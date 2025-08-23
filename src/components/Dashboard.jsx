@@ -26,6 +26,16 @@ const Dashboard = ({ onLogout }) => {
   const [lastRefreshTime, setLastRefreshTime] = useState(null)
   const [nextRefreshTime, setNextRefreshTime] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [collapsedTiles, setCollapsedTiles] = useState({
+    totalOrders: false,
+    totalRevenue: false,
+    averageOrderValue: false
+  })
+  const [collapsedFilters, setCollapsedFilters] = useState({
+    dateRange: false,
+    statusFilter: false,
+    deliveryFilter: false
+  })
 
   // Sorting function
   const sortOrders = (orders, key, direction) => {
@@ -274,30 +284,51 @@ const Dashboard = ({ onLogout }) => {
   }
 
   // Auto-refresh functionality
-  const toggleAutoRefresh = () => {
+  const toggleAutoRefresh = async () => {
     if (autoRefresh) {
       // Stop auto-refresh
-      if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval)
-        setAutoRefreshInterval(null)
+      try {
+        await fetch('/api/auto-refresh/stop', { method: 'POST' })
+        if (autoRefreshInterval) {
+          clearInterval(autoRefreshInterval)
+          setAutoRefreshInterval(null)
+        }
+        setAutoRefresh(false)
+        setNextRefreshTime(null)
+      } catch (error) {
+        console.error('Failed to stop auto-refresh:', error)
       }
-      setAutoRefresh(false)
-      setNextRefreshTime(null)
     } else {
-      // Start auto-refresh
-      const interval = setInterval(() => {
-        fetchOrders()
-      }, 2 * 60 * 1000) // 2 minutes
-      setAutoRefreshInterval(interval)
-      setAutoRefresh(true)
-      
-      // Set initial next refresh time
-      const now = new Date()
-      const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
-      setNextRefreshTime(nextRefresh)
-      
-      // Fetch orders immediately
-      fetchOrders()
+      // Start auto-refresh with current date range
+      try {
+        const response = await fetch('/api/auto-refresh/start', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            startDate: dateRange.startDate,
+            endDate: dateRange.endDate
+          })
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          setAutoRefresh(true)
+          
+          // Set initial next refresh time (20 minutes from now)
+          const now = new Date()
+          const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
+          setNextRefreshTime(nextRefresh)
+          
+          // Fetch orders immediately
+          fetchOrders()
+        } else {
+          console.error('Failed to start auto-refresh')
+        }
+      } catch (error) {
+        console.error('Failed to start auto-refresh:', error)
+      }
     }
   }
 
@@ -313,25 +344,94 @@ const Dashboard = ({ onLogout }) => {
 
   useEffect(() => {
     fetchOrders()
-  }, [dateRange])
+    
+    // Update backend auto-refresh with new date range if auto-refresh is active
+    if (autoRefresh) {
+      const updateBackendAutoRefresh = async () => {
+        try {
+          await fetch('/api/auto-refresh/start', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              startDate: dateRange.startDate,
+              endDate: dateRange.endDate
+            })
+          })
+        } catch (error) {
+          console.error('Failed to update backend auto-refresh:', error)
+        }
+      }
+      
+      updateBackendAutoRefresh()
+    }
+  }, [dateRange, autoRefresh])
 
   // Auto-start auto-refresh when component mounts
   useEffect(() => {
     if (autoRefresh) {
-      const interval = setInterval(() => {
-        fetchOrders()
-      }, 2 * 60 * 1000) // 2 minutes
-      setAutoRefreshInterval(interval)
+      // Start backend auto-refresh with current date range
+      const startBackendAutoRefresh = async () => {
+        try {
+          const response = await fetch('/api/auto-refresh/start', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              startDate: dateRange.startDate,
+              endDate: dateRange.endDate
+            })
+          })
+          
+          if (response.ok) {
+            // Set initial next refresh time (20 minutes from now)
+            const now = new Date()
+            const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
+            setNextRefreshTime(nextRefresh)
+            
+            // Fetch orders immediately
+            fetchOrders()
+          }
+        } catch (error) {
+          console.error('Failed to start backend auto-refresh:', error)
+        }
+      }
       
-      // Set initial next refresh time
-      const now = new Date()
-      const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
-      setNextRefreshTime(nextRefresh)
-      
-      // Fetch orders immediately
-      fetchOrders()
+      startBackendAutoRefresh()
     }
-  }, []) // Empty dependency array means this runs once on mount
+  }, [autoRefresh, dateRange]) // Include dateRange in dependencies
+
+  // Check auto-refresh status and update frontend state
+  useEffect(() => {
+    const checkAutoRefreshStatus = async () => {
+      try {
+        const response = await fetch('/api/auto-refresh/status')
+        if (response.ok) {
+          const status = await response.json()
+          setAutoRefresh(status.active)
+          
+          if (status.active && status.lastRefresh) {
+            setLastRefreshTime(new Date(status.lastRefresh))
+            
+            // Calculate next refresh time
+            if (status.nextRefresh) {
+              setNextRefreshTime(new Date(status.nextRefresh))
+            } else {
+              const now = new Date()
+              const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
+              setNextRefreshTime(nextRefresh)
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to check auto-refresh status:', error)
+      }
+    }
+    
+    checkAutoRefreshStatus()
+  }, [])
 
   // Cleanup auto-refresh on unmount
   useEffect(() => {
@@ -341,6 +441,22 @@ const Dashboard = ({ onLogout }) => {
       }
     }
   }, [autoRefreshInterval])
+
+  // Toggle tile collapse state
+  const toggleTile = (tileKey) => {
+    setCollapsedTiles(prev => ({
+      ...prev,
+      [tileKey]: !prev[tileKey]
+    }))
+  }
+
+  // Toggle filter collapse state
+  const toggleFilter = (filterKey) => {
+    setCollapsedFilters(prev => ({
+      ...prev,
+      [filterKey]: !prev[filterKey]
+    }))
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -371,30 +487,240 @@ const Dashboard = ({ onLogout }) => {
             </div>
           </div>
         </div>
-      </div>
+        </div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Date Range and Filters */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <div>
-            <DateRangePicker
-              dateRange={dateRange}
-              onDateRangeChange={setDateRange}
-              onFetchOrders={fetchOrders}
-            />
+          {/* Date Range Filter */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.dateRange ? 'p-4' : 'p-6'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <Calendar className="h-5 w-5 text-blue-600 mr-2" />
+                <h3 className="text-lg font-medium text-gray-900">Date Range</h3>
+              </div>
+              <button
+                onClick={() => toggleFilter('dateRange')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedFilters.dateRange ? 'Expand' : 'Collapse'}
+              >
+                {collapsedFilters.dateRange ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+              </button>
+            </div>
+            {!collapsedFilters.dateRange && (
+              <DateRangePicker
+                dateRange={dateRange}
+                onDateRangeChange={setDateRange}
+                onFetchOrders={fetchOrders}
+              />
+            )}
           </div>
-          <div>
-            <StatusFilter
-              statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
-            />
+
+          {/* Status Filter */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.statusFilter ? 'p-4' : 'p-6'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <Filter className="h-5 w-5 text-green-600 mr-2" />
+                <h3 className="text-lg font-medium text-gray-900">Status Filter</h3>
+              </div>
+              <button
+                onClick={() => toggleFilter('statusFilter')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedFilters.statusFilter ? 'Expand' : 'Collapse'}
+              >
+                {collapsedFilters.statusFilter ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+              </button>
+            </div>
+            {!collapsedFilters.statusFilter && (
+              <StatusFilter
+                statusFilter={statusFilter}
+                onStatusFilterChange={setStatusFilter}
+              />
+            )}
           </div>
-          <div>
-            <DeliveryFilter
-              deliveryFilter={deliveryFilter}
-              onDeliveryFilterChange={setDeliveryFilter}
-            />
+
+          {/* Delivery Filter */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.deliveryFilter ? 'p-4' : 'p-6'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center">
+                <Clock className="h-5 w-5 text-purple-600 mr-2" />
+                <h3 className="text-lg font-medium text-gray-900">Delivery Filter</h3>
+              </div>
+              <button
+                onClick={() => toggleFilter('deliveryFilter')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedFilters.deliveryFilter ? 'Expand' : 'Collapse'}
+              >
+                {collapsedFilters.deliveryFilter ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+              </button>
+            </div>
+            {!collapsedFilters.deliveryFilter && (
+              <DeliveryFilter
+                deliveryFilter={deliveryFilter}
+                onDeliveryFilterChange={setDeliveryFilter}
+              />
+            )}
+          </div>
+        </div>
+
+
+
+        {/* Summary Tiles */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          {/* Total Orders Tile */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-4' : 'p-6'}`}>
+            <div className="flex items-center justify-between">
+            <div className="flex items-center">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <Calendar className="h-6 w-6 text-blue-600" />
+              </div>
+              <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Total Orders</p>
+                  <p className="text-2xl font-bold text-gray-900">{filteredTotalOrders}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => toggleTile('totalOrders')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedTiles.totalOrders ? 'Expand' : 'Collapse'}
+              >
+                {collapsedTiles.totalOrders ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+              </button>
+            </div>
+            
+            {!collapsedTiles.totalOrders && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>All Orders:</span>
+                    <span className="font-medium">{filteredTotalOrders}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Accepted Orders:</span>
+                    <span className="font-medium">{filteredAcceptedOrders.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Pending/Cancelled/Rejected:</span>
+                    <span className="font-medium">{filteredTotalOrders - filteredAcceptedOrders.length}</span>
+          </div>
+              </div>
+              </div>
+            )}
+        </div>
+
+          {/* Total Revenue Tile */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalRevenue ? 'p-4' : 'p-6'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center">
+              <div className="flex-shrink-0">
+                  <div className="w-8 h-8 bg-green-100 rounded-md flex items-center justify-center">
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                  </svg>
+                </div>
+              </div>
+              <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
+                  <dd className="text-lg font-medium text-gray-900">${filteredTotalRevenue.toFixed(2)}</dd>
+                </div>
+              </div>
+                  <button
+                onClick={() => toggleTile('totalRevenue')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedTiles.totalRevenue ? 'Expand' : 'Collapse'}
+              >
+                {collapsedTiles.totalRevenue ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+                  </button>
+            </div>
+            
+            {!collapsedTiles.totalRevenue && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Base Revenue:</span>
+                    <span className="font-medium">${filteredTotalRevenue.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Accepted Orders Count:</span>
+                    <span className="font-medium">{filteredAcceptedOrders.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Average per Order:</span>
+                    <span className="font-medium">${filteredAcceptedOrders.length > 0 ? (filteredTotalRevenue / filteredAcceptedOrders.length).toFixed(2) : '0.00'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Average Order Value Tile */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.averageOrderValue ? 'p-4' : 'p-6'}`}>
+            <div className="flex items-center justify-between">
+            <div className="flex items-center">
+                <div className="flex-shrink-0">
+                  <div className="w-8 h-8 bg-purple-100 rounded-md flex items-center justify-center">
+                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-500">Average Order Value (Excluding Pending/Cancelled/Rejected)</p>
+                  <dd className="text-lg font-medium text-gray-900">${filteredAverageOrderValue.toFixed(2)}</dd>
+              </div>
+              </div>
+              <button
+                onClick={() => toggleTile('averageOrderValue')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedTiles.averageOrderValue ? 'Expand' : 'Collapse'}
+                >
+                {collapsedTiles.averageOrderValue ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+              </button>
+            </div>
+            
+            {!collapsedTiles.averageOrderValue && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Total Revenue:</span>
+                    <span className="font-medium">${filteredTotalRevenue.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Orders:</span>
+                    <span className="font-medium">{filteredTotalOrders}</span>
+          </div>
+                  <div className="flex justify-between">
+                    <span>Calculation:</span>
+                    <span className="font-medium">{filteredTotalOrders > 0 ? `${filteredTotalRevenue.toFixed(2)} ÷ ${filteredTotalOrders} = $${filteredAverageOrderValue.toFixed(2)}` : 'N/A'}</span>
+            </div>
+                </div>
+                </div>
+              )}
           </div>
         </div>
 
@@ -431,55 +757,6 @@ const Dashboard = ({ onLogout }) => {
           )}
         </div>
 
-        {/* Summary Tiles */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <Calendar className="h-6 w-6 text-blue-600" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                <p className="text-2xl font-bold text-gray-900">{filteredTotalOrders}</p>
-              </div>
-            </div>
-          </div>
-          
-          {/* Total Revenue */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-green-100 rounded-md flex items-center justify-center">
-                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
-                  </svg>
-                </div>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
-                <dd className="text-lg font-medium text-gray-900">${filteredTotalRevenue.toFixed(2)}</dd>
-              </div>
-            </div>
-          </div>
-
-          {/* Average Order Value */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-purple-100 rounded-md flex items-center justify-center">
-                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                </div>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-gray-500">Average Order Value (Excluding Pending/Cancelled/Rejected)</p>
-                <dd className="text-lg font-medium text-gray-900">${filteredAverageOrderValue.toFixed(2)}</dd>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-gray-900">Orders Dashboard</h2>
@@ -487,14 +764,14 @@ const Dashboard = ({ onLogout }) => {
               Showing {filteredOrdersByStatusAndDelivery.length} of {totalOrders} orders
             </div>
           </div>
-          
+
           {/* Error Display */}
           {apiError && (
             <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
               <h3 className="text-lg font-medium text-red-800 mb-2">API Error: {apiError.message}</h3>
               <p className="text-red-700">Status: {apiError.status}</p>
               <p className="text-red-700">Details: {apiError.details}</p>
-            </div>
+                </div>
           )}
 
           {/* Loading State */}
@@ -509,66 +786,66 @@ const Dashboard = ({ onLogout }) => {
           {!isLoading && !apiError && (
             <div>
               {filteredOrdersByStatusAndDelivery.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
-                      <tr>
-                        <th 
+                  <tr>
+                    <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('id')}
-                        >
+                      onClick={() => handleSort('id')}
+                    >
                           <div className="flex items-center space-x-1">
                             <span>Order ID</span>
                             {sortConfig.key === 'id' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                          </div>
-                        </th>
-                        <th 
+                      </div>
+                    </th>
+                    <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('customerName')}
-                        >
+                      onClick={() => handleSort('customerName')}
+                    >
                           <div className="flex items-center space-x-1">
                             <span>Customer</span>
                             {sortConfig.key === 'customerName' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                          </div>
-                        </th>
-                        <th 
+                      </div>
+                    </th>
+                    <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('orderDate')}
-                        >
+                      onClick={() => handleSort('orderDate')}
+                    >
                           <div className="flex items-center space-x-1">
                             <span>Order Date</span>
                             {sortConfig.key === 'orderDate' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                          </div>
-                        </th>
-                        <th 
+                      </div>
+                    </th>
+                    <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('deliveryDate')}
-                        >
+                      onClick={() => handleSort('deliveryDate')}
+                    >
                           <div className="flex items-center space-x-1">
                             <span>Delivery Date</span>
                             {sortConfig.key === 'deliveryDate' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                          </div>
-                        </th>
-                        <th 
+                      </div>
+                    </th>
+                    <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('status')}
-                        >
+                      onClick={() => handleSort('status')}
+                    >
                           <div className="flex items-center space-x-1">
                             <span>Status</span>
                             {sortConfig.key === 'status' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                          </div>
-                        </th>
-                        <th 
+                      </div>
+                    </th>
+                    <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                           onClick={() => handleSort('total')}
                         >
@@ -577,14 +854,14 @@ const Dashboard = ({ onLogout }) => {
                             {sortConfig.key === 'total' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                          </div>
-                        </th>
+                      </div>
+                    </th>
                         <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Actions
                         </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
                       {sortedOrders.map((order) => (
                         <tr key={order.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{order.id}</td>
@@ -602,8 +879,8 @@ const Dashboard = ({ onLogout }) => {
                               'bg-gray-100 text-gray-800'
                             }`}>
                               {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
-                            </span>
-                          </td>
+                        </span>
+                      </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${order.revenue}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <button
@@ -613,11 +890,11 @@ const Dashboard = ({ onLogout }) => {
                               <Eye className="h-4 w-4 mr-1" />
                               View
                             </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
                 </div>
               ) : (
                 <p className="text-gray-500 text-center py-8">
@@ -647,7 +924,7 @@ const Dashboard = ({ onLogout }) => {
             <div className="flex items-center space-x-2">
               <div className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
               <span className="text-gray-300">
-                Auto-refresh: {autoRefresh ? 'Active' : 'Inactive'}
+                Auto-refresh: {autoRefresh ? 'Active (20 min)' : 'Inactive'}
               </span>
             </div>
             {lastRefreshTime && (
