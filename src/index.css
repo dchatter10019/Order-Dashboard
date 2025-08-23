@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-bevvi-primary-600 hover:bg-bevvi-primary-700 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5;
+  }
+  
+  .btn-secondary {
+    @apply bg-bevvi-dark-100 hover:bg-bevvi-dark-200 text-bevvi-dark-700 font-medium py-3 px-6 rounded-xl transition-all duration-200 border border-bevvi-dark-200 hover:border-bevvi-dark-300;
+  }
+  
+  .card {
+    @apply bg-white rounded-2xl shadow-lg border border-bevvi-dark-100 p-8 hover:shadow-xl transition-shadow duration-200;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 border border-bevvi-dark-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-bevvi-primary-300 transition-all duration-200 bg-bevvi-dark-50;
+  }
+  
+  .bevvi-gradient {
+    @apply bg-gradient-to-br from-bevvi-primary-500 to-bevvi-primary-700;
+  }
+  
+  .bevvi-gradient-light {
+    @apply bg-gradient-to-br from-bevvi-primary-50 to-bevvi-accent-50;
+  }
+  
+  .bevvi-shadow {
+    @apply shadow-[0_10px_40px_-10px_rgba(14,165,233,0.3)];
+  }
+}
