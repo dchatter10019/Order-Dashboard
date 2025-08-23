@@ -1,398 +1,369 @@
-import React, { useState, useEffect } from 'react'
-import { LogOut, Calendar, Filter, Search, Package, TrendingUp, Clock, CheckCircle, XCircle, AlertCircle, DollarSign, RefreshCw } from 'lucide-react'
-import OrderModal from './OrderModal'
+import React, { useState, useEffect, useMemo } from 'react'
+import { LogOut, Calendar, Filter, Clock, Eye, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
+import OrderModal from './OrderModal'
 
 const Dashboard = ({ onLogout }) => {
   const [orders, setOrders] = useState([])
-  const [filteredOrders, setFilteredOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedOrder, setSelectedOrder] = useState(null)
-  const [showOrderModal, setShowOrderModal] = useState(false)
+  const [apiError, setApiError] = useState(null)
   const [dateRange, setDateRange] = useState({
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
+    startDate: '2025-08-20',
+    endDate: '2025-08-23'
   })
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'processing', 'pending', 'canceled'])
   const [deliveryFilter, setDeliveryFilter] = useState(['all_dates'])
+  const [selectedOrder, setSelectedOrder] = useState(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState(null)
+  const [sortConfig, setSortConfig] = useState({
+    key: 'id',
+    direction: 'asc'
+  })
+  const [lastRefreshTime, setLastRefreshTime] = useState(null)
+  const [nextRefreshTime, setNextRefreshTime] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [apiError, setApiError] = useState(null)
 
-  const [lastManualRefresh, setLastManualRefresh] = useState(null)
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' })
+  // Sorting function
+  const sortOrders = (orders, key, direction) => {
+    return [...orders].sort((a, b) => {
+      let aVal = a[key]
+      let bVal = b[key]
 
-  // Mock data for demonstration - replace with actual API call
-  const mockOrders = [
-    {
-      id: 'ORD001',
-      customerName: 'John Smith',
-      orderDate: '2025-08-14',
-      deliveryDate: '2025-08-15',
-      status: 'delivered',
-      total: 45.99,
-      items: [
-        { name: 'Bevvi Water Bottle', quantity: 2, price: 22.99 },
-        { name: 'Bevvi Filter', quantity: 1, price: 0.01 }
-      ],
-      address: '123 Main St, City, State 12345',
-      phone: '+1-555-0123'
-    },
-    {
-      id: 'ORD002',
-      customerName: 'Sarah Johnson',
-      orderDate: '2025-08-14',
-      deliveryDate: '2025-08-16',
-      status: 'in_transit',
-      total: 67.50,
-      items: [
-        { name: 'Bevvi Water Bottle', quantity: 3, price: 22.50 }
-      ],
-      address: '456 Oak Ave, City, State 12345',
-      phone: '+1-555-0456'
-    },
-    {
-      id: 'ORD003',
-      customerName: 'Mike Wilson',
-      orderDate: '2025-08-14',
-      deliveryDate: '2025-08-17',
-      status: 'pending',
-      total: 89.99,
-      items: [
-        { name: 'Bevvi Premium Package', quantity: 1, price: 89.99 }
-      ],
-      address: '789 Pine Rd, City, State 12345',
-      phone: '+1-555-0789'
-    },
-    {
-      id: 'ORD004',
-      customerName: 'Lisa Brown',
-      orderDate: '2025-08-14',
-      deliveryDate: '2025-08-15',
-      status: 'delivered',
-      total: 34.99,
-      items: [
-        { name: 'Bevvi Water Bottle', quantity: 1, price: 22.99 },
-        { name: 'Bevvi Accessories', quantity: 1, price: 12.00 }
-      ],
-      address: '321 Elm St, City, State 12345',
-      phone: '+1-555-0321'
-    },
-    {
-      id: 'ORD005',
-      customerName: 'David Lee',
-      orderDate: '2025-08-14',
-      deliveryDate: '2025-08-18',
-      status: 'cancelled',
-      total: 56.99,
-      items: [
-        { name: 'Bevvi Starter Kit', quantity: 1, price: 56.99 }
-      ],
-      address: '654 Maple Dr, City, State 12345',
-      phone: '+1-555-0654'
+      // Handle numeric values
+      if (key === 'total' || key === 'id') {
+        aVal = parseFloat(aVal) || 0
+        bVal = parseFloat(bVal) || 0
+      }
+
+      // Handle date values
+      if (key === 'orderDate' || key === 'deliveryDate') {
+        aVal = new Date(aVal || 0)
+        bVal = new Date(bVal || 0)
+      }
+
+      // Handle string values
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase()
+        bVal = bVal.toLowerCase()
+      }
+
+      if (aVal < bVal) {
+        return direction === 'asc' ? -1 : 1
+      }
+      if (aVal > bVal) {
+        return direction === 'asc' ? 1 : -1
+      }
+      return 0
+    })
+  }
+
+  // Handle sort header click
+  const handleSort = (key) => {
+    setSortConfig(prevConfig => ({
+      key,
+      direction: prevConfig.key === key && prevConfig.direction === 'asc' ? 'desc' : 'asc'
+    }))
+  }
+
+  // Get sort icon for header
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) {
+      return <ChevronUp className="h-4 w-4 text-gray-400" />
     }
-  ]
+    return sortConfig.direction === 'asc' 
+      ? <ChevronUp className="h-4 w-4 text-blue-600" />
+      : <ChevronDown className="h-4 w-4 text-blue-600" />
+  }
 
-  useEffect(() => {
-    fetchOrders()
-  }, [dateRange])
+  // Calculate summary statistics
+  const totalOrders = orders.length
+  const totalRevenue = orders
+    .filter(order => order.status === 'accepted')
+    .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+  const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
 
-  useEffect(() => {
-    applyFilters()
-  }, [orders, statusFilter, deliveryFilter, searchTerm])
-
-
-
-  const fetchOrders = async () => {
-    setIsLoading(true)
-    setApiError(null) // Clear any previous errors immediately
-    setOrders([]) // Clear previous orders to show fresh state
+  // Filter orders based on search term
+  const filteredOrders = useMemo(() => {
+    if (!searchTerm.trim()) return orders
     
+    const searchLower = searchTerm.toLowerCase()
+    const results = orders.filter(order => 
+      order.id?.toLowerCase().includes(searchLower) ||
+      order.customerName?.toLowerCase().includes(searchLower) ||
+      order.ordernum?.toLowerCase().includes(searchLower)
+    )
+    
+    console.log('🔍 Search results:', {
+      searchTerm,
+      totalOrders: orders.length,
+      filteredCount: results.length,
+      results: results.map(order => ({
+        id: order.id,
+        customerName: order.customerName,
+        status: order.status,
+        revenue: order.revenue,
+        ordernum: order.ordernum
+      })),
+      allStatuses: [...new Set(results.map(order => order.status))],
+      revenueValues: results.map(order => ({
+        id: order.id,
+        revenue: order.revenue,
+        revenueType: typeof order.revenue,
+        parsedRevenue: parseFloat(order.revenue)
+      }))
+    })
+    
+    return results
+  }, [orders, searchTerm])
+
+  // Filter orders based on status and delivery filters
+  const filteredOrdersByStatusAndDelivery = useMemo(() => {
+    let filtered = filteredOrders
+    if (statusFilter.length > 0) {
+      filtered = filtered.filter(order => statusFilter.includes(order.status))
+    }
+    if (deliveryFilter.length > 0) {
+      filtered = filtered.filter(order => {
+        const orderDate = new Date(order.orderDate)
+        const deliveryDate = new Date(order.deliveryDate)
+        const now = new Date()
+
+        if (deliveryFilter.includes('all_dates')) {
+          return true
+        }
+        if (deliveryFilter.includes('today') && orderDate.toISOString().split('T')[0] === now.toISOString().split('T')[0]) {
+          return true
+        }
+        if (deliveryFilter.includes('tomorrow') && orderDate.toISOString().split('T')[0] === new Date(now.getTime() + 86400000).toISOString().split('T')[0]) {
+          return true
+        }
+        if (deliveryFilter.includes('this_week') && isThisWeek(orderDate.toISOString().split('T')[0])) {
+          return true
+        }
+        if (deliveryFilter.includes('next_week') && isNextWeek(orderDate.toISOString().split('T')[0])) {
+          return true
+        }
+        return false
+      })
+    }
+    return filtered
+  }, [filteredOrders, statusFilter, deliveryFilter])
+
+  // Get sorted orders
+  const sortedOrders = useMemo(() => {
+    let sortableItems = [...filteredOrdersByStatusAndDelivery]
+    if (sortConfig.key) {
+      sortableItems.sort((a, b) => {
+        if (sortConfig.key === 'orderDate' || sortConfig.key === 'deliveryDate') {
+          const dateA = new Date(a[sortConfig.key])
+          const dateB = new Date(b[sortConfig.key])
+          if (sortConfig.direction === 'asc') {
+            return dateA - dateB
+          } else {
+            return dateB - dateA
+          }
+        } else if (sortConfig.key === 'total') {
+          const totalA = parseFloat(a[sortConfig.key]) || 0
+          const totalB = parseFloat(b[sortConfig.key]) || 0
+          if (sortConfig.direction === 'asc') {
+            return totalA - totalB
+          } else {
+            return totalB - totalA
+          }
+        } else {
+          const aValue = a[sortConfig.key] || ''
+          const bValue = b[sortConfig.key] || ''
+          if (sortConfig.direction === 'asc') {
+            return aValue.localeCompare(bValue)
+          } else {
+            return bValue.localeCompare(aValue)
+          }
+        }
+      })
+    }
+    return sortableItems
+  }, [filteredOrdersByStatusAndDelivery, sortConfig])
+
+  // Calculate filtered summary statistics
+  const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
+  const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter(order => 
+    !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+  )
+  const filteredTotalRevenue = filteredAcceptedOrders
+    .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+  const filteredAverageOrderValue = filteredTotalOrders > 0 ? filteredTotalRevenue / filteredTotalOrders : 0
+
+  // Debug logging for status filtering
+  console.log('🔍 Status Filtering Debug:', {
+    totalFilteredOrders: filteredOrdersByStatusAndDelivery.length,
+    acceptedOrdersCount: filteredAcceptedOrders.length,
+    allStatuses: [...new Set(filteredOrdersByStatusAndDelivery.map(order => order.status))],
+    acceptedOrders: filteredAcceptedOrders.map(order => ({
+      id: order.id,
+      status: order.status,
+      revenue: order.revenue
+    })),
+    totalRevenue: filteredTotalRevenue,
+    averageOrderValue: filteredAverageOrderValue
+  })
+
+  // Helper function to check if date is this week
+  const isThisWeek = (dateString) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()))
+    const endOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 6))
+    return date >= startOfWeek && date <= endOfWeek
+  }
+
+  // Helper function to check if date is next week
+  const isNextWeek = (dateString) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const startOfNextWeek = new Date(now.setDate(now.getDate() - now.getDay() + 7))
+    const endOfNextWeek = new Date(now.setDate(now.getDate() - now.getDay() + 13))
+    return date >= startOfNextWeek && date <= endOfNextWeek
+  }
+
+  // Fetch orders function
+  const fetchOrders = async () => {
     try {
-      console.log(`🔄 Fetching orders for date range: ${dateRange.startDate} to ${dateRange.endDate}`)
+      setIsLoading(true)
+      setApiError(null)
       
-      // Call the backend API which will then call the Bevvi API
-      const response = await fetch(`/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`)
+      const timestamp = Date.now()
+      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}`
+      console.log('🔍 Fetching orders from:', apiUrl)
+      console.log('📅 Date range:', dateRange)
+      console.log('⏰ Timestamp:', timestamp)
+      
+      const response = await fetch(apiUrl)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
-      const result = await response.json()
+      const data = await response.json()
+      console.log('📊 API Response:', data)
+      console.log('📋 Orders count:', data.data?.length || 0)
+      console.log('🎯 Orders array:', data.data)
       
-      if (result.success) {
-        setOrders(result.data)
-        setLastManualRefresh(new Date())
-        console.log(`✅ Successfully fetched ${result.data.length} orders`)
-      } else {
-        // API call failed - show error state
-        setOrders([])
-        setApiError({
-          message: result.error || 'API call failed',
-          note: result.note || 'Unknown error occurred',
-          status: result.apiStatus || 'Unknown',
-          apiUrl: result.apiUrl || 'Unknown'
-        })
-        console.error('❌ API Error:', result.error, result.note)
-        console.error('🌐 API URL Called:', result.apiUrl)
-        console.error('📊 API Status:', result.apiStatus)
-      }
+      setOrders(data.data || [])
+      
+      // Update last refresh time
+      const now = new Date()
+      setLastRefreshTime(now)
+      
+      // Calculate next refresh time (2 minutes from now)
+      const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
+      setNextRefreshTime(nextRefresh)
     } catch (error) {
-      console.error('❌ Network/System Error:', error)
-      // Network or other error - show empty state
-      setOrders([])
+      console.error('❌ Error fetching orders:', error)
       setApiError({
         message: 'Network or system error',
-        note: error.message || 'Failed to connect to the server',
-        status: 'Network Error'
+        status: 'Network Error',
+        details: error.message
       })
     } finally {
       setIsLoading(false)
     }
   }
 
-
-
-  const applyFilters = () => {
-    let filtered = [...orders]
-
-    // Status filter
-    if (statusFilter.length > 0) {
-      filtered = filtered.filter(order => statusFilter.includes(order.status))
+  // Auto-refresh functionality
+  const toggleAutoRefresh = () => {
+    if (autoRefresh) {
+      // Stop auto-refresh
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval)
+        setAutoRefreshInterval(null)
+      }
+      setAutoRefresh(false)
+      setNextRefreshTime(null)
     } else {
-      // If no status filters are selected, show no orders
-      filtered = []
-    }
-
-    // Delivery date filter
-    if (deliveryFilter.length > 0) {
-      // Use the selected date range instead of current real-world date
-      const selectedStartDate = new Date(dateRange.startDate)
-      const selectedEndDate = new Date(dateRange.endDate)
+      // Start auto-refresh
+      const interval = setInterval(() => {
+        fetchOrders()
+      }, 2 * 60 * 1000) // 2 minutes
+      setAutoRefreshInterval(interval)
+      setAutoRefresh(true)
       
-      filtered = filtered.filter(order => {
-        // Skip orders with N/A delivery dates for date-based filtering
-        if (order.deliveryDate === 'N/A') {
-          return false
-        }
-        
-        const deliveryDate = new Date(order.deliveryDate)
-        
-        // Check if any of the selected filters match
-        return deliveryFilter.some(filter => {
-          switch (filter) {
-            case 'all_dates':
-              // Show all orders regardless of delivery date
-              return true
-            case 'today':
-              // Check if delivery date matches the selected start date
-              return deliveryDate.toDateString() === selectedStartDate.toDateString()
-            case 'tomorrow':
-              // Check if delivery date is the day after the selected start date
-              const nextDay = new Date(selectedStartDate)
-              nextDay.setDate(selectedStartDate.getDate() + 1)
-              return deliveryDate.toDateString() === nextDay.toDateString()
-            case 'this_week':
-              // Check if delivery date is within the selected date range
-              return deliveryDate >= selectedStartDate && deliveryDate <= selectedEndDate
-            default:
-              return false
-          }
-        })
-      })
+      // Set initial next refresh time
+      const now = new Date()
+      const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
+      setNextRefreshTime(nextRefresh)
+      
+      // Fetch orders immediately
+      fetchOrders()
     }
-
-    // Search filter
-    if (searchTerm) {
-      filtered = filtered.filter(order =>
-        order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.status.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    }
-
-    setFilteredOrders(filtered)
   }
 
   const handleOrderClick = (order) => {
     setSelectedOrder(order)
-    setShowOrderModal(true)
+    setIsModalOpen(true)
   }
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'delivered':
-        return <CheckCircle className="h-5 w-5 text-green-500" />
-      case 'in_transit':
-        return <Clock className="h-5 w-5 text-blue-500" />
-      case 'pending':
-        return <AlertCircle className="h-5 w-5 text-yellow-500" />
-      case 'cancelled':
-        return <XCircle className="h-5 w-5 text-red-500" />
-      default:
-        return <Package className="h-5 w-5 text-gray-500" />
+  const closeModal = () => {
+    setIsModalOpen(false)
+    setSelectedOrder(null)
+  }
+
+  useEffect(() => {
+    fetchOrders()
+  }, [dateRange])
+
+  // Auto-start auto-refresh when component mounts
+  useEffect(() => {
+    if (autoRefresh) {
+      const interval = setInterval(() => {
+        fetchOrders()
+      }, 2 * 60 * 1000) // 2 minutes
+      setAutoRefreshInterval(interval)
+      
+      // Set initial next refresh time
+      const now = new Date()
+      const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
+      setNextRefreshTime(nextRefresh)
+      
+      // Fetch orders immediately
+      fetchOrders()
     }
-  }
+  }, []) // Empty dependency array means this runs once on mount
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'delivered':
-        return 'bg-green-100 text-green-800'
-      case 'in_transit':
-        return 'bg-blue-100 text-blue-800'
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'cancelled':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
+  // Cleanup auto-refresh on unmount
+  useEffect(() => {
+    return () => {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval)
+      }
     }
-  }
-
-  const getStatusCount = (status) => {
-    return filteredOrders.filter(order => order.status === status).length
-  }
-
-  const getTotalRevenueWithFees = () => {
-    return filteredOrders
-      .filter(order => order.status === 'accepted' || order.status === 'delivered' || order.status === 'in_transit')
-      .reduce((sum, order) => sum + order.total, 0)
-      .toFixed(2)
-  }
-
-  const getTotalRevenueField = () => {
-    return filteredOrders
-      .filter(order => order.status === 'accepted' || order.status === 'delivered' || order.status === 'in_transit')
-      .reduce((sum, order) => sum + (order.revenue || 0), 0)
-      .toFixed(2)
-      }
-
-  const getCalculatedBaseRevenue = () => {
-    return filteredOrders
-      .filter(order => order.status === 'accepted' || order.status === 'delivered' || order.status === 'in_transit')
-      .reduce((sum, order) => {
-        // Calculate base revenue by subtracting fees from total
-        const total = order.total || 0
-        const giftNote = order.giftNoteCharge || 0
-        const promoDisc = order.promoDiscAmt || 0
-        const tax = order.tax || 0
-        const tip = order.tip || 0
-        const shipping = order.shippingFee || 0
-        const delivery = order.deliveryFee || 0
-        const serviceCharge = order.serviceCharge || 0
-        const serviceTax = order.serviceChargeTax || 0
-        
-        // Base revenue = total - all fees
-        const baseRevenue = total - giftNote - tax - tip - shipping - delivery - serviceCharge - serviceTax + promoDisc
-        return sum + Math.max(0, baseRevenue) // Ensure non-negative
-      }, 0)
-      .toFixed(2)
-  }
-
-  const getOrderBaseRevenue = (order) => {
-    // Calculate base revenue for a single order
-    const total = order.total || 0
-    const giftNote = order.giftNoteCharge || 0
-    const promoDisc = order.promoDiscAmt || 0
-    const tax = order.tax || 0
-    const tip = order.tip || 0
-    const shipping = order.shippingFee || 0
-    const delivery = order.deliveryFee || 0
-    const serviceCharge = order.serviceCharge || 0
-    const serviceTax = order.serviceChargeTax || 0
-    
-    // Base revenue = total - all fees + promo discount
-    const baseRevenue = total - giftNote - tax - tip - shipping - delivery - serviceCharge - serviceTax + promoDisc
-    return Math.max(0, baseRevenue) // Ensure non-negative
-  }
-
-
-
-  const getAcceptedOrdersCount = () => {
-    return filteredOrders.filter(order => order.status === 'delivered' || order.status === 'in_transit' || order.status === 'accepted').length
-  }
-
-  const getTotalOrders = () => filteredOrders.length
-
-  const handleSort = (key) => {
-    let direction = 'asc'
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc'
-    }
-    setSortConfig({ key, direction })
-  }
-
-  const getSortedOrders = () => {
-    if (!sortConfig.key) return filteredOrders
-
-    return [...filteredOrders].sort((a, b) => {
-      let aValue = a[sortConfig.key]
-      let bValue = b[sortConfig.key]
-
-      // Handle special cases
-      if (sortConfig.key === 'orderDate' || sortConfig.key === 'deliveryDate') {
-        aValue = aValue === 'N/A' ? '1900-01-01' : aValue
-        bValue = bValue === 'N/A' ? '1900-01-01' : bValue
-      } else if (sortConfig.key === 'revenue') {
-        aValue = getOrderBaseRevenue(a)
-        bValue = getOrderBaseRevenue(b)
-      }
-
-      // Convert to numbers if possible
-      if (!isNaN(aValue) && !isNaN(bValue)) {
-        aValue = parseFloat(aValue)
-        bValue = parseFloat(bValue)
-      }
-
-      // Handle string comparison
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        aValue = aValue.toLowerCase()
-        bValue = bValue.toLowerCase()
-      }
-
-      if (aValue < bValue) {
-        return sortConfig.direction === 'asc' ? -1 : 1
-      }
-      if (aValue > bValue) {
-        return sortConfig.direction === 'asc' ? 1 : -1
-      }
-      return 0
-    })
-  }
-
-  const getSortIcon = (key) => {
-    if (sortConfig.key !== key) {
-      return <span className="text-gray-400 text-sm">↕</span>
-    }
-    return (
-      <span className={`text-sm font-bold ${sortConfig.direction === 'asc' ? 'text-green-600' : 'text-blue-600'}`}>
-        {sortConfig.direction === 'asc' ? '↑' : '↓'}
-      </span>
-    )
-  }
+  }, [autoRefreshInterval])
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-gradient-to-r from-blue-600 to-cyan-600 shadow-lg border-b border-blue-200">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-20">
-            <div className="flex items-center">
-              <div className="h-12 w-12 bg-white rounded-xl flex items-center justify-center mr-4 shadow-lg">
-                <Package className="h-7 w-7 text-blue-600" />
-              </div>
-              <h1 className="text-2xl font-bold text-white">
-                Bevvi Order Tracking System
-              </h1>
-            </div>
+          <div className="flex justify-between items-center h-16">
+            <h1 className="text-2xl font-bold text-gray-900">Bevvi Order Tracking</h1>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-white/90 font-medium">
-                Welcome, Bevvi_User
-              </span>
+              <button
+                onClick={toggleAutoRefresh}
+                className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+                  autoRefresh 
+                    ? 'bg-green-600 text-white hover:bg-green-700' 
+                    : 'bg-gray-600 text-white hover:bg-gray-700'
+                }`}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
+                {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
+              </button>
               <button
                 onClick={onLogout}
-                className="bg-white/20 hover:bg-white/30 text-white font-medium py-2 px-4 rounded-xl transition-all duration-200 flex items-center backdrop-blur-sm"
+                className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
@@ -400,16 +371,13 @@ const Dashboard = ({ onLogout }) => {
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
+      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-3xl p-8 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Bevvi Order Management</h2>
-          <p className="text-gray-600">Track, monitor, and manage your orders with real-time updates</p>
-        </div>
         {/* Date Range and Filters */}
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+          <div>
             <DateRangePicker
               dateRange={dateRange}
               onDateRangeChange={setDateRange}
@@ -430,319 +398,284 @@ const Dashboard = ({ onLogout }) => {
           </div>
         </div>
 
-        {/* Refresh Timing Information */}
-        <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-xl">
-          <div className="flex items-center mb-3">
-            <RefreshCw className="h-5 w-5 text-blue-600 mr-2" />
-            <span className="text-sm font-medium text-blue-800">Refresh Status</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <span className="text-blue-700 font-medium">Last Refresh:</span>
-              <div className="text-blue-600">
-                {lastManualRefresh ? (
-                  <>
-                    <div>{lastManualRefresh.toLocaleString()}</div>
-                    <div className="text-blue-500">
-                      Range: {dateRange.startDate} to {dateRange.endDate}
-                    </div>
-                  </>
-                ) : (
-                  <span className="text-blue-500">No refresh yet</span>
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="text-blue-700 font-medium">Next Refresh:</span>
-              <div className="text-blue-600">
-                {lastManualRefresh ? (
-                  <>
-                    <div>
-                      {new Date(lastManualRefresh.getTime() + 20 * 60 * 1000).toLocaleString()}
-                    </div>
-                    <div className="text-blue-500">(20 min interval)</div>
-                  </>
-                ) : (
-                  <span className="text-blue-500">Not scheduled</span>
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="text-blue-700 font-medium">Current Status:</span>
-              <div className="text-blue-600">
-                <div className="text-green-600 font-medium">✅ Manual Refresh Active</div>
-                <div className="text-blue-500">Click "Fetch Orders" to refresh</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-
-
-        {/* Search */}
+        {/* Search Bar */}
         <div className="mb-6">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
             <input
               type="text"
-              placeholder="Search orders by ID, customer name, or status..."
-              className="input-field pl-10"
+              placeholder="Search by Order ID, Customer Name, or Order Number..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-bevvi-500 focus:border-bevvi-500 sm:text-sm"
             />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute inset-y-0 right-0 pr-3 flex items-center"
+              >
+                <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
+          {searchTerm && (
+            <p className="mt-2 text-sm text-gray-600">
+              Found {filteredOrders.length} orders matching "{searchTerm}"
+            </p>
+          )}
         </div>
 
-
-        
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-2xl shadow-lg border border-blue-200 p-8">
+        {/* Summary Tiles */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+          <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
-              <div className="p-3 bg-blue-500 rounded-xl shadow-lg">
-                <Package className="h-7 w-7 text-white" />
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Calendar className="h-6 w-6 text-blue-600" />
               </div>
               <div className="ml-4">
-                <p className="text-sm font-medium text-blue-700">Total Orders</p>
-                <p className="text-3xl font-bold text-blue-900">{getTotalOrders()}</p>
+                <p className="text-sm font-medium text-gray-600">Total Orders</p>
+                <p className="text-2xl font-bold text-gray-900">{filteredTotalOrders}</p>
               </div>
             </div>
           </div>
-
-          <div className="bg-white rounded-2xl shadow-lg border border-green-200 p-8">
+          
+          {/* Total Revenue */}
+          <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
-              <div className="p-3 bg-green-500 rounded-xl shadow-lg">
-                <CheckCircle className="h-7 w-7 text-white" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-green-700">Accepted</p>
-                <p className="text-3xl font-bold text-green-900">{getStatusCount('accepted')}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg border border-blue-200 p-8">
-            <div className="flex items-center">
-              <div className="p-3 bg-blue-500 rounded-xl shadow-lg">
-                <Clock className="h-7 w-7 text-white" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-blue-700">Pending</p>
-                <p className="text-3xl font-bold text-blue-900">{getStatusCount('pending')}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-lg border border-emerald-200 p-8">
-            <div className="flex items-center">
-              <div className="p-3 bg-emerald-500 rounded-xl shadow-lg">
-                <TrendingUp className="h-7 w-7 text-white" />
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-emerald-700">Revenue</p>
-                <p className="text-3xl font-bold text-emerald-900">${getCalculatedBaseRevenue()}</p>
-                <p className="text-xs text-emerald-600">Base revenue from accepted orders</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* API Error Display */}
-        {apiError && (
-          <div className="bg-white rounded-2xl shadow-lg border border-red-200 p-8 mb-6">
-            <div className="flex items-start">
               <div className="flex-shrink-0">
-                <div className="p-2 bg-red-500 rounded-xl">
-                  <svg className="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                <div className="w-8 h-8 bg-green-100 rounded-md flex items-center justify-center">
+                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
                   </svg>
                 </div>
               </div>
               <div className="ml-4">
-                <h3 className="text-lg font-semibold text-red-800">
-                  API Error: {apiError.message}
-                </h3>
-                <div className="mt-3 text-sm text-red-700 space-y-2">
-                  <p><strong>Status:</strong> {apiError.status}</p>
-                  <p><strong>Details:</strong> {apiError.note}</p>
-                  <p><strong>Date Range:</strong> {dateRange.startDate} to {dateRange.endDate}</p>
-                  <p><strong>API Called:</strong> 
-                    <code className="bg-red-200 px-3 py-2 rounded-lg text-xs break-all font-mono block mt-2">
-                      {apiError.apiUrl}
-                    </code>
-                  </p>
-                </div>
-                <div className="mt-6">
-                  <button
-                    onClick={fetchOrders}
-                    className="bg-red-500 hover:bg-red-600 text-white font-medium px-6 py-3 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                  >
-                    🔄 Retry with Current Dates
-                  </button>
-                </div>
+                <p className="text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
+                <dd className="text-lg font-medium text-gray-900">${filteredTotalRevenue.toFixed(2)}</dd>
               </div>
             </div>
           </div>
-        )}
 
-        {/* Current Fetch Status */}
-        {isLoading && (
-          <div className="bg-white rounded-2xl shadow-lg border border-blue-200 p-8 mb-6">
+          {/* Average Order Value */}
+          <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center">
-              <div className="p-2 bg-blue-500 rounded-xl mr-4">
-                <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent"></div>
+              <div className="flex-shrink-0">
+                <div className="w-8 h-8 bg-purple-100 rounded-md flex items-center justify-center">
+                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
               </div>
-              <div>
-                <p className="text-lg font-semibold text-blue-800">
-                  Fetching orders for {dateRange.startDate} to {dateRange.endDate}
-                </p>
-                <p className="text-sm text-blue-600">Calling Bevvi API...</p>
+              <div className="ml-4">
+                <p className="text-sm font-medium text-gray-500">Average Order Value (Excluding Pending/Cancelled/Rejected)</p>
+                <dd className="text-lg font-medium text-gray-900">${filteredAverageOrderValue.toFixed(2)}</dd>
               </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Orders Table */}
-        <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8">
-          <div className="flex justify-between items-center mb-8">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900">
-                Orders ({filteredOrders.length})
-              </h2>
-              <p className="text-sm text-gray-600 mt-1">
-                Click any column header to sort. Click again to reverse sort order.
-              </p>
-            </div>
-            <div className="flex items-center space-x-4">
-              {isLoading && (
-                <div className="flex items-center text-sm text-blue-600">
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent mr-2"></div>
-                  Loading...
-                </div>
-              )}
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold text-gray-900">Orders Dashboard</h2>
+            <div className="text-sm text-gray-600">
+              Showing {filteredOrdersByStatusAndDelivery.length} of {totalOrders} orders
             </div>
           </div>
-
-          {filteredOrders.length === 0 ? (
-            <div className="text-center py-12">
-              <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              {apiError ? (
-                <div>
-                  <p className="text-red-600 font-medium mb-2">Unable to fetch orders</p>
-                  <p className="text-gray-500">The Bevvi API is currently unavailable. Please try again later.</p>
-                </div>
-              ) : statusFilter.length === 0 ? (
-                <div>
-                  <p className="text-blue-600 font-medium mb-2">No Status Filters Selected</p>
-                  <p className="text-gray-500">Please select at least one status filter to view orders.</p>
-                </div>
-              ) : (
-                <p className="text-gray-500">No orders found matching your criteria.</p>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gradient-to-r from-blue-50 to-green-50">
-                  <tr>
-                    <th 
-                      className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-blue-100 transition-colors duration-200"
-                      onClick={() => handleSort('id')}
-                    >
-                      <div className="flex items-center justify-between">
-                        Order ID
-                        <span className="ml-2 text-blue-600">{getSortIcon('id')}</span>
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-blue-100 transition-colors duration-200"
-                      onClick={() => handleSort('customerName')}
-                    >
-                      <div className="flex items-center justify-between">
-                        Customer
-                        <span className="ml-2 text-blue-600">{getSortIcon('customerName')}</span>
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-blue-100 transition-colors duration-200"
-                      onClick={() => handleSort('orderDate')}
-                    >
-                      <div className="flex items-center justify-between">
-                        Order Date
-                        <span className="ml-2 text-blue-600">{getSortIcon('orderDate')}</span>
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-blue-100 transition-colors duration-200"
-                      onClick={() => handleSort('deliveryDate')}
-                    >
-                      <div className="flex items-center justify-between">
-                        Delivery Date
-                        <span className="ml-2 text-blue-600">{getSortIcon('deliveryDate')}</span>
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-blue-100 transition-colors duration-200"
-                      onClick={() => handleSort('status')}
-                    >
-                      <div className="flex items-center justify-between">
-                        Status
-                        <span className="ml-2 text-blue-600">{getSortIcon('status')}</span>
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider cursor-pointer hover:bg-blue-100 transition-colors duration-200"
-                      onClick={() => handleSort('revenue')}
-                    >
-                      <div className="flex items-center justify-between">
-                        Base Revenue
-                        <span className="ml-2 text-blue-600">{getSortIcon('revenue')}</span>
-                      </div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {getSortedOrders().map((order) => (
-                    <tr
-                      key={order.id}
-                      onClick={() => handleOrderClick(order)}
-                      className="hover:bg-blue-50 cursor-pointer transition-all duration-200 hover:shadow-sm"
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-blue-600">
-                        {order.id}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {order.customerName}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {order.orderDate ? new Date(order.orderDate + 'T00:00:00').toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                        {order.deliveryDate === 'N/A' ? 'N/A' : new Date(order.deliveryDate + 'T00:00:00').toLocaleDateString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${getStatusColor(order.status)}`}>
-                          {getStatusIcon(order.status)}
-                          <span className="ml-2 capitalize">{order.status.replace('_', ' ')}</span>
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
-                        ${getOrderBaseRevenue(order).toFixed(2)} {/* CACHE-BUST: Base Revenue Display */}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          
+          {/* Error Display */}
+          {apiError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <h3 className="text-lg font-medium text-red-800 mb-2">API Error: {apiError.message}</h3>
+              <p className="text-red-700">Status: {apiError.status}</p>
+              <p className="text-red-700">Details: {apiError.details}</p>
             </div>
           )}
+
+          {/* Loading State */}
+          {isLoading && (
+            <div className="text-center py-8">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading orders...</p>
+            </div>
+          )}
+
+          {/* Orders Display */}
+          {!isLoading && !apiError && (
+            <div>
+              {filteredOrdersByStatusAndDelivery.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('id')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Order ID</span>
+                            {sortConfig.key === 'id' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('customerName')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Customer</span>
+                            {sortConfig.key === 'customerName' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('orderDate')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Order Date</span>
+                            {sortConfig.key === 'orderDate' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('deliveryDate')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Delivery Date</span>
+                            {sortConfig.key === 'deliveryDate' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('status')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Status</span>
+                            {sortConfig.key === 'status' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('total')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Total</span>
+                            {sortConfig.key === 'total' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {sortedOrders.map((order) => (
+                        <tr key={order.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{order.id}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.customerName}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.orderDate}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.deliveryDate}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              order.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                              order.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
+                              order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
+                              order.status === 'processing' ? 'bg-purple-100 text-purple-800' :
+                              order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
+                              order.status === 'canceled' ? 'bg-red-100 text-red-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${order.revenue}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              onClick={() => handleOrderClick(order)}
+                              className="text-bevvi-600 hover:text-bevvi-900 inline-flex items-center"
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-gray-500 text-center py-8">
+                  {totalOrders > 0 ? 'No orders match the current filters.' : 'No orders found for the selected date range.'}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Refresh Button */}
+          <div className="mt-6">
+            <button
+              onClick={fetchOrders}
+              disabled={isLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Refreshing...' : 'Refresh Orders'}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Order Details Modal */}
-      {showOrderModal && selectedOrder && (
+      {/* Status Band */}
+      <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-3 px-4 border-t border-gray-700">
+        <div className="max-w-7xl mx-auto flex justify-between items-center text-sm">
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
+              <span className="text-gray-300">
+                Auto-refresh: {autoRefresh ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+            {lastRefreshTime && (
+              <div className="text-gray-300">
+                Last refresh: {lastRefreshTime.toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center space-x-6">
+            {nextRefreshTime && autoRefresh && (
+              <div className="text-gray-300">
+                Next refresh: {nextRefreshTime.toLocaleTimeString()}
+              </div>
+            )}
+            <div className="text-gray-300">
+              Orders: {orders.length} | 
+              Total: ${orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0).toFixed(2)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Order Modal */}
+      {isModalOpen && selectedOrder && (
         <OrderModal
           order={selectedOrder}
-          isOpen={showOrderModal}
-          onClose={() => setShowOrderModal(false)}
+          isOpen={isModalOpen}
+          onClose={closeModal}
         />
       )}
     </div>
