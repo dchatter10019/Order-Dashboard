@@ -12,8 +12,7 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return <Clock className="h-5 w-5 text-blue-500" />
       case 'accepted':
         return <CheckCircle className="h-5 w-5 text-green-500" />
-      case 'delayed':
-        return <AlertTriangle className="h-5 w-5 text-red-500" />
+
       case 'pending':
         return <AlertCircle className="h-5 w-5 text-yellow-500" />
       case 'canceled':
@@ -31,8 +30,7 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return 'bg-blue-100 text-blue-800'
       case 'accepted':
         return 'bg-green-100 text-green-800'
-      case 'delayed':
-        return 'bg-red-100 text-red-800'
+
       case 'pending':
         return 'bg-yellow-100 text-yellow-800'
       case 'canceled':
@@ -303,6 +301,16 @@ const OrderModal = ({ order, isOpen, onClose }) => {
                       {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
                     </span>
                   </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-sm font-medium text-amber-700">Delivery Status</span>
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
+                      order.deliveryStatus === 'On Time' ? 'bg-green-100 text-green-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
+                      {order.deliveryStatus || 'N/A'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -318,7 +326,7 @@ const OrderModal = ({ order, isOpen, onClose }) => {
               {order.status === 'delivered' ? '✅ Order has been delivered' : 
                order.status === 'in_transit' ? '🚚 Order is in transit' : 
                order.status === 'accepted' ? '✅ Order has been accepted' :
-               order.status === 'delayed' ? '⚠️ Order is delayed' :
+
                '⏳ Order is pending'}
             </div>
           </div>

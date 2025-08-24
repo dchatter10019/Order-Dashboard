@@ -106,45 +106,56 @@ function parseCSVLine(line) {
   return values
 }
 
-// Check if order should be marked as delayed based on type and timing
-function checkOrderDelay(order, currentStatus) {
-  // Don't override delivered or canceled orders
-  if (currentStatus === 'delivered' || currentStatus === 'canceled') {
-    return currentStatus
-  }
-  
+// Check delivery status based on order type and timing
+function checkOrderDeliveryStatus(order, currentStatus) {
   const now = new Date()
   const orderDate = new Date(order.orderDate)
   
   // For shipping orders: check if not in_transit within 3 business days
   if ((parseFloat(order.shippingFee) || 0) > 0) {
-    if (currentStatus !== 'in_transit') {
+    if (currentStatus === 'delivered') {
+      return 'On Time' // Delivered orders are considered on time
+    } else if (currentStatus === 'in_transit') {
+      return 'On Time' // In transit orders are on time
+    } else {
       const businessDays = calculateBusinessDays(orderDate, now)
       if (businessDays > 3) {
-        return 'delayed'
+        return 'Delayed'
+      } else {
+        return 'On Time'
       }
     }
   }
   
   // For delivery orders: check if not in_transit and within 30 mins of delivery time
   if ((parseFloat(order.shippingFee) || 0) === 0 && order.deliveryDate !== 'N/A') {
-    if (currentStatus !== 'in_transit') {
+    if (currentStatus === 'delivered') {
+      return 'On Time' // Delivered orders are considered on time
+    } else if (currentStatus === 'in_transit') {
+      return 'On Time' // In transit orders are on time
+    } else {
       try {
         const deliveryDateTime = new Date(order.deliveryDate)
         const timeDiff = deliveryDateTime.getTime() - now.getTime()
         const minutesUntilDelivery = timeDiff / (1000 * 60)
         
         if (minutesUntilDelivery <= 30 && minutesUntilDelivery > -60) { // Within 30 mins before or 1 hour after
-          return 'delayed'
+          return 'Delayed'
+        } else if (minutesUntilDelivery > 30) {
+          return 'On Time' // Still have time before delivery
+        } else {
+          return 'On Time' // Past delivery time but not significantly delayed
         }
       } catch (e) {
-        // If delivery date parsing fails, keep current status
-        console.log(`Delivery date parsing error for delay check: ${e.message}`)
+        // If delivery date parsing fails, return N/A
+        console.log(`Delivery date parsing error for delivery status check: ${e.message}`)
+        return 'N/A'
       }
     }
   }
   
-  return currentStatus
+  // For orders without clear shipping/delivery classification
+  return 'N/A'
 }
 
 // Calculate business days between two dates (excluding weekends)
@@ -258,8 +269,8 @@ function createOrderFromCSV(headers, values, orderDate) {
           
           order.status = statusValue
           
-          // Check if order should be marked as delayed based on type and timing
-          order.status = checkOrderDelay(order, statusValue)
+          // Add delivery status based on timing requirements
+          order.deliveryStatus = checkOrderDeliveryStatus(order, statusValue)
           break
         case 'estname':
           order.establishment = value || 'Unknown Establishment'
