@@ -195,6 +195,15 @@ const Dashboard = ({ onLogout }) => {
           } else {
             return totalB - totalA
           }
+        } else if (sortConfig.key === 'orderType') {
+          // Order Type is derived from shippingFee - 0 = Delivery, >0 = Shipping
+          const aValue = (parseFloat(a.shippingFee) || 0) > 0 ? 'Shipping' : 'Delivery'
+          const bValue = (parseFloat(b.shippingFee) || 0) > 0 ? 'Shipping' : 'Delivery'
+          if (sortConfig.direction === 'asc') {
+            return aValue.localeCompare(bValue)
+          } else {
+            return bValue.localeCompare(aValue)
+          }
         } else {
           const aValue = a[sortConfig.key] || ''
           const bValue = b[sortConfig.key] || ''
@@ -915,11 +924,27 @@ const Dashboard = ({ onLogout }) => {
                             )}
                       </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Order Type
+                    <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                      onClick={() => handleSort('orderType')}
+                    >
+                          <div className="flex items-center space-x-1">
+                            <span>Order Type</span>
+                            {sortConfig.key === 'orderType' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Delivery Status
+                    <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                      onClick={() => handleSort('deliveryStatus')}
+                    >
+                          <div className="flex items-center space-x-1">
+                            <span>Delivery Status</span>
+                            {sortConfig.key === 'deliveryStatus' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                      </div>
                     </th>
                     <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
