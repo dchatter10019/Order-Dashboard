@@ -980,7 +980,10 @@ const Dashboard = ({ onLogout }) => {
                         <tr key={order.id} className="hover:bg-gray-50">
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                             <button
-                              onClick={() => setSelectedOrder(order)}
+                              onClick={() => {
+                                setSelectedOrder(order)
+                                setIsModalOpen(true)
+                              }}
                               className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer"
                             >
                               {order.ordernum || order.id}
