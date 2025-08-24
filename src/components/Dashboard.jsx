@@ -791,6 +791,67 @@ const Dashboard = ({ onLogout }) => {
           </div>
         </div>
 
+        {/* Order Types Tile */}
+        <div className="bg-white rounded-lg shadow p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <div className="p-2 bg-purple-100 rounded-lg">
+                <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                </svg>
+              </div>
+              <div className="ml-4">
+                <h3 className="text-lg font-medium text-gray-900">Order Types Breakdown</h3>
+                <p className="text-sm text-gray-600">
+                  {filteredOrders.filter(order => (parseFloat(order.shippingFee) || 0) > 0).length} Shipping / {filteredOrders.filter(order => (parseFloat(order.shippingFee) || 0) === 0).length} Delivery
+                </p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Shipping Orders */}
+            <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="p-2 bg-purple-100 rounded-lg">
+                    <span className="text-2xl">🚢</span>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-purple-800">Shipping Orders</p>
+                    <p className="text-2xl font-bold text-purple-900">
+                      {filteredOrders.filter(order => (parseFloat(order.shippingFee) || 0) > 0).length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 text-sm text-purple-700">
+                <p>Orders shipped to customer addresses</p>
+              </div>
+            </div>
+
+            {/* Delivery Orders */}
+            <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <span className="text-2xl">🚚</span>
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-blue-800">Delivery Orders</p>
+                    <p className="text-2xl font-bold text-blue-900">
+                      {filteredOrders.filter(order => (parseFloat(order.shippingFee) || 0) === 0).length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 text-sm text-blue-700">
+                <p>Orders delivered by delivery service</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Search Bar */}
         <div className="mb-6">
           <div className="relative">
@@ -912,6 +973,9 @@ const Dashboard = ({ onLogout }) => {
                             )}
                       </div>
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Order Type
+                    </th>
                     <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                           onClick={() => handleSort('total')}
@@ -948,6 +1012,13 @@ const Dashboard = ({ onLogout }) => {
                               {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
                         </span>
                       </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${(parseFloat(order.revenue) || 0).toFixed(2)}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <button

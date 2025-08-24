@@ -10,9 +10,11 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return <CheckCircle className="h-5 w-5 text-green-500" />
       case 'in_transit':
         return <Clock className="h-5 w-5 text-blue-500" />
+      case 'accepted':
+        return <CheckCircle className="h-5 w-5 text-green-500" />
       case 'pending':
         return <AlertCircle className="h-5 w-5 text-yellow-500" />
-      case 'cancelled':
+      case 'canceled':
         return <XCircle className="h-5 w-5 text-red-500" />
       default:
         return <Package className="h-5 w-5 text-gray-500" />
@@ -25,9 +27,11 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return 'bg-green-100 text-green-800'
       case 'in_transit':
         return 'bg-blue-100 text-blue-800'
+      case 'accepted':
+        return 'bg-green-100 text-green-800'
       case 'pending':
         return 'bg-yellow-100 text-yellow-800'
-      case 'cancelled':
+      case 'canceled':
         return 'bg-red-100 text-red-800'
       default:
         return 'bg-gray-100 text-gray-800'
@@ -287,6 +291,14 @@ const OrderModal = ({ order, isOpen, onClose }) => {
                       <span className="ml-1 capitalize">{order.status.replace('_', ' ')}</span>
                     </span>
                   </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-sm font-medium text-amber-700">Order Type</span>
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -301,6 +313,7 @@ const OrderModal = ({ order, isOpen, onClose }) => {
             <div className="mt-2 text-sm text-blue-700">
               {order.status === 'delivered' ? '✅ Order has been delivered' : 
                order.status === 'in_transit' ? '🚚 Order is in transit' : 
+               order.status === 'accepted' ? '✅ Order has been accepted' :
                '⏳ Order is pending'}
             </div>
           </div>
