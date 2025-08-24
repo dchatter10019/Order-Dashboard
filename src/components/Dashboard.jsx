@@ -4,6 +4,7 @@ import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
+import Logo from './Logo'
 
 const Dashboard = ({ onLogout }) => {
   const [orders, setOrders] = useState([])
@@ -555,7 +556,10 @@ const Dashboard = ({ onLogout }) => {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <h1 className="text-2xl font-bold text-gray-900">Bevvi Order Tracking</h1>
+            <div className="flex items-center space-x-4">
+              <Logo size="default" />
+              <h1 className="text-xl font-semibold text-gray-700">Order Tracking Dashboard</h1>
+            </div>
             <div className="flex items-center space-x-4">
               <button
                 onClick={toggleAutoRefresh}

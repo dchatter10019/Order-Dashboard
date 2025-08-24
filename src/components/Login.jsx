@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { Eye, EyeOff, Package } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
+import Logo from './Logo'
 
 const Login = ({ onLogin }) => {
   const [showPassword, setShowPassword] = useState(false)
@@ -41,11 +42,11 @@ const Login = ({ onLogin }) => {
       <div className="max-w-md w-full space-y-8">
         {/* Logo and Header */}
         <div className="text-center">
-          <div className="mx-auto h-24 w-24 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-full flex items-center justify-center mb-6 shadow-lg">
-            <Package className="h-12 w-12 text-white" />
+          <div className="mx-auto mb-6 flex justify-center">
+            <Logo size="large" />
           </div>
           <h2 className="text-4xl font-bold text-gray-900 mb-3">
-            Bevvi Order Tracking
+            Order Tracking
           </h2>
           <p className="text-gray-600 text-lg">
             Sign in to access your order management system
