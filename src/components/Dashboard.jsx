@@ -108,7 +108,9 @@ const Dashboard = ({ onLogout }) => {
     const results = orders.filter(order => 
       order.id?.toLowerCase().includes(searchLower) ||
       order.customerName?.toLowerCase().includes(searchLower) ||
-      order.ordernum?.toLowerCase().includes(searchLower)
+      order.ordernum?.toLowerCase().includes(searchLower) ||
+      // Add search for "Delayed" keyword to show delayed orders
+      (searchLower === 'delayed' && order.deliveryStatus === 'Delayed')
     )
     
     console.log('🔍 Search results:', {
@@ -119,10 +121,12 @@ const Dashboard = ({ onLogout }) => {
         id: order.id,
         customerName: order.customerName,
         status: order.status,
+        deliveryStatus: order.deliveryStatus,
         revenue: order.revenue,
         ordernum: order.ordernum
       })),
       allStatuses: [...new Set(results.map(order => order.status))],
+      deliveryStatuses: [...new Set(results.map(order => order.deliveryStatus))],
       revenueValues: results.map(order => ({
         id: order.id,
         revenue: order.revenue,
@@ -813,7 +817,7 @@ const Dashboard = ({ onLogout }) => {
             </div>
             <input
               type="text"
-              placeholder="Search by Order ID, Customer Name, or Order Number..."
+                              placeholder="Search by Order ID, Customer Name, Order Number, or 'Delayed'..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-bevvi-500 focus:border-bevvi-500 sm:text-sm"
