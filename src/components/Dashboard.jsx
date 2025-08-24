@@ -261,10 +261,12 @@ const Dashboard = ({ onLogout }) => {
       setApiError(null)
       
       const timestamp = Date.now()
-      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}`
+      const randomId = Math.random().toString(36).substring(7)
+      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
       console.log('🔍 Fetching orders from:', apiUrl)
       console.log('📅 Date range:', dateRange)
       console.log('⏰ Timestamp:', timestamp)
+      console.log('🎲 Random ID:', randomId)
       
       const response = await fetch(apiUrl)
       
@@ -276,8 +278,18 @@ const Dashboard = ({ onLogout }) => {
       console.log('📊 API Response:', data)
       console.log('📋 Orders count:', data.data?.length || 0)
       console.log('🎯 Orders array:', data.data)
+      console.log('🔍 Orders data type:', typeof data.data)
+      console.log('🔍 Orders is array:', Array.isArray(data.data))
       
-      setOrders(data.data || [])
+      if (data.data && Array.isArray(data.data)) {
+        console.log('✅ Setting real orders from API')
+        console.log('📊 Orders before setState:', orders)
+        setOrders(data.data)
+        console.log('🔄 setOrders called with:', data.data)
+      } else {
+        console.log('❌ No valid orders data, setting empty array')
+        setOrders([])
+      }
       
       // Update last refresh time
       const now = new Date()
@@ -478,6 +490,13 @@ const Dashboard = ({ onLogout }) => {
       }
     }
   }, [autoRefreshInterval])
+  
+  // Debug effect to log orders changes
+  useEffect(() => {
+    console.log('🔄 Orders state changed:', orders)
+    console.log('📊 Orders count:', orders.length)
+    console.log('🎯 First order:', orders[0])
+  }, [orders])
 
   // Toggle tile collapse state
   const toggleTile = (tileKey) => {
@@ -918,7 +937,7 @@ const Dashboard = ({ onLogout }) => {
                               {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
                         </span>
                       </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${order.revenue}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${(parseFloat(order.revenue) || 0).toFixed(2)}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                             <button
                               onClick={() => handleOrderClick(order)}
