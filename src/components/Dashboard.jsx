@@ -17,7 +17,7 @@ const Dashboard = ({ onLogout }) => {
       endDate: todayString
     }
   })
-  const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'processing', 'processed', 'pending', 'canceled'])
+  const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled'])
   const [deliveryFilter, setDeliveryFilter] = useState(['today'])
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)

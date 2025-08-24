@@ -190,10 +190,6 @@ function createOrderFromCSV(headers, values, orderDate) {
             statusValue = 'canceled'
           } else if (normalizedStatus.includes('pending') || normalizedStatus === 'pending') {
             statusValue = 'pending'
-          } else if (normalizedStatus.includes('processing') || normalizedStatus === 'processing') {
-            statusValue = 'processing'
-          } else if (normalizedStatus.includes('processed') || normalizedStatus === 'processed') {
-            statusValue = 'processed'
           }
           
           // Special case: If you know certain orders should be delivered, we can override here
