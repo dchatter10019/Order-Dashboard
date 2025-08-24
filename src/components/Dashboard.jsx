@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { LogOut, Calendar, Filter, Clock, Eye, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { LogOut, Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
@@ -408,10 +408,7 @@ const Dashboard = ({ onLogout }) => {
     }
   }
 
-  const handleOrderClick = (order) => {
-    setSelectedOrder(order)
-    setIsModalOpen(true)
-  }
+
 
   const closeModal = () => {
     setIsModalOpen(false)
@@ -889,11 +886,11 @@ const Dashboard = ({ onLogout }) => {
                   <tr>
                     <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('id')}
+                      onClick={() => handleSort('ordernum')}
                     >
                           <div className="flex items-center space-x-1">
-                            <span>Order ID</span>
-                            {sortConfig.key === 'id' && (
+                            <span>Order Number</span>
+                            {sortConfig.key === 'ordernum' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
                       </div>
@@ -975,15 +972,20 @@ const Dashboard = ({ onLogout }) => {
                             )}
                       </div>
                     </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
+
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                       {sortedOrders.map((order) => (
                         <tr key={order.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{order.id}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            <button
+                              onClick={() => setSelectedOrder(order)}
+                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer"
+                            >
+                              {order.ordernum || order.id}
+                            </button>
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.customerName}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.orderDate}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.deliveryDate}</td>
@@ -1016,15 +1018,7 @@ const Dashboard = ({ onLogout }) => {
                             </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${(parseFloat(order.revenue) || 0).toFixed(2)}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                            <button
-                              onClick={() => handleOrderClick(order)}
-                              className="text-bevvi-600 hover:text-bevvi-900 inline-flex items-center"
-                            >
-                              <Eye className="h-4 w-4 mr-1" />
-                              View
-                            </button>
-                      </td>
+
                     </tr>
                   ))}
                 </tbody>
