@@ -2,11 +2,36 @@ import React from 'react'
 import { Calendar, RefreshCw } from 'lucide-react'
 
 const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshInfo }) => {
+  const [validationError, setValidationError] = React.useState('')
+  
+  const validateDateRange = (startDate, endDate) => {
+    if (!startDate || !endDate) return true // Allow empty dates during input
+    
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    
+    if (start > end) {
+      setValidationError('Start date must be less than or equal to end date')
+      return false
+    } else {
+      setValidationError('')
+      return true
+    }
+  }
+  
   const handleDateChange = (field, value) => {
     const newDateRange = {
       ...dateRange,
       [field]: value
     }
+    
+    // Validate the new date range
+    if (field === 'startDate') {
+      validateDateRange(value, newDateRange.endDate)
+    } else if (field === 'endDate') {
+      validateDateRange(newDateRange.startDate, value)
+    }
+    
     onDateRangeChange(newDateRange)
     
     // Auto-fetch orders when dates change (optional - you can remove this if you prefer manual fetch)
@@ -26,7 +51,12 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
         </h3>
         <button
           onClick={handleFetchOrders}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex items-center"
+          disabled={!!validationError}
+          className={`font-semibold py-2 px-4 rounded-xl transition-all duration-200 shadow-lg transform flex items-center ${
+            validationError 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl hover:-translate-y-0.5'
+          } text-white`}
         >
           <RefreshCw className="h-4 w-4 mr-2" />
           Fetch Orders
@@ -62,10 +92,17 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
         </div>
       </div>
       
-              <div className="mt-4 text-sm text-gray-600">
-          <p>Selected range: <span className="font-medium">{dateRange.startDate}</span> to <span className="font-medium">{dateRange.endDate}</span></p>
-          <p className="mt-1 text-xs text-gray-500">Click "Fetch Orders" to call the Bevvi API with these dates</p>
+      {/* Validation Error Display */}
+      {validationError && (
+        <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-700 font-medium">{validationError}</p>
         </div>
+      )}
+      
+      <div className="mt-4 text-sm text-gray-600">
+        <p>Selected range: <span className="font-medium">{dateRange.startDate}</span> to <span className="font-medium">{dateRange.endDate}</span></p>
+        <p className="mt-1 text-xs text-gray-500">Click "Fetch Orders" to call the Bevvi API with these dates</p>
+      </div>
         
         {/* Refresh Timing Information removed as requested */}
     </div>

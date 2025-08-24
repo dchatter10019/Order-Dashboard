@@ -242,6 +242,21 @@ const Dashboard = ({ onLogout }) => {
   // Fetch orders function
   const fetchOrders = async () => {
     try {
+      // Validate date range before making API call
+      if (dateRange.startDate && dateRange.endDate) {
+        const start = new Date(dateRange.startDate)
+        const end = new Date(dateRange.endDate)
+        
+        if (start > end) {
+          setApiError({
+            message: 'Invalid date range',
+            status: 'Validation Error',
+            details: 'Start date must be less than or equal to end date'
+          })
+          return
+        }
+      }
+      
       setIsLoading(true)
       setApiError(null)
       
@@ -301,6 +316,17 @@ const Dashboard = ({ onLogout }) => {
     } else {
       // Start auto-refresh with current date range
       try {
+        // Validate date range before starting auto-refresh
+        if (dateRange.startDate && dateRange.endDate) {
+          const start = new Date(dateRange.startDate)
+          const end = new Date(dateRange.endDate)
+          
+          if (start > end) {
+            console.error('Cannot start auto-refresh: Invalid date range')
+            return
+          }
+        }
+        
         const response = await fetch('/api/auto-refresh/start', {
           method: 'POST',
           headers: {
@@ -349,6 +375,17 @@ const Dashboard = ({ onLogout }) => {
     if (autoRefresh) {
       const updateBackendAutoRefresh = async () => {
         try {
+          // Validate date range before updating backend auto-refresh
+          if (dateRange.startDate && dateRange.endDate) {
+            const start = new Date(dateRange.startDate)
+            const end = new Date(dateRange.endDate)
+            
+            if (start > end) {
+              console.error('Cannot update backend auto-refresh: Invalid date range')
+              return
+            }
+          }
+          
           await fetch('/api/auto-refresh/start', {
             method: 'POST',
             headers: {
