@@ -110,7 +110,7 @@ const Dashboard = ({ onLogout }) => {
       order.customerName?.toLowerCase().includes(searchLower) ||
       order.ordernum?.toLowerCase().includes(searchLower) ||
       // Add search for "Delayed" keyword to show delayed orders
-      (searchLower === 'delayed' && order.deliveryStatus === 'Delayed')
+      (searchLower === 'delayed' && order.deliveryStatus?.toLowerCase() === 'delayed')
     )
     
     console.log('🔍 Search results:', {
@@ -134,6 +134,20 @@ const Dashboard = ({ onLogout }) => {
         parsedRevenue: parseFloat(order.revenue)
       }))
     })
+    
+    // Debug: Log delivery status values for troubleshooting
+    if (searchLower === 'delayed') {
+      console.log('🔍 Searching for delayed orders...')
+      console.log('📊 All orders delivery statuses:', orders.map(order => ({
+        id: order.id,
+        deliveryStatus: order.deliveryStatus,
+        status: order.status,
+        shippingFee: order.shippingFee
+      })))
+      console.log('🎯 Orders with deliveryStatus === "Delayed":', orders.filter(order => order.deliveryStatus === 'Delayed').length)
+      console.log('🎯 Orders with deliveryStatus === "delayed":', orders.filter(order => order.deliveryStatus === 'delayed').length)
+      console.log('🎯 Orders with deliveryStatus containing "delayed":', orders.filter(order => order.deliveryStatus?.toLowerCase().includes('delayed')).length)
+    }
     
     return results
   }, [orders, searchTerm])
