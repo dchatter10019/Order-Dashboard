@@ -1,5 +1,5 @@
 import React from 'react'
-import { X, Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle } from 'lucide-react'
+import { X, Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle, AlertTriangle } from 'lucide-react'
 
 const OrderModal = ({ order, isOpen, onClose }) => {
   if (!isOpen || !order) return null
@@ -12,6 +12,8 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return <Clock className="h-5 w-5 text-blue-500" />
       case 'accepted':
         return <CheckCircle className="h-5 w-5 text-green-500" />
+      case 'delayed':
+        return <AlertTriangle className="h-5 w-5 text-red-500" />
       case 'pending':
         return <AlertCircle className="h-5 w-5 text-yellow-500" />
       case 'canceled':
@@ -29,6 +31,8 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return 'bg-blue-100 text-blue-800'
       case 'accepted':
         return 'bg-green-100 text-green-800'
+      case 'delayed':
+        return 'bg-red-100 text-red-800'
       case 'pending':
         return 'bg-yellow-100 text-yellow-800'
       case 'canceled':
@@ -314,6 +318,7 @@ const OrderModal = ({ order, isOpen, onClose }) => {
               {order.status === 'delivered' ? '✅ Order has been delivered' : 
                order.status === 'in_transit' ? '🚚 Order is in transit' : 
                order.status === 'accepted' ? '✅ Order has been accepted' :
+               order.status === 'delayed' ? '⚠️ Order is delayed' :
                '⏳ Order is pending'}
             </div>
           </div>

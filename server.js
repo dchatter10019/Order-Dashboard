@@ -106,6 +106,63 @@ function parseCSVLine(line) {
   return values
 }
 
+// Check if order should be marked as delayed based on type and timing
+function checkOrderDelay(order, currentStatus) {
+  // Don't override delivered or canceled orders
+  if (currentStatus === 'delivered' || currentStatus === 'canceled') {
+    return currentStatus
+  }
+  
+  const now = new Date()
+  const orderDate = new Date(order.orderDate)
+  
+  // For shipping orders: check if not in_transit within 3 business days
+  if ((parseFloat(order.shippingFee) || 0) > 0) {
+    if (currentStatus !== 'in_transit') {
+      const businessDays = calculateBusinessDays(orderDate, now)
+      if (businessDays > 3) {
+        return 'delayed'
+      }
+    }
+  }
+  
+  // For delivery orders: check if not in_transit and within 30 mins of delivery time
+  if ((parseFloat(order.shippingFee) || 0) === 0 && order.deliveryDate !== 'N/A') {
+    if (currentStatus !== 'in_transit') {
+      try {
+        const deliveryDateTime = new Date(order.deliveryDate)
+        const timeDiff = deliveryDateTime.getTime() - now.getTime()
+        const minutesUntilDelivery = timeDiff / (1000 * 60)
+        
+        if (minutesUntilDelivery <= 30 && minutesUntilDelivery > -60) { // Within 30 mins before or 1 hour after
+          return 'delayed'
+        }
+      } catch (e) {
+        // If delivery date parsing fails, keep current status
+        console.log(`Delivery date parsing error for delay check: ${e.message}`)
+      }
+    }
+  }
+  
+  return currentStatus
+}
+
+// Calculate business days between two dates (excluding weekends)
+function calculateBusinessDays(startDate, endDate) {
+  let businessDays = 0
+  const current = new Date(startDate)
+  
+  while (current <= endDate) {
+    const dayOfWeek = current.getDay()
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) { // 0 = Sunday, 6 = Saturday
+      businessDays++
+    }
+    current.setDate(current.getDate() + 1)
+  }
+  
+  return businessDays
+}
+
 // Create order object from CSV data
 function createOrderFromCSV(headers, values, orderDate) {
   try {
@@ -200,6 +257,9 @@ function createOrderFromCSV(headers, values, orderDate) {
           // }
           
           order.status = statusValue
+          
+          // Check if order should be marked as delayed based on type and timing
+          order.status = checkOrderDelay(order, statusValue)
           break
         case 'estname':
           order.establishment = value || 'Unknown Establishment'

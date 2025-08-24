@@ -7,6 +7,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
     { value: 'in_transit', label: 'In Transit', count: null },
     { value: 'accepted', label: 'Accepted', count: null },
     { value: 'pending', label: 'Pending', count: null },
+    { value: 'delayed', label: 'Delayed', count: null },
     { value: 'canceled', label: 'Canceled', count: null }
   ]
 
