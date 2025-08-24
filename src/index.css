@@ -6,6 +6,34 @@
   body {
     font-family: 'Inter', system-ui, sans-serif;
   }
+  
+  /* Fix for date input text truncation */
+  input[type="date"] {
+    min-width: 160px !important;
+    width: auto !important;
+    text-overflow: visible !important;
+    overflow: visible !important;
+    white-space: nowrap !important;
+    font-size: 16px !important;
+    font-weight: 500 !important;
+  }
+  
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+  }
+  
+  /* Additional specificity for date inputs */
+  .DateRangePicker input[type="date"],
+  input[type="date"]#startDate,
+  input[type="date"]#endDate {
+    min-width: 160px !important;
+    width: auto !important;
+    text-overflow: visible !important;
+    overflow: visible !important;
+    white-space: nowrap !important;
+    font-size: 16px !important;
+    font-weight: 500 !important;
+  }
 }
 
 @layer components {
