@@ -26,17 +26,30 @@ app.use((req, res, next) => {
 // CSV parsing function
 function parseCSVToOrders(csvData, orderDate) {
   try {
+    console.log('Starting CSV parsing...')
+    console.log('Raw CSV data type:', typeof csvData)
+    console.log('Raw CSV data length:', csvData.length)
+    
     // Split CSV into lines
     const lines = csvData.split('\n').filter(line => line.trim())
+    console.log('Number of lines after splitting:', lines.length)
+    console.log('First few lines:', lines.slice(0, 3))
     
     if (lines.length < 2) {
-      console.log('CSV has insufficient data, using mock data')
+      console.log('CSV has insufficient data (less than 2 lines), using mock data')
+      return getMockOrders(orderDate)
+    }
+    
+    // Check if the CSV actually contains meaningful data (not just headers)
+    if (lines.length === 2 && lines[1].trim().length < 10) {
+      console.log('CSV contains only headers and minimal data, using mock data')
       return getMockOrders(orderDate)
     }
     
     // Parse header row
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
     console.log('CSV Headers:', headers)
+    console.log('Number of headers:', headers.length)
     
     // Parse data rows
     const orders = []
@@ -46,16 +59,22 @@ function parseCSVToOrders(csvData, orderDate) {
       
       // Simple CSV parsing (handles quoted fields)
       const values = parseCSVLine(line)
+      console.log(`Line ${i}: values count = ${values.length}, headers count = ${headers.length}`)
       
       if (values.length >= headers.length) {
         const order = createOrderFromCSV(headers, values, orderDate)
         if (order) {
           orders.push(order)
         }
+      } else {
+        console.log(`Line ${i} skipped: insufficient values (${values.length} < ${headers.length})`)
       }
     }
     
     console.log(`Parsed ${orders.length} orders from CSV`)
+    if (orders.length === 0) {
+      console.log('No orders parsed, falling back to mock data')
+    }
     return orders.length > 0 ? orders : getMockOrders(orderDate)
     
   } catch (error) {
@@ -377,6 +396,25 @@ app.get('/api/orders', async (req, res) => {
         error: 'Start date and end date are required' 
       })
     }
+    
+    // Validate that dates are not in the future
+    const today = new Date()
+    today.setHours(23, 59, 59, 999) // End of today
+    
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    
+    if (start > today || end > today) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid date range',
+        message: 'Cannot fetch orders for future dates. Please select dates up to today.',
+        dateRange: { startDate, endDate },
+        today: today.toISOString().split('T')[0],
+        data: [],
+        totalOrders: 0
+      })
+    }
 
     // Update auto-refresh range when new dates are requested
     updateAutoRefreshRange(startDate, endDate)
@@ -428,18 +466,35 @@ app.get('/api/orders', async (req, res) => {
         if (jsonResponse.results) {
           const csvData = jsonResponse.results
           console.log('CSV Data extracted from results field, length:', csvData.length)
+          console.log('CSV Data preview (first 200 chars):', csvData.substring(0, 200))
           
           // Parse the CSV data from the results field
           const orders = parseCSVToOrders(csvData, startDate)
           
-          return res.json({
-            success: true,
-            data: orders,
-            dateRange: { startDate, endDate },
-            totalOrders: orders.length,
-            message: `Orders fetched for ${startDate} to ${endDate}`,
-            rawData: csvData.substring(0, 500) + '...' // First 500 chars for debugging
-          })
+          // Check if we got real orders or fell back to mock data
+          if (orders.length > 0 && orders[0].id && !orders[0].id.startsWith('ORD')) {
+            // Real orders from API
+            return res.json({
+              success: true,
+              data: orders,
+              dateRange: { startDate, endDate },
+              totalOrders: orders.length,
+              message: `Orders fetched for ${startDate} to ${endDate}`,
+              source: 'Bevvi API',
+              rawData: csvData.substring(0, 500) + '...' // First 500 chars for debugging
+            })
+          } else {
+            // Mock data was used
+            return res.json({
+              success: true,
+              data: orders,
+              dateRange: { startDate, endDate },
+              totalOrders: orders.length,
+              message: `No orders found for ${startDate} to ${endDate}. Showing sample data.`,
+              source: 'Mock Data (No API data available)',
+              note: 'The selected date range may not have any orders, or the API returned insufficient data.'
+            })
+          }
         } else {
           throw new Error('No results field found in API response')
         }

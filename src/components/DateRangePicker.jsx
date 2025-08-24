@@ -9,6 +9,14 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
     
     const start = new Date(startDate)
     const end = new Date(endDate)
+    const today = new Date()
+    today.setHours(23, 59, 59, 999) // End of today
+    
+    // Check if dates are in the future
+    if (start > today || end > today) {
+      setValidationError('Cannot select future dates. Please select dates up to today.')
+      return false
+    }
     
     if (start > end) {
       setValidationError('Start date must be less than or equal to end date')
@@ -71,6 +79,7 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
                       <input
               id="startDate"
               type="date"
+              max={new Date().toISOString().split('T')[0]}
               className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all duration-200 bg-gray-50"
               value={dateRange.startDate}
               onChange={(e) => handleDateChange('startDate', e.target.value)}
@@ -84,6 +93,7 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
                       <input
               id="endDate"
               type="date"
+              max={new Date().toISOString().split('T')[0]}
               className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:border-blue-300 transition-all duration-200 bg-gray-50"
               value={dateRange.endDate}
               onChange={(e) => handleDateChange('endDate', e.target.value)}
