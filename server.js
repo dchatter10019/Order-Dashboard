@@ -127,30 +127,38 @@ function checkOrderDeliveryStatus(order, currentStatus) {
     }
   }
   
-  // For delivery orders: check if not in_transit and within 30 mins of delivery time
+  // For delivery orders: check delivery timing
   if ((parseFloat(order.shippingFee) || 0) === 0 && order.deliveryDate !== 'N/A') {
-    if (currentStatus === 'delivered') {
-      return 'On Time' // Delivered orders are considered on time
-    } else if (currentStatus === 'in_transit') {
-      return 'On Time' // In transit orders are on time
-    } else {
-      try {
-        const deliveryDateTime = new Date(order.deliveryDate)
-        const timeDiff = deliveryDateTime.getTime() - now.getTime()
-        const minutesUntilDelivery = timeDiff / (1000 * 60)
-        
-        if (minutesUntilDelivery <= 30 && minutesUntilDelivery > -60) { // Within 30 mins before or 1 hour after
-          return 'Delayed'
-        } else if (minutesUntilDelivery > 30) {
-          return 'On Time' // Still have time before delivery
-        } else {
-          return 'On Time' // Past delivery time but not significantly delayed
-        }
-      } catch (e) {
-        // If delivery date parsing fails, return N/A
-        console.log(`Delivery date parsing error for delivery status check: ${e.message}`)
-        return 'N/A'
+    try {
+      const deliveryDateTime = new Date(order.deliveryDate)
+      const timeDiff = deliveryDateTime.getTime() - now.getTime()
+      const minutesUntilDelivery = timeDiff / (1000 * 60)
+      
+      // Scenario 1: Orders not delivered after delivery window
+      if (currentStatus !== 'delivered' && minutesUntilDelivery < -30) {
+        return 'Delayed'
       }
+      
+      // Scenario 2: Orders delivered but after delivery window
+      if (currentStatus === 'delivered' && minutesUntilDelivery < -30) {
+        return 'Delayed'
+      }
+      
+      // In transit orders are considered on time
+      if (currentStatus === 'in_transit') {
+        return 'On Time'
+      }
+      
+      // Orders within delivery window or not significantly past
+      if (minutesUntilDelivery >= -30) {
+        return 'On Time'
+      }
+      
+      return 'On Time' // Default case
+    } catch (e) {
+      // If delivery date parsing fails, return N/A
+      console.log(`Delivery date parsing error for delivery status check: ${e.message}`)
+      return 'N/A'
     }
   }
   
