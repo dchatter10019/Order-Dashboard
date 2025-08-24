@@ -177,6 +177,9 @@ function createOrderFromCSV(headers, values, orderDate) {
           // Convert the status string to lowercase and normalize it
           const normalizedStatus = value ? value.toLowerCase().trim() : ''
           
+          // Debug: Log the actual status value from CSV
+          console.log(`Raw status from CSV for order ${order.id}: "${value}" -> normalized: "${normalizedStatus}"`)
+          
           if (normalizedStatus.includes('delivered') || normalizedStatus === 'delivered') {
             statusValue = 'delivered'
           } else if (normalizedStatus.includes('transit') || normalizedStatus === 'in transit') {
@@ -189,6 +192,8 @@ function createOrderFromCSV(headers, values, orderDate) {
             statusValue = 'pending'
           } else if (normalizedStatus.includes('processing') || normalizedStatus === 'processing') {
             statusValue = 'processing'
+          } else if (normalizedStatus.includes('processed') || normalizedStatus === 'processed') {
+            statusValue = 'processed'
           }
           
           // Special case: If you know certain orders should be delivered, we can override here
