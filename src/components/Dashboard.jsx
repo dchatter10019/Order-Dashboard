@@ -18,7 +18,7 @@ const Dashboard = ({ onLogout }) => {
     }
   })
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled'])
-  const [deliveryFilter, setDeliveryFilter] = useState(['today'])
+  const [deliveryFilter, setDeliveryFilter] = useState([])
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -137,9 +137,14 @@ const Dashboard = ({ onLogout }) => {
   // Filter orders based on status and delivery filters
   const filteredOrdersByStatusAndDelivery = useMemo(() => {
     let filtered = filteredOrders
+    
+    // Apply status filter - if none selected, show all (default to "Select All")
     if (statusFilter.length > 0) {
       filtered = filtered.filter(order => statusFilter.includes(order.status))
     }
+    // If no status filters selected, show all orders (default behavior)
+    
+    // Apply delivery filter - if none selected, show all (default to "All Dates")
     if (deliveryFilter.length > 0) {
       filtered = filtered.filter(order => {
         const orderDate = new Date(order.orderDate)
@@ -164,6 +169,8 @@ const Dashboard = ({ onLogout }) => {
         return false
       })
     }
+    // If no delivery filters selected, show all orders (default behavior)
+    
     return filtered
   }, [filteredOrders, statusFilter, deliveryFilter])
 

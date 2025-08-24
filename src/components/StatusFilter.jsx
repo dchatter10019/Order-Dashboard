@@ -25,20 +25,20 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
           <input
             type="checkbox"
             name="selectAll"
-            checked={statusFilter.length === statusOptions.length}
+            checked={statusFilter.length === statusOptions.length || statusFilter.length === 0}
             onChange={(e) => {
               if (e.target.checked) {
                 // Select all options
                 onStatusFilterChange(statusOptions.map(option => option.value))
               } else {
-                // Deselect all options
+                // Deselect all options (this will default to showing all)
                 onStatusFilterChange([])
               }
             }}
             className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
           />
           <span className="ml-3 text-sm font-medium text-gray-700">
-            Select All
+            {statusFilter.length === 0 ? 'Select All (Default)' : 'Select All'}
           </span>
         </label>
         
