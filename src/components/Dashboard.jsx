@@ -9,9 +9,13 @@ const Dashboard = ({ onLogout }) => {
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
-  const [dateRange, setDateRange] = useState({
-    startDate: '2025-08-20',
-    endDate: '2025-08-23'
+  const [dateRange, setDateRange] = useState(() => {
+    const today = new Date()
+    const todayString = today.toISOString().split('T')[0]
+    return {
+      startDate: todayString,
+      endDate: todayString
+    }
   })
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'processing', 'pending', 'canceled'])
   const [deliveryFilter, setDeliveryFilter] = useState(['all_dates'])
