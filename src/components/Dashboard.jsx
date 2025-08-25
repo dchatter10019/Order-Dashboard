@@ -165,28 +165,90 @@ const Dashboard = ({ onLogout }) => {
     
     // Apply delivery filter - if none selected, show all (default to "All Dates")
     if (deliveryFilter.length > 0) {
+      console.log('🔍 Applying delivery filter:', deliveryFilter)
+      console.log('📊 Orders before delivery filter:', filtered.length)
+      
       filtered = filtered.filter(order => {
         const orderDate = new Date(order.orderDate)
         const deliveryDate = new Date(order.deliveryDate)
         const now = new Date()
+        
+        console.log('🔍 Order filtering:', {
+          orderId: order.id,
+          orderDate: order.orderDate,
+          deliveryDate: order.deliveryDate,
+          parsedOrderDate: orderDate.toISOString().split('T')[0],
+          parsedDeliveryDate: deliveryDate.toISOString().split('T')[0],
+          today: now.toISOString().split('T')[0],
+          deliveryFilter: deliveryFilter
+        })
 
         if (deliveryFilter.includes('all_dates')) {
+          console.log('✅ Order passed: all_dates filter')
           return true
         }
-        if (deliveryFilter.includes('today') && orderDate.toISOString().split('T')[0] === now.toISOString().split('T')[0]) {
-          return true
+        
+        // For "today" filter, check if delivery is scheduled for today
+        if (deliveryFilter.includes('today')) {
+          // If order has a delivery date, use that; otherwise fall back to order date
+          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
+            const isToday = deliveryDate.toISOString().split('T')[0] === now.toISOString().split('T')[0]
+            console.log(`🔍 Today filter - delivery date: ${isToday ? '✅ PASS' : '❌ FAIL'}`)
+            return isToday
+          } else {
+            // Fallback to order date if no delivery date available
+            const isToday = orderDate.toISOString().split('T')[0] === now.toISOString().split('T')[0]
+            console.log(`🔍 Today filter - order date fallback: ${isToday ? '✅ PASS' : '❌ FAIL'}`)
+            return isToday
+          }
         }
-        if (deliveryFilter.includes('tomorrow') && orderDate.toISOString().split('T')[0] === new Date(now.getTime() + 86400000).toISOString().split('T')[0]) {
-          return true
+        
+        // For "tomorrow" filter, check if delivery is scheduled for tomorrow
+        if (deliveryFilter.includes('tomorrow')) {
+          const tomorrow = new Date(now.getTime() + 86400000)
+          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
+            const isTomorrow = deliveryDate.toISOString().split('T')[0] === tomorrow.toISOString().split('T')[0]
+            console.log(`🔍 Tomorrow filter - delivery date: ${isTomorrow ? '✅ PASS' : '❌ FAIL'}`)
+            return isTomorrow
+          } else {
+            // Fallback to order date if no delivery date available
+            const isTomorrow = orderDate.toISOString().split('T')[0] === tomorrow.toISOString().split('T')[0]
+            console.log(`🔍 Tomorrow filter - order date fallback: ${isTomorrow ? '✅ PASS' : '❌ FAIL'}`)
+            return isTomorrow
+          }
         }
-        if (deliveryFilter.includes('this_week') && isThisWeek(orderDate.toISOString().split('T')[0])) {
-          return true
+        
+        // For "this_week" filter, check delivery dates
+        if (deliveryFilter.includes('this_week')) {
+          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
+            const isThisWeek = isThisWeek(deliveryDate.toISOString().split('T')[0])
+            console.log(`🔍 This week filter - delivery date: ${isThisWeek ? '✅ PASS' : '❌ FAIL'}`)
+            return isThisWeek
+          } else {
+            const isThisWeek = isThisWeek(orderDate.toISOString().split('T')[0])
+            console.log(`🔍 This week filter - order date fallback: ${isThisWeek ? '✅ PASS' : '❌ FAIL'}`)
+            return isThisWeek
+          }
         }
-        if (deliveryFilter.includes('next_week') && isNextWeek(orderDate.toISOString().split('T')[0])) {
-          return true
+        
+        // For "next_week" filter, check delivery dates
+        if (deliveryFilter.includes('next_week')) {
+          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
+            const isNextWeek = isNextWeek(deliveryDate.toISOString().split('T')[0])
+            console.log(`🔍 Next week filter - delivery date: ${isNextWeek ? '✅ PASS' : '❌ FAIL'}`)
+            return isNextWeek
+          } else {
+            const isNextWeek = isNextWeek(orderDate.toISOString().split('T')[0])
+            console.log(`🔍 Next week filter - order date fallback: ${isNextWeek ? '✅ PASS' : '❌ FAIL'}`)
+            return isNextWeek
+          }
         }
+        
+        console.log('❌ Order failed all delivery filters')
         return false
       })
+      
+      console.log('📊 Orders after delivery filter:', filtered.length)
     }
     // If no delivery filters selected, show all orders (default behavior)
     

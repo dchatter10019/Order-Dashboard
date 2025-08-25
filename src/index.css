@@ -7,32 +7,22 @@
     font-family: 'Inter', system-ui, sans-serif;
   }
   
-  /* Fix for date input text truncation */
+  /* Fix for date input text truncation and alignment */
   input[type="date"] {
-    min-width: 160px !important;
-    width: auto !important;
+    min-width: 140px !important;
+    width: 100% !important;
     text-overflow: visible !important;
     overflow: visible !important;
     white-space: nowrap !important;
-    font-size: 16px !important;
+    font-size: 14px !important;
     font-weight: 500 !important;
+    display: block !important;
+    box-sizing: border-box !important;
+    vertical-align: top !important;
   }
   
   input[type="date"]::-webkit-calendar-picker-indicator {
     cursor: pointer;
-  }
-  
-  /* Additional specificity for date inputs */
-  .DateRangePicker input[type="date"],
-  input[type="date"]#startDate,
-  input[type="date"]#endDate {
-    min-width: 160px !important;
-    width: auto !important;
-    text-overflow: visible !important;
-    overflow: visible !important;
-    white-space: nowrap !important;
-    font-size: 16px !important;
-    font-weight: 500 !important;
   }
 }
 

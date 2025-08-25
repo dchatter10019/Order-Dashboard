@@ -71,8 +71,8 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
         </button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
-        <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="flex flex-col">
           <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-2">
             Start Date
           </label>
@@ -80,14 +80,13 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
             id="startDate"
             type="date"
             max={new Date().toISOString().split('T')[0]}
-            className="w-full min-w-[160px] px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all duration-200 bg-gray-50 text-gray-900 text-base font-medium"
-            style={{ minWidth: '160px', fontSize: '16px' }}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-gray-50 text-gray-900 text-sm"
             value={dateRange.startDate}
             onChange={(e) => handleDateChange('startDate', e.target.value)}
           />
         </div>
         
-        <div className="space-y-2">
+        <div className="flex flex-col">
           <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-2">
             End Date
           </label>
@@ -95,8 +94,7 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
             id="endDate"
             type="date"
             max={new Date().toISOString().split('T')[0]}
-            className="w-full min-w-[160px] px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:border-blue-300 transition-all duration-200 bg-gray-50 text-gray-900 text-base font-medium"
-            style={{ minWidth: '160px', fontSize: '16px' }}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-gray-50 text-gray-900 text-sm"
             value={dateRange.endDate}
             onChange={(e) => handleDateChange('endDate', e.target.value)}
             min={dateRange.startDate}
