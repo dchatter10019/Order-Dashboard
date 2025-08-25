@@ -36,14 +36,14 @@ function parseCSVToOrders(csvData, orderDate) {
     console.log('First few lines:', lines.slice(0, 3))
     
     if (lines.length < 2) {
-      console.log('CSV has insufficient data (less than 2 lines), using mock data')
-      return getMockOrders(orderDate)
+      console.log('CSV has insufficient data (less than 2 lines)')
+      return []
     }
     
     // Check if the CSV actually contains meaningful data (not just headers)
     if (lines.length === 2 && lines[1].trim().length < 10) {
-      console.log('CSV contains only headers and minimal data, using mock data')
-      return getMockOrders(orderDate)
+      console.log('CSV contains only headers and minimal data')
+      return []
     }
     
     // Parse header row
@@ -73,13 +73,13 @@ function parseCSVToOrders(csvData, orderDate) {
     
     console.log(`Parsed ${orders.length} orders from CSV`)
     if (orders.length === 0) {
-      console.log('No orders parsed, falling back to mock data')
+      console.log('No orders parsed for this date range')
     }
-    return orders.length > 0 ? orders : getMockOrders(orderDate)
+    return orders // Return empty array instead of mock data
     
   } catch (error) {
     console.error('CSV parsing error:', error)
-    return getMockOrders(orderDate)
+    return [] // Return empty array instead of mock data
   }
 }
 
@@ -340,17 +340,22 @@ function createOrderFromCSV(headers, values, orderDate) {
                 const day = parsedDeliveryDate.getDate()
                 const localDate = new Date(year, month, day)
                 order.deliveryDate = localDate.toISOString().split('T')[0]
-                console.log(`Set deliveryDate to: ${order.deliveryDate}`)
+                // Also preserve the full deliveryDateTime for frontend display
+                order.deliveryDateTime = value
+                console.log(`Set deliveryDate to: ${order.deliveryDate} and deliveryDateTime to: ${order.deliveryDateTime}`)
               } else {
                 order.deliveryDate = 'N/A'
+                order.deliveryDateTime = null
                 console.log(`Invalid date, set deliveryDate to: N/A`)
               }
             } catch (e) {
               console.log(`Delivery date parsing error for value "${value}":`, e.message)
               order.deliveryDate = 'N/A'
+              order.deliveryDateTime = null
             }
           } else {
             order.deliveryDate = 'N/A'
+            order.deliveryDateTime = null
             console.log(`Empty/null value, set deliveryDate to: N/A`)
           }
           break
@@ -551,7 +556,7 @@ app.get('/api/orders', async (req, res) => {
           // Parse the CSV data from the results field
           const orders = parseCSVToOrders(csvData, startDate)
           
-          // Check if we got real orders or fell back to mock data
+          // Check if we got real orders from API
           if (orders.length > 0 && orders[0].id && !orders[0].id.startsWith('ORD')) {
             // Real orders from API
             return res.json({
@@ -564,15 +569,15 @@ app.get('/api/orders', async (req, res) => {
               rawData: csvData.substring(0, 500) + '...' // First 500 chars for debugging
             })
           } else {
-            // Mock data was used
+            // No real orders found - return empty array instead of mock data
             return res.json({
               success: true,
-              data: orders,
+              data: [],
               dateRange: { startDate, endDate },
-              totalOrders: orders.length,
-              message: `No orders found for ${startDate} to ${endDate}. Showing sample data.`,
-              source: 'Mock Data (No API data available)',
-              note: 'The selected date range may not have any orders, or the API returned insufficient data.'
+              totalOrders: 0,
+              message: `No orders found for ${startDate} to ${endDate}`,
+              source: 'Bevvi API',
+              note: 'The selected date range has no orders.'
             })
           }
         } else {

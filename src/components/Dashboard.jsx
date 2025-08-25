@@ -206,6 +206,14 @@ const Dashboard = ({ onLogout }) => {
           } else {
             return dateB - dateA
           }
+        } else if (sortConfig.key === 'deliveryTime') {
+          const timeA = a.deliveryDateTime ? new Date(a.deliveryDateTime).getTime() : 0
+          const timeB = b.deliveryDateTime ? new Date(b.deliveryDateTime).getTime() : 0
+          if (sortConfig.direction === 'asc') {
+            return timeA - timeB
+          } else {
+            return timeB - timeA
+          }
         } else if (sortConfig.key === 'total') {
           const totalA = parseFloat(a[sortConfig.key]) || 0
           const totalB = parseFloat(b[sortConfig.key]) || 0
@@ -921,17 +929,28 @@ const Dashboard = ({ onLogout }) => {
                             )}
                       </div>
                     </th>
-                    <th 
+                                        <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('deliveryDate')}
-                    >
+                          onClick={() => handleSort('deliveryDate')}
+                        >
                           <div className="flex items-center space-x-1">
                             <span>Delivery Date</span>
                             {sortConfig.key === 'deliveryDate' && (
                               sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
                             )}
-                      </div>
-                    </th>
+                          </div>
+                        </th>
+                        <th 
+                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleSort('deliveryTime')}
+                        >
+                          <div className="flex items-center space-x-1">
+                            <span>Delivery Time</span>
+                            {sortConfig.key === 'deliveryTime' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                          </div>
+                        </th>
                     <th 
                           className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('status')}
@@ -996,6 +1015,22 @@ const Dashboard = ({ onLogout }) => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.customerName}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.orderDate}</td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.deliveryDate}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {(() => {
+                              console.log('🕐 Delivery Time Debug:', {
+                                orderId: order.id,
+                                deliveryDateTime: order.deliveryDateTime,
+                                parsed: order.deliveryDateTime ? new Date(order.deliveryDateTime) : null
+                              })
+                              return order.deliveryDateTime ? 
+                                new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
+                                  hour: 'numeric', 
+                                  minute: '2-digit',
+                                  hour12: true 
+                                }) : 
+                                'N/A'
+                            })()}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               order.status === 'delivered' ? 'bg-green-100 text-green-800' :
