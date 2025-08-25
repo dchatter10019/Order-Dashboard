@@ -191,7 +191,7 @@ const Dashboard = ({ onLogout }) => {
     if (statusFilter.length > 0) {
       filtered = filtered.filter(order => statusFilter.includes(order.status))
     }
-    // If no status filters selected, show all orders (default behavior)
+    // If no status filters selected, show all orders (default behavior - equivalent to "Select All")
     
     // Apply delivery filter - if none selected, show all (default to "All Dates")
     if (deliveryFilter.length > 0) {
