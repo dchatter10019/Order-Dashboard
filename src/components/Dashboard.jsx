@@ -953,12 +953,12 @@ const Dashboard = ({ onLogout }) => {
           {!isLoading && !apiError && (
             <div>
               {filteredOrdersByStatusAndDelivery.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
+            <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg max-w-full">
+              <table className="w-full table-auto divide-y divide-gray-200 min-w-0">
                     <thead className="bg-gray-50">
                   <tr>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-48"
                       onClick={() => handleSort('ordernum')}
                     >
                           <div className="flex items-center space-x-1">
@@ -969,7 +969,7 @@ const Dashboard = ({ onLogout }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-40"
                       onClick={() => handleSort('customerName')}
                     >
                           <div className="flex items-center space-x-1">
@@ -980,7 +980,7 @@ const Dashboard = ({ onLogout }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
                       onClick={() => handleSort('orderDate')}
                     >
                           <div className="flex items-center space-x-1">
@@ -991,7 +991,7 @@ const Dashboard = ({ onLogout }) => {
                       </div>
                     </th>
                                         <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
                           onClick={() => handleSort('deliveryDate')}
                         >
                           <div className="flex items-center space-x-1">
@@ -1002,7 +1002,7 @@ const Dashboard = ({ onLogout }) => {
                           </div>
                         </th>
                         <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
                           onClick={() => handleSort('deliveryTime')}
                         >
                           <div className="flex items-center space-x-1">
@@ -1013,7 +1013,7 @@ const Dashboard = ({ onLogout }) => {
                           </div>
                         </th>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
                       onClick={() => handleSort('status')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1024,7 +1024,7 @@ const Dashboard = ({ onLogout }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
                       onClick={() => handleSort('orderType')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1035,7 +1035,7 @@ const Dashboard = ({ onLogout }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
                       onClick={() => handleSort('deliveryStatus')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1046,7 +1046,7 @@ const Dashboard = ({ onLogout }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-20"
                           onClick={() => handleSort('total')}
                         >
                           <div className="flex items-center space-x-1">
@@ -1062,37 +1062,52 @@ const Dashboard = ({ onLogout }) => {
                 <tbody className="bg-white divide-y divide-gray-200">
                       {sortedOrders.map((order) => (
                         <tr key={order.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          <td className="px-3 py-4 text-sm font-medium text-gray-900">
                             <button
                               onClick={() => {
                                 setSelectedOrder(order)
                                 setIsModalOpen(true)
                               }}
-                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer truncate block w-full text-left"
+                              title={order.ordernum || order.id}
                             >
                               {order.ordernum || order.id}
                             </button>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.customerName}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.orderDate}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{order.deliveryDate}</td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {(() => {
-                              console.log('🕐 Delivery Time Debug:', {
-                                orderId: order.id,
-                                deliveryDateTime: order.deliveryDateTime,
-                                parsed: order.deliveryDateTime ? new Date(order.deliveryDateTime) : null
-                              })
-                              return order.deliveryDateTime ? 
-                                new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
-                                  hour: 'numeric', 
-                                  minute: '2-digit',
-                                  hour12: true 
-                                }) : 
-                                'N/A'
-                            })()}
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={order.customerName}>
+                              {order.customerName}
+                            </div>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={order.orderDate}>
+                              {order.orderDate}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={order.deliveryDate}>
+                              {order.deliveryDate}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={order.deliveryDateTime ? new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : 'N/A'}>
+                              {(() => {
+                                console.log('🕐 Delivery Time Debug:', {
+                                  orderId: order.id,
+                                  deliveryDateTime: order.deliveryDateTime,
+                                  parsed: order.deliveryDateTime ? new Date(order.deliveryDateTime) : null
+                                })
+                                return order.deliveryDateTime ? 
+                                  new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
+                                    hour: 'numeric', 
+                                    minute: '2-digit',
+                                    hour12: true 
+                                  }) : 
+                                  'N/A'
+                              })()}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               order.status === 'delivered' ? 'bg-green-100 text-green-800' :
                               order.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
@@ -1105,14 +1120,14 @@ const Dashboard = ({ onLogout }) => {
                               {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
                         </span>
                       </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-3 py-4 text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
                             }`}>
                               {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <td className="px-3 py-4 text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
                               order.deliveryStatus === 'On Time' ? 'bg-green-100 text-green-800' :
@@ -1121,7 +1136,11 @@ const Dashboard = ({ onLogout }) => {
                               {order.deliveryStatus || 'N/A'}
                             </span>
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${(parseFloat(order.revenue) || 0).toFixed(2)}</td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={`$${(parseFloat(order.revenue) || 0).toFixed(2)}`}>
+                              ${(parseFloat(order.revenue) || 0).toFixed(2)}
+                            </div>
+                          </td>
 
                     </tr>
                   ))}
