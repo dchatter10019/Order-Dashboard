@@ -198,27 +198,37 @@ const Dashboard = ({ onLogout }) => {
       console.log('🔍 Applying delivery filter:', deliveryFilter)
       
       filtered = filtered.filter(order => {
-        // Check if order has valid delivery information
+        // Handle "All Dates" filter first - show all orders regardless of delivery date
+        if (deliveryFilter.includes('all_dates')) {
+          console.log(`🔍 All Dates filter for order ${order.id}: INCLUDING all orders`)
+          return true
+        }
+        
+        // For specific date filters, check if order has valid delivery information
         if (!order.deliveryDate || order.deliveryDate === 'N/A' || order.deliveryDate === 'null' || order.deliveryDate === 'undefined') {
           console.log(`🔍 Order ${order.id} has no valid delivery date: ${order.deliveryDate} - EXCLUDING from delivery filter`)
           return false
         }
         
-        // Simple working filter - check delivery date (not order date)
+        // Check ALL selected filters and return true if ANY match (OR logic)
+        let shouldShow = false
+        
+        // Today filter
         if (deliveryFilter.includes('today')) {
           const today = new Date().toISOString().split('T')[0]
           const deliveryDate = order.deliveryDate
           const isToday = deliveryDate === today
           console.log(`🔍 Today filter for order ${order.id}: delivery date ${deliveryDate} === ${today} = ${isToday}`)
-          return isToday
+          if (isToday) shouldShow = true
         }
         
+        // Tomorrow filter
         if (deliveryFilter.includes('tomorrow')) {
           const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
           const deliveryDate = order.deliveryDate
           const isTomorrow = deliveryDate === tomorrow
           console.log(`🔍 Tomorrow filter for order ${order.id}: delivery date ${deliveryDate} === ${tomorrow} = ${isTomorrow}`)
-          return isTomorrow
+          if (isTomorrow) shouldShow = true
         }
         
         // This Week filter
@@ -233,7 +243,7 @@ const Dashboard = ({ onLogout }) => {
           const isThisWeek = deliveryDate >= startOfWeek && deliveryDate <= endOfWeek
           
           console.log(`🔍 This week filter for order ${order.id}: delivery date ${deliveryDate.toDateString()} (${isThisWeek ? 'IN' : 'OUT'} of week ${startOfWeek.toDateString()} - ${endOfWeek.toDateString()})`)
-          return isThisWeek
+          if (isThisWeek) shouldShow = true
         }
         
         // Next Week filter
@@ -248,10 +258,11 @@ const Dashboard = ({ onLogout }) => {
           const isNextWeek = deliveryDate >= startOfNextWeek && deliveryDate <= endOfNextWeek
           
           console.log(`🔍 Next week filter for order ${order.id}: delivery date ${deliveryDate.toDateString()} (${isNextWeek ? 'IN' : 'OUT'} of week ${startOfNextWeek.toDateString()} - ${endOfNextWeek.toDateString()})`)
-          return isNextWeek
+          if (isNextWeek) shouldShow = true
         }
         
-        return false
+        console.log(`🔍 Final result for order ${order.id}: ${shouldShow ? '✅ SHOW' : '❌ HIDE'} (matched filters: ${deliveryFilter.filter(f => f !== 'all_dates').join(', ')})`)
+        return shouldShow
       })
       
       console.log('📊 Orders after delivery filter:', filtered.length)
