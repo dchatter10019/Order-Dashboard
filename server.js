@@ -264,6 +264,8 @@ function createOrderFromCSV(headers, values, orderDate) {
             statusValue = 'accepted'
           } else if (normalizedStatus.includes('canceled') || normalizedStatus === 'canceled') {
             statusValue = 'canceled'
+          } else if (normalizedStatus.includes('rejected') || normalizedStatus === 'rejected') {
+            statusValue = 'rejected'
           } else if (normalizedStatus.includes('pending') || normalizedStatus === 'pending') {
             statusValue = 'pending'
           }

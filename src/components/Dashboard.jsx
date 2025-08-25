@@ -19,7 +19,7 @@ const Dashboard = ({ onLogout }) => {
       endDate: todayString
     }
   })
-  const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled'])
+  const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected'])
   const [deliveryFilter, setDeliveryFilter] = useState([])
   
   // Log when delivery filter changes
@@ -1099,6 +1099,7 @@ const Dashboard = ({ onLogout }) => {
                               order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
                               order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
                               order.status === 'canceled' ? 'bg-red-100 text-red-800' :
+                              order.status === 'rejected' ? 'bg-red-100 text-red-800' :
                               'bg-gray-100 text-gray-800'
                             }`}>
                               {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}

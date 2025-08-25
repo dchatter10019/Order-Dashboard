@@ -17,6 +17,8 @@ const OrderModal = ({ order, isOpen, onClose }) => {
         return <AlertCircle className="h-5 w-5 text-yellow-500" />
       case 'canceled':
         return <XCircle className="h-5 w-5 text-red-500" />
+      case 'rejected':
+        return <XCircle className="h-5 w-5 text-red-500" />
       default:
         return <Package className="h-5 w-5 text-gray-500" />
     }
@@ -34,6 +36,8 @@ const OrderModal = ({ order, isOpen, onClose }) => {
       case 'pending':
         return 'bg-yellow-100 text-yellow-800'
       case 'canceled':
+        return 'bg-red-100 text-red-800'
+      case 'rejected':
         return 'bg-red-100 text-red-800'
       default:
         return 'bg-gray-100 text-gray-800'
