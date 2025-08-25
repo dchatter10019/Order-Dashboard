@@ -54,13 +54,20 @@ const DeliveryFilter = ({ deliveryFilter, onDeliveryFilterChange }) => {
               checked={deliveryFilter.includes(option.value)}
               onChange={(e) => {
                 const value = e.target.value
+                console.log(`🔍 DeliveryFilter: ${option.label} checkbox ${e.target.checked ? 'checked' : 'unchecked'}`)
+                console.log(`🔍 DeliveryFilter: Current deliveryFilter:`, deliveryFilter)
+                
                 if (e.target.checked) {
                   // Add to selection and remove 'all_dates' if it was selected
                   const newFilter = deliveryFilter.filter(item => item !== 'all_dates')
-                  onDeliveryFilterChange([...newFilter, value])
+                  const finalFilter = [...newFilter, value]
+                  console.log(`🔍 DeliveryFilter: Setting new filter:`, finalFilter)
+                  onDeliveryFilterChange(finalFilter)
                 } else {
                   // Remove from selection
-                  onDeliveryFilterChange(deliveryFilter.filter(item => item !== value))
+                  const finalFilter = deliveryFilter.filter(item => item !== value)
+                  console.log(`🔍 DeliveryFilter: Removing from filter:`, finalFilter)
+                  onDeliveryFilterChange(finalFilter)
                 }
               }}
               className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"

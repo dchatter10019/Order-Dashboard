@@ -7,6 +7,7 @@ import OrderModal from './OrderModal'
 import Logo from './Logo'
 
 const Dashboard = ({ onLogout }) => {
+  console.log('🔍 Dashboard component rendering')
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -20,6 +21,11 @@ const Dashboard = ({ onLogout }) => {
   })
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled'])
   const [deliveryFilter, setDeliveryFilter] = useState([])
+  
+  // Log when delivery filter changes
+  useEffect(() => {
+    console.log('🔍 Delivery filter state changed:', deliveryFilter)
+  }, [deliveryFilter])
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -41,6 +47,24 @@ const Dashboard = ({ onLogout }) => {
     statusFilter: false,
     deliveryFilter: false
   })
+
+  // Helper function to check if date is this week
+  const isThisWeek = (dateString) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()))
+    const endOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 6))
+    return date >= startOfWeek && date <= endOfWeek
+  }
+
+  // Helper function to check if date is next week
+  const isNextWeek = (dateString) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const startOfNextWeek = new Date(now.setDate(now.getDate() - now.getDay() + 7))
+    const endOfNextWeek = new Date(now.setDate(now.getDate() - now.getDay() + 13))
+    return date >= startOfNextWeek && date <= endOfNextWeek
+  }
 
   // Sorting function
   const sortOrders = (orders, key, direction) => {
@@ -155,6 +179,12 @@ const Dashboard = ({ onLogout }) => {
 
   // Filter orders based on status and delivery filters
   const filteredOrdersByStatusAndDelivery = useMemo(() => {
+    console.log('🔍 filteredOrdersByStatusAndDelivery called with:', {
+      filteredOrdersLength: filteredOrders.length,
+      statusFilter: statusFilter,
+      deliveryFilter: deliveryFilter
+    })
+    
     let filtered = filteredOrders
     
     // Apply status filter - if none selected, show all (default to "Select All")
@@ -166,85 +196,61 @@ const Dashboard = ({ onLogout }) => {
     // Apply delivery filter - if none selected, show all (default to "All Dates")
     if (deliveryFilter.length > 0) {
       console.log('🔍 Applying delivery filter:', deliveryFilter)
-      console.log('📊 Orders before delivery filter:', filtered.length)
       
       filtered = filtered.filter(order => {
-        const orderDate = new Date(order.orderDate)
-        const deliveryDate = new Date(order.deliveryDate)
-        const now = new Date()
-        
-        console.log('🔍 Order filtering:', {
-          orderId: order.id,
-          orderDate: order.orderDate,
-          deliveryDate: order.deliveryDate,
-          parsedOrderDate: orderDate.toISOString().split('T')[0],
-          parsedDeliveryDate: deliveryDate.toISOString().split('T')[0],
-          today: now.toISOString().split('T')[0],
-          deliveryFilter: deliveryFilter
-        })
-
-        if (deliveryFilter.includes('all_dates')) {
-          console.log('✅ Order passed: all_dates filter')
-          return true
+        // Check if order has valid delivery information
+        if (!order.deliveryDate || order.deliveryDate === 'N/A' || order.deliveryDate === 'null' || order.deliveryDate === 'undefined') {
+          console.log(`🔍 Order ${order.id} has no valid delivery date: ${order.deliveryDate} - EXCLUDING from delivery filter`)
+          return false
         }
         
-        // For "today" filter, check if delivery is scheduled for today
+        // Simple working filter - check delivery date (not order date)
         if (deliveryFilter.includes('today')) {
-          // If order has a delivery date, use that; otherwise fall back to order date
-          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
-            const isToday = deliveryDate.toISOString().split('T')[0] === now.toISOString().split('T')[0]
-            console.log(`🔍 Today filter - delivery date: ${isToday ? '✅ PASS' : '❌ FAIL'}`)
-            return isToday
-          } else {
-            // Fallback to order date if no delivery date available
-            const isToday = orderDate.toISOString().split('T')[0] === now.toISOString().split('T')[0]
-            console.log(`🔍 Today filter - order date fallback: ${isToday ? '✅ PASS' : '❌ FAIL'}`)
-            return isToday
-          }
+          const today = new Date().toISOString().split('T')[0]
+          const deliveryDate = order.deliveryDate
+          const isToday = deliveryDate === today
+          console.log(`🔍 Today filter for order ${order.id}: delivery date ${deliveryDate} === ${today} = ${isToday}`)
+          return isToday
         }
         
-        // For "tomorrow" filter, check if delivery is scheduled for tomorrow
         if (deliveryFilter.includes('tomorrow')) {
-          const tomorrow = new Date(now.getTime() + 86400000)
-          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
-            const isTomorrow = deliveryDate.toISOString().split('T')[0] === tomorrow.toISOString().split('T')[0]
-            console.log(`🔍 Tomorrow filter - delivery date: ${isTomorrow ? '✅ PASS' : '❌ FAIL'}`)
-            return isTomorrow
-          } else {
-            // Fallback to order date if no delivery date available
-            const isTomorrow = orderDate.toISOString().split('T')[0] === tomorrow.toISOString().split('T')[0]
-            console.log(`🔍 Tomorrow filter - order date fallback: ${isTomorrow ? '✅ PASS' : '❌ FAIL'}`)
-            return isTomorrow
-          }
+          const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+          const deliveryDate = order.deliveryDate
+          const isTomorrow = deliveryDate === tomorrow
+          console.log(`🔍 Tomorrow filter for order ${order.id}: delivery date ${deliveryDate} === ${tomorrow} = ${isTomorrow}`)
+          return isTomorrow
         }
         
-        // For "this_week" filter, check delivery dates
+        // This Week filter
         if (deliveryFilter.includes('this_week')) {
-          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
-            const isThisWeek = isThisWeek(deliveryDate.toISOString().split('T')[0])
-            console.log(`🔍 This week filter - delivery date: ${isThisWeek ? '✅ PASS' : '❌ FAIL'}`)
-            return isThisWeek
-          } else {
-            const isThisWeek = isThisWeek(orderDate.toISOString().split('T')[0])
-            console.log(`🔍 This week filter - order date fallback: ${isThisWeek ? '✅ PASS' : '❌ FAIL'}`)
-            return isThisWeek
-          }
+          const today = new Date()
+          const startOfWeek = new Date(today)
+          startOfWeek.setDate(today.getDate() - today.getDay()) // Start of week (Sunday)
+          const endOfWeek = new Date(startOfWeek)
+          endOfWeek.setDate(startOfWeek.getDate() + 6) // End of week (Saturday)
+          
+          const deliveryDate = new Date(order.deliveryDate)
+          const isThisWeek = deliveryDate >= startOfWeek && deliveryDate <= endOfWeek
+          
+          console.log(`🔍 This week filter for order ${order.id}: delivery date ${deliveryDate.toDateString()} (${isThisWeek ? 'IN' : 'OUT'} of week ${startOfWeek.toDateString()} - ${endOfWeek.toDateString()})`)
+          return isThisWeek
         }
         
-        // For "next_week" filter, check delivery dates
+        // Next Week filter
         if (deliveryFilter.includes('next_week')) {
-          if (order.deliveryDate && order.deliveryDate !== 'N/A') {
-            const isNextWeek = isNextWeek(deliveryDate.toISOString().split('T')[0])
-            console.log(`🔍 Next week filter - delivery date: ${isNextWeek ? '✅ PASS' : '❌ FAIL'}`)
-            return isNextWeek
-          } else {
-            const isNextWeek = isNextWeek(orderDate.toISOString().split('T')[0])
-            console.log(`🔍 Next week filter - order date fallback: ${isNextWeek ? '✅ PASS' : '❌ FAIL'}`)
-            return isNextWeek
-          }
+          const today = new Date()
+          const startOfNextWeek = new Date(today)
+          startOfNextWeek.setDate(today.getDate() - today.getDay() + 7) // Start of next week
+          const endOfNextWeek = new Date(startOfNextWeek)
+          endOfNextWeek.setDate(startOfNextWeek.getDate() + 6) // End of next week
+          
+          const deliveryDate = new Date(order.deliveryDate)
+          const isNextWeek = deliveryDate >= startOfNextWeek && deliveryDate <= endOfNextWeek
+          
+          console.log(`🔍 Next week filter for order ${order.id}: delivery date ${deliveryDate.toDateString()} (${isNextWeek ? 'IN' : 'OUT'} of week ${startOfNextWeek.toDateString()} - ${endOfNextWeek.toDateString()})`)
+          return isNextWeek
         }
         
-        console.log('❌ Order failed all delivery filters')
         return false
       })
       
@@ -329,24 +335,6 @@ const Dashboard = ({ onLogout }) => {
     totalRevenue: filteredTotalRevenue,
     averageOrderValue: filteredAverageOrderValue
   })
-
-  // Helper function to check if date is this week
-  const isThisWeek = (dateString) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()))
-    const endOfWeek = new Date(now.setDate(now.getDate() - now.getDay() + 6))
-    return date >= startOfWeek && date <= endOfWeek
-  }
-
-  // Helper function to check if date is next week
-  const isNextWeek = (dateString) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const startOfNextWeek = new Date(now.setDate(now.getDate() - now.getDay() + 7))
-    const endOfNextWeek = new Date(now.setDate(now.getDate() - now.getDay() + 13))
-    return date >= startOfNextWeek && date <= endOfNextWeek
-  }
 
   // Fetch orders function
   const fetchOrders = async () => {
