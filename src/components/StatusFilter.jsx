@@ -50,7 +50,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
               type="checkbox"
               name="statusFilter"
               value={option.value}
-              checked={statusFilter.includes(option.value)}
+              checked={statusFilter.length === 0 || statusFilter.includes(option.value)}
               onChange={(e) => {
                 const value = e.target.value
                 if (e.target.checked) {
