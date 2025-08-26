@@ -682,6 +682,9 @@ let autoRefreshTimer = null
 let lastAutoRefreshDate = null
 let lastAutoRefreshRange = null
 
+// Store connected clients for real-time updates
+let connectedClients = []
+
 // Function to start auto-refresh
 function startAutoRefresh() {
   if (autoRefreshTimer) {
@@ -732,6 +735,9 @@ function startAutoRefresh() {
             timestamp: lastAutoRefreshDate,
             dateRange: lastAutoRefreshRange
           }
+          
+          // Notify all connected clients about the data refresh
+          notifyClientsOfRefresh(orders.length, lastAutoRefreshDate)
         }
       } catch (error) {
         console.log(`❌ Auto-refresh error: ${error.message}`)
@@ -757,17 +763,69 @@ function updateAutoRefreshRange(startDate, endDate) {
   console.log(`📅 Auto-refresh range updated to ${startDate} to ${endDate}`)
 }
 
+// Function to notify all connected clients about data refresh
+function notifyClientsOfRefresh(ordersCount, refreshTime) {
+  const message = JSON.stringify({
+    type: 'data_refresh',
+    ordersCount: ordersCount,
+    refreshTime: refreshTime.toISOString(),
+    refreshTimeFormatted: refreshTime.toLocaleString(),
+    message: `Data refreshed: ${ordersCount} orders updated at ${refreshTime.toLocaleString()}`
+  })
+  
+  // Send message to all connected clients
+  connectedClients.forEach(client => {
+    if (client.res && !client.res.destroyed) {
+      client.res.write(`data: ${message}\n\n`)
+    }
+  })
+  
+  console.log(`📡 Notified ${connectedClients.length} connected clients about data refresh`)
+}
+
+// Function to add a new client connection
+function addClient(client) {
+  connectedClients.push(client)
+  console.log(`📱 New client connected. Total clients: ${connectedClients.length}`)
+}
+
+// Function to remove a disconnected client
+function removeClient(client) {
+  const index = connectedClients.findIndex(c => c.id === client.id)
+  if (index > -1) {
+    connectedClients.splice(index, 1)
+    console.log(`📱 Client disconnected. Total clients: ${connectedClients.length}`)
+  }
+}
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
+  const now = new Date()
+  const nextRefresh = autoRefreshTimer ? new Date(Date.now() + AUTO_REFRESH_INTERVAL) : null
+  const timeUntilNext = nextRefresh ? Math.max(0, nextRefresh.getTime() - now.getTime()) : null
+  
+  // Format time until next refresh
+  let timeUntilNextFormatted = null
+  if (timeUntilNext !== null) {
+    const minutes = Math.floor(timeUntilNext / (1000 * 60))
+    const seconds = Math.floor((timeUntilNext % (1000 * 60)) / 1000)
+    timeUntilNextFormatted = `${minutes}m ${seconds}s`
+  }
+  
   res.json({ 
     status: 'OK', 
     message: 'Bevvi Order Tracking System API is running',
-    timestamp: new Date().toISOString(),
+    timestamp: now.toISOString(),
+    serverTime: now.toLocaleString(),
     autoRefresh: {
       active: !!autoRefreshTimer,
       interval: `${AUTO_REFRESH_INTERVAL / 60000} minutes`,
       lastRefresh: lastAutoRefreshDate,
-      currentRange: lastAutoRefreshRange
+      lastRefreshFormatted: lastAutoRefreshDate ? lastAutoRefreshDate.toLocaleString() : null,
+      currentRange: lastAutoRefreshRange,
+      nextRefresh: nextRefresh,
+      nextRefreshFormatted: nextRefresh ? nextRefresh.toLocaleString() : null,
+      timeUntilNext: timeUntilNextFormatted
     }
   })
 })
@@ -802,13 +860,75 @@ app.post('/api/auto-refresh/stop', (req, res) => {
 })
 
 app.get('/api/auto-refresh/status', (req, res) => {
+  const now = new Date()
+  const nextRefresh = autoRefreshTimer ? new Date(Date.now() + AUTO_REFRESH_INTERVAL) : null
+  const timeUntilNext = nextRefresh ? Math.max(0, nextRefresh.getTime() - now.getTime()) : null
+  
+  // Format time until next refresh
+  let timeUntilNextFormatted = null
+  if (timeUntilNext !== null) {
+    const minutes = Math.floor(timeUntilNext / (1000 * 60))
+    const seconds = Math.floor((timeUntilNext % (1000 * 60)) / 1000)
+    timeUntilNextFormatted = `${minutes}m ${seconds}s`
+  }
+  
   res.json({
     active: !!autoRefreshTimer,
     interval: `${AUTO_REFRESH_INTERVAL / 60000} minutes`,
     lastRefresh: lastAutoRefreshDate,
+    lastRefreshFormatted: lastAutoRefreshDate ? lastAutoRefreshDate.toLocaleString() : null,
     currentRange: lastAutoRefreshRange,
-    nextRefresh: autoRefreshTimer ? new Date(Date.now() + AUTO_REFRESH_INTERVAL) : null
+    nextRefresh: nextRefresh,
+    nextRefreshFormatted: nextRefresh ? nextRefresh.toLocaleString() : null,
+    timeUntilNext: timeUntilNextFormatted,
+    serverTime: now.toLocaleString(),
+    serverTimeISO: now.toISOString()
   })
+})
+
+// Server-Sent Events endpoint for real-time updates
+app.get('/api/events', (req, res) => {
+  // Set headers for SSE
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  })
+  
+  // Send initial connection message
+  res.write(`data: ${JSON.stringify({
+    type: 'connected',
+    message: 'Connected to real-time updates',
+    timestamp: new Date().toISOString()
+  })}\n\n`)
+  
+  // Create client object with unique ID
+  const client = {
+    id: Date.now() + Math.random(),
+    res: res
+  }
+  
+  // Add client to connected clients
+  addClient(client)
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    removeClient(client)
+  })
+  
+  // Keep connection alive with heartbeat
+  const heartbeat = setInterval(() => {
+    if (res.destroyed) {
+      clearInterval(heartbeat)
+      return
+    }
+    res.write(`data: ${JSON.stringify({
+      type: 'heartbeat',
+      timestamp: new Date().toISOString()
+    })}\n\n`)
+  }, 30000) // Send heartbeat every 30 seconds
 })
 
 // Serve React app for all other routes

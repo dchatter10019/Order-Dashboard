@@ -531,6 +531,74 @@ const Dashboard = ({ onLogout }) => {
     }
   }, [dateRange, autoRefresh])
 
+  // Real-time updates using Server-Sent Events
+  useEffect(() => {
+    let eventSource = null
+    
+    const connectToRealTimeUpdates = () => {
+      try {
+        eventSource = new EventSource('/api/events')
+        
+        eventSource.onopen = () => {
+          console.log('🔗 Connected to real-time updates')
+        }
+        
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            
+            if (data.type === 'data_refresh') {
+              console.log('🔄 Received real-time update:', data.message)
+              
+              // Update the last refresh time
+              setLastRefreshTime(new Date(data.refreshTime))
+              
+              // Automatically fetch fresh data
+              fetchOrders()
+              
+              // Show notification to user
+              if (data.ordersCount > 0) {
+                // You can add a toast notification here if you want
+                console.log(`📊 Auto-refreshed: ${data.ordersCount} orders updated`)
+              }
+            } else if (data.type === 'connected') {
+              console.log('✅ Real-time connection established')
+            } else if (data.type === 'heartbeat') {
+              // Keep connection alive
+              console.log('💓 Heartbeat received')
+            }
+          } catch (error) {
+            console.error('Error parsing real-time update:', error)
+          }
+        }
+        
+        eventSource.onerror = (error) => {
+          console.error('❌ Real-time connection error:', error)
+          eventSource.close()
+          
+          // Attempt to reconnect after 5 seconds
+          setTimeout(() => {
+            console.log('🔄 Attempting to reconnect to real-time updates...')
+            connectToRealTimeUpdates()
+          }, 5000)
+        }
+      } catch (error) {
+        console.error('Failed to connect to real-time updates:', error)
+      }
+    }
+    
+    // Connect to real-time updates
+    connectToRealTimeUpdates()
+    
+    // Cleanup on unmount
+    return () => {
+      if (eventSource) {
+        console.log('🔌 Disconnecting from real-time updates')
+        eventSource.close()
+      }
+    }
+  }, []) // Only run once on mount
+
   // Auto-start auto-refresh when component mounts
   useEffect(() => {
     if (autoRefresh) {
