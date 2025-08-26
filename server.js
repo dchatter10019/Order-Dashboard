@@ -14,14 +14,14 @@ app.use(cors({
 }))
 app.use(express.json())
 
-// Serve static files from the dist directory
-app.use(express.static(path.join(__dirname, 'dist')))
-
 // Add some debugging
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`)
   next()
 })
+
+// Serve static files from the dist directory
+app.use(express.static(path.join(__dirname, 'dist')))
 
 // CSV parsing function
 function parseCSVToOrders(csvData, orderDate) {

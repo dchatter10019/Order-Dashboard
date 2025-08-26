@@ -123,9 +123,7 @@ const Dashboard = ({ onLogout }) => {
 
   // Calculate summary statistics
   const totalOrders = orders.length
-  const revenueOrders = orders.filter(order => 
-    !['pending', 'rejected', 'canceled'].includes(order.status)
-  )
+  const revenueOrders = orders.filter(order => order.status === 'accepted')
   const totalRevenue = revenueOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
   const averageOrderValue = revenueOrders.length > 0 ? totalRevenue / revenueOrders.length : 0
@@ -220,19 +218,25 @@ const Dashboard = ({ onLogout }) => {
         
         // Today filter
         if (deliveryFilter.includes('today')) {
-          const today = new Date().toISOString().split('T')[0]
+          const today = new Date()
+          const todayString = today.getFullYear() + '-' + 
+                             String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                             String(today.getDate()).padStart(2, '0')
           const deliveryDate = order.deliveryDate
-          const isToday = deliveryDate === today
-          console.log(`🔍 Today filter for order ${order.id}: delivery date ${deliveryDate} === ${today} = ${isToday}`)
+          const isToday = deliveryDate === todayString
+          console.log(`🔍 Today filter for order ${order.id}: delivery date ${deliveryDate} === ${todayString} = ${isToday}`)
           if (isToday) shouldShow = true
         }
         
         // Tomorrow filter
         if (deliveryFilter.includes('tomorrow')) {
-          const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]
+          const tomorrow = new Date(Date.now() + 86400000)
+          const tomorrowString = tomorrow.getFullYear() + '-' + 
+                                String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + 
+                                String(tomorrow.getDate()).padStart(2, '0')
           const deliveryDate = order.deliveryDate
-          const isTomorrow = deliveryDate === tomorrow
-          console.log(`🔍 Tomorrow filter for order ${order.id}: delivery date ${deliveryDate} === ${tomorrow} = ${isTomorrow}`)
+          const isTomorrow = deliveryDate === tomorrowString
+          console.log(`🔍 Tomorrow filter for order ${order.id}: delivery date ${deliveryDate} === ${tomorrowString} = ${isTomorrow}`)
           if (isTomorrow) shouldShow = true
         }
         
@@ -331,19 +335,19 @@ const Dashboard = ({ onLogout }) => {
 
   // Calculate filtered summary statistics
   const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
-  const filteredRevenueOrders = filteredOrdersByStatusAndDelivery.filter(order => 
-    !['pending', 'rejected', 'canceled'].includes(order.status)
+  const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter(order => 
+    !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
   )
-  const filteredTotalRevenue = filteredRevenueOrders
+  const filteredTotalRevenue = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
-  const filteredAverageOrderValue = filteredRevenueOrders.length > 0 ? filteredTotalRevenue / filteredRevenueOrders.length : 0
+  const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
 
   // Debug logging for status filtering
   console.log('🔍 Status Filtering Debug:', {
     totalFilteredOrders: filteredOrdersByStatusAndDelivery.length,
-    revenueOrdersCount: filteredRevenueOrders.length,
+    acceptedOrdersCount: filteredAcceptedOrders.length,
     allStatuses: [...new Set(filteredOrdersByStatusAndDelivery.map(order => order.status))],
-    revenueOrders: filteredRevenueOrders.map(order => ({
+    acceptedOrders: filteredAcceptedOrders.map(order => ({
       id: order.id,
       status: order.status,
       revenue: order.revenue
@@ -880,12 +884,12 @@ const Dashboard = ({ onLogout }) => {
                     <span className="font-medium">${filteredTotalRevenue.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Total Orders:</span>
-                    <span className="font-medium">{filteredTotalOrders}</span>
+                    <span>Revenue Orders:</span>
+                    <span className="font-medium">{filteredAcceptedOrders.length}</span>
           </div>
                   <div className="flex justify-between">
                     <span>Calculation:</span>
-                    <span className="font-medium">{filteredTotalOrders > 0 ? `${filteredTotalRevenue.toFixed(2)} ÷ ${filteredTotalOrders} = $${filteredAverageOrderValue.toFixed(2)}` : 'N/A'}</span>
+                    <span className="font-medium">{filteredAcceptedOrders.length > 0 ? `${filteredTotalRevenue.toFixed(2)} ÷ ${filteredAcceptedOrders.length} = $${filteredAverageOrderValue.toFixed(2)}` : 'N/A'}</span>
             </div>
                 </div>
                 </div>
