@@ -123,10 +123,12 @@ const Dashboard = ({ onLogout }) => {
 
   // Calculate summary statistics
   const totalOrders = orders.length
-  const acceptedOrders = orders.filter(order => order.status === 'accepted')
-  const totalRevenue = acceptedOrders
+  const revenueOrders = orders.filter(order => 
+    !['pending', 'rejected', 'canceled'].includes(order.status)
+  )
+  const totalRevenue = revenueOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
-  const averageOrderValue = acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
+  const averageOrderValue = revenueOrders.length > 0 ? totalRevenue / revenueOrders.length : 0
 
   // Filter orders based on search term
   const filteredOrders = useMemo(() => {
@@ -329,19 +331,19 @@ const Dashboard = ({ onLogout }) => {
 
   // Calculate filtered summary statistics
   const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
-  const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter(order => 
-    order.status === 'accepted'
+  const filteredRevenueOrders = filteredOrdersByStatusAndDelivery.filter(order => 
+    !['pending', 'rejected', 'canceled'].includes(order.status)
   )
-  const filteredTotalRevenue = filteredAcceptedOrders
+  const filteredTotalRevenue = filteredRevenueOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
-  const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
+  const filteredAverageOrderValue = filteredRevenueOrders.length > 0 ? filteredTotalRevenue / filteredRevenueOrders.length : 0
 
   // Debug logging for status filtering
   console.log('🔍 Status Filtering Debug:', {
     totalFilteredOrders: filteredOrdersByStatusAndDelivery.length,
-    acceptedOrdersCount: filteredAcceptedOrders.length,
+    revenueOrdersCount: filteredRevenueOrders.length,
     allStatuses: [...new Set(filteredOrdersByStatusAndDelivery.map(order => order.status))],
-    acceptedOrders: filteredAcceptedOrders.map(order => ({
+    revenueOrders: filteredRevenueOrders.map(order => ({
       id: order.id,
       status: order.status,
       revenue: order.revenue
