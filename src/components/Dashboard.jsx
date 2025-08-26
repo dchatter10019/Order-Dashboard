@@ -123,10 +123,10 @@ const Dashboard = ({ onLogout }) => {
 
   // Calculate summary statistics
   const totalOrders = orders.length
-  const totalRevenue = orders
-    .filter(order => order.status === 'accepted')
+  const acceptedOrders = orders.filter(order => order.status === 'accepted')
+  const totalRevenue = acceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
-  const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+  const averageOrderValue = acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
 
   // Filter orders based on search term
   const filteredOrders = useMemo(() => {
@@ -330,11 +330,11 @@ const Dashboard = ({ onLogout }) => {
   // Calculate filtered summary statistics
   const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
   const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter(order => 
-    !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+    order.status === 'accepted'
   )
   const filteredTotalRevenue = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
-  const filteredAverageOrderValue = filteredTotalOrders > 0 ? filteredTotalRevenue / filteredTotalOrders : 0
+  const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
 
   // Debug logging for status filtering
   console.log('🔍 Status Filtering Debug:', {
