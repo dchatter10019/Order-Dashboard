@@ -13,7 +13,10 @@ const Dashboard = ({ onLogout }) => {
   const [apiError, setApiError] = useState(null)
   const [dateRange, setDateRange] = useState(() => {
     const today = new Date()
-    const todayString = today.toISOString().split('T')[0]
+    // Use local date instead of UTC to avoid timezone issues
+    const todayString = today.getFullYear() + '-' + 
+                       String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                       String(today.getDate()).padStart(2, '0')
     return {
       startDate: todayString,
       endDate: todayString

@@ -297,14 +297,20 @@ function createOrderFromCSV(headers, values, orderDate) {
                 const year = parseInt(dateParts[2])
                 const parsedDate = new Date(year, month, day)
                 if (!isNaN(parsedDate.getTime())) {
-                  order.orderDate = parsedDate.toISOString().split('T')[0]
+                  // Use local date instead of UTC to avoid timezone issues
+                  order.orderDate = parsedDate.getFullYear() + '-' + 
+                                   String(parsedDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(parsedDate.getDate()).padStart(2, '0')
                   console.log(`Parsed date "${value}" to "${order.orderDate}" for order ${order.id}`)
                 }
               } else {
                 // Fallback to original parsing for other formats
                 const parsedDate = new Date(value)
                 if (!isNaN(parsedDate.getTime())) {
-                  order.orderDate = parsedDate.toISOString().split('T')[0]
+                  // Use local date instead of UTC to avoid timezone issues
+                  order.orderDate = parsedDate.getFullYear() + '-' + 
+                                   String(parsedDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(parsedDate.getDate()).padStart(2, '0')
                   console.log(`Fallback parsed date "${value}" to "${order.orderDate}" for order ${order.id}`)
                 }
               }
@@ -341,7 +347,10 @@ function createOrderFromCSV(headers, values, orderDate) {
                 const month = parsedDeliveryDate.getMonth()
                 const day = parsedDeliveryDate.getDate()
                 const localDate = new Date(year, month, day)
-                order.deliveryDate = localDate.toISOString().split('T')[0]
+                // Use local date instead of UTC to avoid timezone issues
+                order.deliveryDate = localDate.getFullYear() + '-' + 
+                                   String(localDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(localDate.getDate()).padStart(2, '0')
                 // Also preserve the full deliveryDateTime for frontend display
                 order.deliveryDateTime = value
                 console.log(`Set deliveryDate to: ${order.deliveryDate} and deliveryDateTime to: ${order.deliveryDateTime}`)
@@ -497,7 +506,12 @@ app.get('/api/orders', async (req, res) => {
         error: 'Invalid date range',
         message: 'Cannot fetch orders for future dates. Please select dates up to today.',
         dateRange: { startDate, endDate },
-        today: today.toISOString().split('T')[0],
+        today: (() => {
+          const today = new Date()
+          return today.getFullYear() + '-' + 
+                 String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                 String(today.getDate()).padStart(2, '0')
+        })(),
         data: [],
         totalOrders: 0
       })
@@ -642,8 +656,18 @@ function splitDateRange(startDate, endDate, maxDays = 3) {
     }
     
     chunks.push({
-      startDate: currentDate.toISOString().split('T')[0],
-      endDate: chunkEnd.toISOString().split('T')[0]
+      startDate: (() => {
+        const date = new Date(currentDate)
+        return date.getFullYear() + '-' + 
+               String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+               String(date.getDate()).padStart(2, '0')
+      })(),
+      endDate: (() => {
+        const date = new Date(chunkEnd)
+        return date.getFullYear() + '-' + 
+               String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+               String(date.getDate()).padStart(2, '0')
+      })()
     })
     
     currentDate.setDate(currentDate.getDate() + maxDays)

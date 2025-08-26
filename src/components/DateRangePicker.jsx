@@ -79,7 +79,12 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
           <input
             id="startDate"
             type="date"
-            max={new Date().toISOString().split('T')[0]}
+            max={(() => {
+              const today = new Date()
+              return today.getFullYear() + '-' + 
+                     String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                     String(today.getDate()).padStart(2, '0')
+            })()}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-gray-50 text-gray-900 text-sm"
             value={dateRange.startDate}
             onChange={(e) => handleDateChange('startDate', e.target.value)}
@@ -93,7 +98,12 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
           <input
             id="endDate"
             type="date"
-            max={new Date().toISOString().split('T')[0]}
+            max={(() => {
+              const today = new Date()
+              return today.getFullYear() + '-' + 
+                     String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                     String(today.getDate()).padStart(2, '0')
+            })()}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200 bg-gray-50 text-gray-900 text-sm"
             value={dateRange.endDate}
             onChange={(e) => handleDateChange('endDate', e.target.value)}
