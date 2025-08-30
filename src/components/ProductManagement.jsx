@@ -348,11 +348,7 @@ const ProductManagement = () => {
                   </option>
                 ))}
               </select>
-              {/* Debug info */}
-              <div className="mt-1 text-xs text-gray-500">
-                Stores loaded: {stores.length} | 
-                Debug: {JSON.stringify(stores.slice(0, 2).map(s => ({ name: s.name || s.Name })))}
-              </div>
+
             </div>
 
             {/* Company Selection */}
@@ -373,11 +369,7 @@ const ProductManagement = () => {
                   </option>
                 ))}
               </select>
-              {/* Debug info */}
-              <div className="mt-1 text-xs text-gray-500">
-                Companies loaded: {companies.length} | 
-                Debug: {JSON.stringify(companies.slice(0, 2).map(c => ({ name: c.name || c.Name })))}
-              </div>
+
             </div>
 
             {/* Price Input */}
