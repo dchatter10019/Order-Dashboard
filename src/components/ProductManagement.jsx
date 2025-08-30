@@ -284,11 +284,7 @@ const ProductManagement = () => {
                   )}
                 </div>
               )}
-              {selectedProduct && (
-                <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md">
-                  <div className="text-sm font-medium text-blue-800">Selected: {selectedProduct}</div>
-                </div>
-              )}
+
             </div>
 
             {/* Store Selection */}
