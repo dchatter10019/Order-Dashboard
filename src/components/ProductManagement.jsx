@@ -61,11 +61,18 @@ const ProductManagement = () => {
     const file = event.target.files[0]
     if (!file) return
 
+    console.log(`📁 Uploading ${type} CSV file:`, file.name, 'Size:', file.size)
+
     const reader = new FileReader()
     reader.onload = (e) => {
       const csv = e.target.result
+      console.log(`📄 CSV content for ${type}:`, csv.substring(0, 200) + '...')
+      
       const lines = csv.split('\n')
+      console.log(`📊 Total lines in ${type} CSV:`, lines.length)
+      
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
+      console.log(`🏷️ Headers for ${type}:`, headers)
       
       const data = lines.slice(1).map(line => {
         const values = line.split(',').map(v => v.trim().replace(/"/g, ''))
@@ -75,6 +82,9 @@ const ProductManagement = () => {
         })
         return obj
       }).filter(item => Object.values(item).some(val => val !== ''))
+
+      console.log(`✅ Parsed ${type} data:`, data.length, 'items')
+      console.log(`📋 Sample ${type} data:`, data.slice(0, 2))
 
       switch (type) {
         case 'products':
@@ -93,6 +103,12 @@ const ProductManagement = () => {
           break
       }
     }
+    
+    reader.onerror = (error) => {
+      console.error(`❌ Error reading ${type} CSV:`, error)
+      setMessage(`Error reading ${type} CSV file`)
+    }
+    
     reader.readAsText(file)
   }
 
@@ -305,6 +321,11 @@ const ProductManagement = () => {
                   </option>
                 ))}
               </select>
+              {/* Debug info */}
+              <div className="mt-1 text-xs text-gray-500">
+                Stores loaded: {stores.length} | 
+                Debug: {JSON.stringify(stores.slice(0, 2).map(s => ({ name: s.name || s.Name })))}
+              </div>
             </div>
 
             {/* Company Selection */}
@@ -325,6 +346,11 @@ const ProductManagement = () => {
                   </option>
                 ))}
               </select>
+              {/* Debug info */}
+              <div className="mt-1 text-xs text-gray-500">
+                Companies loaded: {companies.length} | 
+                Debug: {JSON.stringify(companies.slice(0, 2).map(c => ({ name: c.name || c.Name })))}
+              </div>
             </div>
 
             {/* Price Input */}
