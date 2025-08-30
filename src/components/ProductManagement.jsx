@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Upload, Search, Plus, FileText, Store, Building, Package } from 'lucide-react'
 
 const ProductManagement = () => {
@@ -13,12 +13,31 @@ const ProductManagement = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [productSearchTerm, setProductSearchTerm] = useState('')
-  const [storeSearchTerm, setStoreSearchTerm] = useState('')
-  const [companySearchTerm, setCompanySearchTerm] = useState('')
   
   const fileInputRef = useRef(null)
+  const searchTimeoutRef = useRef(null)
 
-  // Handle CSV file uploads
+  // Debounced search function for better performance
+  const debouncedSearch = useCallback((searchTerm, setSearchTerm) => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      setSearchTerm(searchTerm)
+    }, 300) // 300ms delay
+  }, [])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+      }
+    }
+  }, [])
+
+    // Handle CSV file uploads
   const handleFileUpload = (event, type) => {
     const file = event.target.files[0]
     if (!file) return
@@ -58,34 +77,18 @@ const ProductManagement = () => {
     reader.readAsText(file)
   }
 
-  // Filter products by name or UPC
-  const filteredProducts = products.filter(product => {
+  // Filter products by name or UPC with debouncing for performance
+  const filteredProducts = useMemo(() => {
+    if (!productSearchTerm.trim()) return products.slice(0, 50) // Show first 50 if no search
+    
     const searchLower = productSearchTerm.toLowerCase()
-    return (
-      (product.name && product.name.toLowerCase().includes(searchLower)) ||
-      (product.upc && product.upc.toLowerCase().includes(searchLower)) ||
-      (product.Name && product.Name.toLowerCase().includes(searchLower)) ||
-      (product.UPC && product.UPC.toLowerCase().includes(searchLower))
-    )
-  })
-
-  // Filter stores by name
-  const filteredStores = stores.filter(store => {
-    const searchLower = storeSearchTerm.toLowerCase()
-    return (
-      (store.name && store.name.toLowerCase().includes(searchLower)) ||
-      (store.Name && store.Name.toLowerCase().includes(searchLower))
-    )
-  })
-
-  // Filter companies by name
-  const filteredCompanies = companies.filter(company => {
-    const searchLower = companySearchTerm.toLowerCase()
-    return (
-      (company.name && company.name.toLowerCase().includes(searchLower)) ||
-      (company.Name && company.Name.toLowerCase().includes(searchLower))
-    )
-  })
+    return products.filter(product => {
+      const name = (product.name || product.Name || '').toLowerCase()
+      const upc = (product.upc || product.UPC || '').toLowerCase()
+      
+      return name.includes(searchLower) || upc.includes(searchLower)
+    }).slice(0, 100) // Limit results to 100 for performance
+  }, [products, productSearchTerm])
 
   // Handle form submission
   const handleSubmit = async (e) => {
@@ -216,28 +219,34 @@ const ProductManagement = () => {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
-                  value={productSearchTerm}
-                  onChange={(e) => setProductSearchTerm(e.target.value)}
                   placeholder="Search products by name or UPC..."
+                  onChange={(e) => debouncedSearch(e.target.value, setProductSearchTerm)}
                   className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
               {productSearchTerm && (
                 <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
                   {filteredProducts.length > 0 ? (
-                    filteredProducts.map((product, index) => (
-                      <div
-                        key={index}
-                        onClick={() => {
-                          setSelectedProduct(product.name || product.Name)
-                          setProductSearchTerm(product.name || product.Name)
-                        }}
-                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                      >
-                        <div className="font-medium">{product.name || product.Name}</div>
-                        <div className="text-sm text-gray-500">{product.upc || product.UPC}</div>
-                      </div>
-                    ))
+                    <>
+                      {filteredProducts.map((product, index) => (
+                        <div
+                          key={index}
+                          onClick={() => {
+                            setSelectedProduct(product.name || product.Name)
+                            setProductSearchTerm('') // Clear search after selection
+                          }}
+                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="font-medium">{product.name || product.Name}</div>
+                          <div className="text-sm text-gray-500">{product.upc || product.UPC}</div>
+                        </div>
+                      ))}
+                      {filteredProducts.length === 100 && (
+                        <div className="px-3 py-2 text-xs text-gray-400 border-t border-gray-100">
+                          Showing first 100 results. Refine your search for more specific results.
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <div className="px-3 py-2 text-gray-500 text-sm">No products found</div>
                   )}
@@ -255,41 +264,19 @@ const ProductManagement = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Store *
               </label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  value={storeSearchTerm}
-                  onChange={(e) => setStoreSearchTerm(e.target.value)}
-                  placeholder="Search stores by name..."
-                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              {storeSearchTerm && (
-                <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
-                  {filteredStores.length > 0 ? (
-                    filteredStores.map((store, index) => (
-                      <div
-                        key={index}
-                        onClick={() => {
-                          setSelectedStore(store.name || store.Name)
-                          setStoreSearchTerm(store.name || store.Name)
-                        }}
-                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                      >
-                        <div className="font-medium">{store.name || store.Name}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-gray-500 text-sm">No stores found</div>
-                  )}
-                </div>
-              )}
-              {selectedStore && (
-                <div className="mt-2 px-3 py-2 bg-green-50 border border-green-200 rounded-md">
-                  <div className="text-sm font-medium text-green-800">Selected: {selectedStore}</div>
-                </div>
-              )}
+              <select
+                value={selectedStore}
+                onChange={(e) => setSelectedStore(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              >
+                <option value="">Select a store</option>
+                {stores.map((store, index) => (
+                  <option key={index} value={store.name || store.Name}>
+                    {store.name || store.Name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Company Selection */}
@@ -297,41 +284,19 @@ const ProductManagement = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Company *
               </label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <input
-                  type="text"
-                  value={companySearchTerm}
-                  onChange={(e) => setCompanySearchTerm(e.target.value)}
-                  placeholder="Search companies by name..."
-                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              {companySearchTerm && (
-                <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
-                  {filteredCompanies.length > 0 ? (
-                    filteredCompanies.map((company, index) => (
-                      <div
-                        key={index}
-                        onClick={() => {
-                          setSelectedCompany(company.name || company.Name)
-                          setCompanySearchTerm(company.name || company.Name)
-                        }}
-                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                      >
-                        <div className="font-medium">{company.name || company.Name}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-gray-500 text-sm">No companies found</div>
-                  )}
-                </div>
-              )}
-              {selectedCompany && (
-                <div className="mt-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-md">
-                  <div className="text-sm font-medium text-purple-800">Selected: {selectedCompany}</div>
-                </div>
-              )}
+              <select
+                value={selectedCompany}
+                onChange={(e) => setSelectedCompany(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              >
+                <option value="">Select a company</option>
+                {companies.map((company, index) => (
+                  <option key={index} value={company.name || company.Name}>
+                    {company.name || company.Name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Price Input */}
