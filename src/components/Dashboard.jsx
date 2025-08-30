@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { LogOut, Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
+import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
-import Logo from './Logo'
 
-const Dashboard = ({ onLogout }) => {
+const Dashboard = () => {
   console.log('🔍 Dashboard component rendering')
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -697,41 +696,24 @@ const Dashboard = ({ onLogout }) => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
-              <Logo size="default" />
-              <h1 className="text-xl font-semibold text-gray-700">Order Tracking Dashboard</h1>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={toggleAutoRefresh}
-                className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
-                  autoRefresh 
-                    ? 'bg-green-600 text-white hover:bg-green-700' 
-                    : 'bg-gray-600 text-white hover:bg-gray-700'
-                }`}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
-                {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
-              </button>
-              <button
-                onClick={onLogout}
-                className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-        </div>
-
+    <div className="bg-gray-50">
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Auto-Refresh Control */}
+        <div className="mb-6 flex justify-end">
+          <button
+            onClick={toggleAutoRefresh}
+            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+              autoRefresh 
+                ? 'bg-green-600 text-white hover:bg-green-700' 
+                : 'bg-gray-600 text-white hover:bg-gray-700'
+            }`}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
+            {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
+          </button>
+        </div>
+        
         {/* Date Range and Filters */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           {/* Date Range Filter */}
