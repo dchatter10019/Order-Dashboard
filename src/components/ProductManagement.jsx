@@ -74,6 +74,15 @@ const ProductManagement = () => {
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
       console.log(`🏷️ Headers for ${type}:`, headers)
       
+      // Check for common header variations
+      const hasNameHeader = headers.some(h => 
+        h.toLowerCase() === 'name' || 
+        h.toLowerCase() === 'company' || 
+        h.toLowerCase() === 'company_name' ||
+        h.toLowerCase() === 'companyname'
+      )
+      console.log(`🔍 Has name header: ${hasNameHeader}`, headers)
+      
       const data = lines.slice(1).map(line => {
         const values = line.split(',').map(v => v.trim().replace(/"/g, ''))
         const obj = {}
@@ -81,10 +90,28 @@ const ProductManagement = () => {
           obj[header] = values[index] || ''
         })
         return obj
-      }).filter(item => Object.values(item).some(val => val !== ''))
+      }).filter(item => {
+        // More flexible filtering - check for any meaningful data
+        const hasData = Object.values(item).some(val => val && val.trim() !== '')
+        console.log(`🔍 Filtering item:`, item, `Has data: ${hasData}`)
+        return hasData
+      })
 
       console.log(`✅ Parsed ${type} data:`, data.length, 'items')
       console.log(`📋 Sample ${type} data:`, data.slice(0, 2))
+      
+      // If no proper header found, try to use first column as name
+      if (!hasNameHeader && data.length > 0) {
+        console.log(`⚠️ No proper name header found, using first column as name`)
+        data.forEach(item => {
+          const firstKey = Object.keys(item)[0]
+          if (firstKey && item[firstKey]) {
+            item.name = item[firstKey]
+            item.Name = item[firstKey]
+          }
+        })
+        console.log(`🔄 Updated data with fallback names:`, data.slice(0, 2))
+      }
 
       switch (type) {
         case 'products':
