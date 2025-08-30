@@ -13,9 +13,11 @@ const ProductManagement = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [productSearchTerm, setProductSearchTerm] = useState('')
+  const [showProductDropdown, setShowProductDropdown] = useState(false)
   
   const fileInputRef = useRef(null)
   const searchTimeoutRef = useRef(null)
+  const productSearchRef = useRef(null)
 
   // Debounced search function for better performance
   const debouncedSearch = useCallback((searchTerm, setSearchTerm) => {
@@ -23,9 +25,12 @@ const ProductManagement = () => {
       clearTimeout(searchTimeoutRef.current)
     }
     
+    // Show dropdown immediately when typing
+    setShowProductDropdown(true)
+    
     searchTimeoutRef.current = setTimeout(() => {
       setSearchTerm(searchTerm)
-    }, 300) // 300ms delay
+    }, 200) // Reduced to 200ms for better responsiveness
   }, [])
 
   // Cleanup timeout on unmount
@@ -34,6 +39,20 @@ const ProductManagement = () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current)
       }
+    }
+  }, [])
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (productSearchRef.current && !productSearchRef.current.contains(event.target)) {
+        setShowProductDropdown(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [])
 
@@ -77,17 +96,28 @@ const ProductManagement = () => {
     reader.readAsText(file)
   }
 
-  // Filter products by name or UPC with debouncing for performance
+  // Filter products by name or UPC with better performance
   const filteredProducts = useMemo(() => {
-    if (!productSearchTerm.trim()) return products.slice(0, 50) // Show first 50 if no search
+    if (!productSearchTerm.trim()) return [] // Don't show anything until user types
     
     const searchLower = productSearchTerm.toLowerCase()
-    return products.filter(product => {
+    let count = 0
+    const results = []
+    
+    // Use a more efficient search with early termination
+    for (const product of products) {
+      if (count >= 50) break // Limit to 50 results for better performance
+      
       const name = (product.name || product.Name || '').toLowerCase()
       const upc = (product.upc || product.UPC || '').toLowerCase()
       
-      return name.includes(searchLower) || upc.includes(searchLower)
-    }).slice(0, 100) // Limit results to 100 for performance
+      if (name.includes(searchLower) || upc.includes(searchLower)) {
+        results.push(product)
+        count++
+      }
+    }
+    
+    return results
   }, [products, productSearchTerm])
 
   // Handle form submission
@@ -211,7 +241,7 @@ const ProductManagement = () => {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Product Selection */}
-            <div>
+            <div ref={productSearchRef}>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Product *
               </label>
@@ -225,7 +255,7 @@ const ProductManagement = () => {
                   className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
-              {productSearchTerm && (
+              {showProductDropdown && productSearchTerm && filteredProducts.length > 0 && (
                 <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
                   {filteredProducts.length > 0 ? (
                     <>
@@ -235,6 +265,7 @@ const ProductManagement = () => {
                           onClick={() => {
                             setSelectedProduct(product.name || product.Name)
                             setProductSearchTerm(product.name || product.Name) // Show selected product in search box
+                            setShowProductDropdown(false) // Hide dropdown after selection
                           }}
                           className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
                         >
