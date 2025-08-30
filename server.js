@@ -342,11 +342,9 @@ function createOrderFromCSV(headers, values, orderDate) {
               const parsedDeliveryDate = new Date(value)
               if (!isNaN(parsedDeliveryDate.getTime())) {
                 // Convert UTC to local date to handle timezone correctly
-                // This ensures midnight UTC dates are interpreted as the correct local date
-                const year = parsedDeliveryDate.getFullYear()
-                const month = parsedDeliveryDate.getMonth()
-                const day = parsedDeliveryDate.getDate()
-                const localDate = new Date(year, month, day)
+                // This ensures the date is interpreted in the local timezone
+                const localDate = new Date(parsedDeliveryDate.getTime() - (parsedDeliveryDate.getTimezoneOffset() * 60000))
+                
                 // Use local date instead of UTC to avoid timezone issues
                 order.deliveryDate = localDate.getFullYear() + '-' + 
                                    String(localDate.getMonth() + 1).padStart(2, '0') + '-' + 
@@ -493,24 +491,34 @@ app.get('/api/orders', async (req, res) => {
       })
     }
     
-    // Validate that dates are not in the future
+    // Validate that dates are not too far in the future (allow up to 7 days ahead for delivery scheduling)
     const today = new Date()
     today.setHours(23, 59, 59, 999) // End of today
+    
+    const maxFutureDate = new Date()
+    maxFutureDate.setDate(maxFutureDate.getDate() + 7) // Allow up to 7 days in the future
     
     const start = new Date(startDate)
     const end = new Date(endDate)
     
-    if (start > today || end > today) {
+    if (start > maxFutureDate || end > maxFutureDate) {
       return res.status(400).json({
         success: false,
         error: 'Invalid date range',
-        message: 'Cannot fetch orders for future dates. Please select dates up to today.',
+        message: 'Cannot fetch orders for dates more than 7 days in the future. Please select dates within the next week.',
         dateRange: { startDate, endDate },
         today: (() => {
           const today = new Date()
           return today.getFullYear() + '-' + 
                  String(today.getMonth() + 1).padStart(2, '0') + '-' + 
                  String(today.getDate()).padStart(2, '0')
+        })(),
+        maxFuture: (() => {
+          const maxFuture = new Date()
+          maxFuture.setDate(maxFuture.getDate() + 7)
+          return maxFuture.getFullYear() + '-' + 
+                 String(maxFuture.getMonth() + 1).padStart(2, '0') + '-' + 
+                 String(maxFuture.getDate()).padStart(2, '0')
         })(),
         data: [],
         totalOrders: 0
@@ -520,9 +528,29 @@ app.get('/api/orders', async (req, res) => {
     // Update auto-refresh range when new dates are requested
     updateAutoRefreshRange(startDate, endDate)
     
-    // Call the Bevvi API
-            const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${startDate}&endDate=${endDate}`
+    // Convert local dates to UTC before calling the Bevvi API
+    // This ensures we get orders that are scheduled for delivery on the requested local dates
+    const localStartDate = new Date(startDate + 'T00:00:00') // Start of day in local time
+    const localEndDate = new Date(endDate + 'T23:59:59') // End of day in local time
     
+    // Convert to UTC for API call
+    const utcStartDate = new Date(localStartDate.getTime() - (localStartDate.getTimezoneOffset() * 60000))
+    const utcEndDate = new Date(localEndDate.getTime() - (localEndDate.getTimezoneOffset() * 60000))
+    
+    // Format as YYYY-MM-DD for API
+    const utcStartString = utcStartDate.toISOString().split('T')[0]
+    const utcEndString = utcEndDate.toISOString().split('T')[0]
+    
+    // Call the Bevvi API with UTC dates
+    const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${utcStartString}&endDate=${utcEndString}`
+    
+    console.log('🕐 Converting local dates to UTC for API call:')
+    console.log('  Local requested range:', startDate, 'to', endDate)
+    console.log('  UTC API range:', utcStartString, 'to', utcEndString)
+    console.log('  Local start time:', localStartDate.toLocaleString())
+    console.log('  Local end time:', localEndDate.toLocaleString())
+    console.log('  UTC start time:', utcStartDate.toISOString())
+    console.log('  UTC end time:', utcEndDate.toISOString())
     console.log('Calling Bevvi API:', apiUrl)
     
     try {
@@ -570,16 +598,37 @@ app.get('/api/orders', async (req, res) => {
           console.log('CSV Data preview (first 200 chars):', csvData.substring(0, 200))
           
           // Parse the CSV data from the results field
-          const orders = parseCSVToOrders(csvData, startDate)
+          const allOrders = parseCSVToOrders(csvData, startDate)
+          
+          // Filter orders to show only those delivered within the requested local date range
+          // Since the API now returns UTC-based data, we need to compare properly
+          const filteredOrders = allOrders.filter(order => {
+            if (!order.deliveryDate || order.deliveryDate === 'N/A') {
+              // If no delivery date, include based on order date
+              return order.orderDate >= startDate && order.orderDate <= endDate
+            }
+            
+            // Filter by delivery date (primary) and order date (fallback)
+            // Both dates are now in the same timezone (local) for comparison
+            const deliveryInRange = order.deliveryDate >= startDate && order.deliveryDate <= endDate
+            const orderInRange = order.orderDate >= startDate && order.orderDate <= endDate
+            
+            return deliveryInRange || orderInRange
+          })
+          
+          console.log(`📊 Filtered orders: ${filteredOrders.length} out of ${allOrders.length} total orders`)
+          console.log(`📅 Requested range: ${startDate} to ${endDate}`)
+          console.log(`🔍 Orders with delivery dates in range: ${filteredOrders.filter(o => o.deliveryDate && o.deliveryDate !== 'N/A' && o.deliveryDate >= startDate && o.deliveryDate <= endDate).length}`)
+          console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate >= startDate && o.orderDate <= endDate).length}`)
           
           // Check if we got real orders from API
-          if (orders.length > 0 && orders[0].id && !orders[0].id.startsWith('ORD')) {
+          if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
             // Real orders from API
             return res.json({
               success: true,
-              data: orders,
+              data: filteredOrders,
               dateRange: { startDate, endDate },
-              totalOrders: orders.length,
+              totalOrders: filteredOrders.length,
               message: `Orders fetched for ${startDate} to ${endDate}`,
               source: 'Bevvi API',
               rawData: csvData.substring(0, 500) + '...' // First 500 chars for debugging
