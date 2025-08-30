@@ -12,7 +12,9 @@ const ProductManagement = () => {
   const [quantity, setQuantity] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
+  const [productSearchTerm, setProductSearchTerm] = useState('')
+  const [storeSearchTerm, setStoreSearchTerm] = useState('')
+  const [companySearchTerm, setCompanySearchTerm] = useState('')
   
   const fileInputRef = useRef(null)
 
@@ -58,7 +60,7 @@ const ProductManagement = () => {
 
   // Filter products by name or UPC
   const filteredProducts = products.filter(product => {
-    const searchLower = searchTerm.toLowerCase()
+    const searchLower = productSearchTerm.toLowerCase()
     return (
       (product.name && product.name.toLowerCase().includes(searchLower)) ||
       (product.upc && product.upc.toLowerCase().includes(searchLower)) ||
@@ -69,7 +71,7 @@ const ProductManagement = () => {
 
   // Filter stores by name
   const filteredStores = stores.filter(store => {
-    const searchLower = searchTerm.toLowerCase()
+    const searchLower = storeSearchTerm.toLowerCase()
     return (
       (store.name && store.name.toLowerCase().includes(searchLower)) ||
       (store.Name && store.Name.toLowerCase().includes(searchLower))
@@ -78,10 +80,10 @@ const ProductManagement = () => {
 
   // Filter companies by name
   const filteredCompanies = companies.filter(company => {
-    const searchLower = searchTerm.toLowerCase()
+    const searchLower = companySearchTerm.toLowerCase()
     return (
-      (store.name && company.name.toLowerCase().includes(searchLower)) ||
-      (store.Name && company.Name.toLowerCase().includes(searchLower))
+      (company.name && company.name.toLowerCase().includes(searchLower)) ||
+      (company.Name && company.Name.toLowerCase().includes(searchLower))
     )
   })
 
@@ -204,42 +206,48 @@ const ProductManagement = () => {
         <h3 className="text-xl font-semibold mb-6">Add Corporate Product</h3>
         
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Search Input */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Search Products, Stores, or Companies
-            </label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by name or UPC..."
-                className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Product Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Product *
               </label>
-              <select
-                value={selectedProduct}
-                onChange={(e) => setSelectedProduct(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Select a product</option>
-                {filteredProducts.map((product, index) => (
-                  <option key={index} value={product.name || product.Name}>
-                    {product.name || product.Name} - {product.upc || product.UPC}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={productSearchTerm}
+                  onChange={(e) => setProductSearchTerm(e.target.value)}
+                  placeholder="Search products by name or UPC..."
+                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              {productSearchTerm && (
+                <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
+                  {filteredProducts.length > 0 ? (
+                    filteredProducts.map((product, index) => (
+                      <div
+                        key={index}
+                        onClick={() => {
+                          setSelectedProduct(product.name || product.Name)
+                          setProductSearchTerm(product.name || product.Name)
+                        }}
+                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="font-medium">{product.name || product.Name}</div>
+                        <div className="text-sm text-gray-500">{product.upc || product.UPC}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-gray-500 text-sm">No products found</div>
+                  )}
+                </div>
+              )}
+              {selectedProduct && (
+                <div className="mt-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-md">
+                  <div className="text-sm font-medium text-blue-800">Selected: {selectedProduct}</div>
+                </div>
+              )}
             </div>
 
             {/* Store Selection */}
@@ -247,19 +255,41 @@ const ProductManagement = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Store *
               </label>
-              <select
-                value={selectedStore}
-                onChange={(e) => setSelectedStore(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Select a store</option>
-                {filteredStores.map((store, index) => (
-                  <option key={index} value={store.name || store.Name}>
-                    {store.name || store.Name}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={storeSearchTerm}
+                  onChange={(e) => setStoreSearchTerm(e.target.value)}
+                  placeholder="Search stores by name..."
+                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              {storeSearchTerm && (
+                <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
+                  {filteredStores.length > 0 ? (
+                    filteredStores.map((store, index) => (
+                      <div
+                        key={index}
+                        onClick={() => {
+                          setSelectedStore(store.name || store.Name)
+                          setStoreSearchTerm(store.name || store.Name)
+                        }}
+                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="font-medium">{store.name || store.Name}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-gray-500 text-sm">No stores found</div>
+                  )}
+                </div>
+              )}
+              {selectedStore && (
+                <div className="mt-2 px-3 py-2 bg-green-50 border border-green-200 rounded-md">
+                  <div className="text-sm font-medium text-green-800">Selected: {selectedStore}</div>
+                </div>
+              )}
             </div>
 
             {/* Company Selection */}
@@ -267,19 +297,41 @@ const ProductManagement = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Company *
               </label>
-              <select
-                value={selectedCompany}
-                onChange={(e) => setSelectedCompany(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Select a company</option>
-                {filteredCompanies.map((company, index) => (
-                  <option key={index} value={company.name || company.Name}>
-                    {company.name || company.Name}
-                  </option>
-                ))}
-              </select>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  value={companySearchTerm}
+                  onChange={(e) => setCompanySearchTerm(e.target.value)}
+                  placeholder="Search companies by name..."
+                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+              {companySearchTerm && (
+                <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
+                  {filteredCompanies.length > 0 ? (
+                    filteredCompanies.map((company, index) => (
+                      <div
+                        key={index}
+                        onClick={() => {
+                          setSelectedCompany(company.name || company.Name)
+                          setCompanySearchTerm(company.name || company.Name)
+                        }}
+                        className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="font-medium">{company.name || company.Name}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-gray-500 text-sm">No companies found</div>
+                  )}
+                </div>
+              )}
+              {selectedCompany && (
+                <div className="mt-2 px-3 py-2 bg-purple-50 border border-purple-200 rounded-md">
+                  <div className="text-sm font-medium text-purple-800">Selected: {selectedCompany}</div>
+                </div>
+              )}
             </div>
 
             {/* Price Input */}
