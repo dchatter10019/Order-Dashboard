@@ -219,6 +219,7 @@ const ProductManagement = () => {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
+                  value={productSearchTerm}
                   placeholder="Search products by name or UPC..."
                   onChange={(e) => debouncedSearch(e.target.value, setProductSearchTerm)}
                   className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -233,7 +234,7 @@ const ProductManagement = () => {
                           key={index}
                           onClick={() => {
                             setSelectedProduct(product.name || product.Name)
-                            setProductSearchTerm('') // Clear search after selection
+                            setProductSearchTerm(product.name || product.Name) // Show selected product in search box
                           }}
                           className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0"
                         >
