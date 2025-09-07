@@ -30,6 +30,9 @@ const Dashboard = () => {
   }, [deliveryFilter])
   const [selectedOrder, setSelectedOrder] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [orderDetails, setOrderDetails] = useState(null)
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false)
+  const [detailsError, setDetailsError] = useState(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(null)
   const [sortConfig, setSortConfig] = useState({
@@ -488,9 +491,59 @@ const Dashboard = () => {
 
 
 
+  // Fetch detailed order information from Bevvi API
+  const fetchOrderDetails = async (orderNumber) => {
+    try {
+      setIsLoadingDetails(true)
+      setDetailsError(null)
+      
+      console.log('🔍 Fetching order details for:', orderNumber)
+      console.log('🌐 API URL:', `https://api.getbevvi.com/api/corputil/getOrderInfo?orderNumber=${orderNumber}`)
+      
+      const response = await fetch(`/api/order-details/${orderNumber}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        }
+      })
+      
+      console.log('📡 Response status:', response.status)
+      console.log('📡 Response headers:', response.headers)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ API Error Response:', errorText)
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
+      }
+      
+      const data = await response.json()
+      console.log('📊 Order details response:', data)
+      console.log('📊 Products array:', data.products)
+      console.log('📊 Products count:', data.products ? data.products.length : 'No products array')
+      
+      setOrderDetails(data)
+    } catch (error) {
+      console.error('❌ Error fetching order details:', error)
+      console.error('❌ Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      })
+      setDetailsError({
+        message: 'Failed to fetch order details',
+        details: error.message
+      })
+    } finally {
+      setIsLoadingDetails(false)
+    }
+  }
+
   const closeModal = () => {
     setIsModalOpen(false)
     setSelectedOrder(null)
+    setOrderDetails(null)
+    setDetailsError(null)
   }
 
   useEffect(() => {
@@ -1124,8 +1177,18 @@ const Dashboard = () => {
                           <td className="px-3 py-4 text-sm font-medium text-gray-900">
                             <button
                               onClick={() => {
+                                console.log('🖱️ Order clicked:', order)
+                                console.log('🖱️ Order number:', order.ordernum || order.id)
                                 setSelectedOrder(order)
                                 setIsModalOpen(true)
+                                // Fetch detailed order information
+                                const orderNumber = order.ordernum || order.id
+                                if (orderNumber) {
+                                  console.log('🔄 Calling fetchOrderDetails for:', orderNumber)
+                                  fetchOrderDetails(orderNumber)
+                                } else {
+                                  console.error('❌ No order number found for order:', order)
+                                }
                               }}
                               className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer truncate block w-full text-left"
                               title={order.ordernum || order.id}
@@ -1261,8 +1324,12 @@ const Dashboard = () => {
       {isModalOpen && selectedOrder && (
         <OrderModal
           order={selectedOrder}
+          orderDetails={orderDetails}
           isOpen={isModalOpen}
           onClose={closeModal}
+          isLoadingDetails={isLoadingDetails}
+          detailsError={detailsError}
+          setOrderDetails={setOrderDetails}
         />
       )}
     </div>

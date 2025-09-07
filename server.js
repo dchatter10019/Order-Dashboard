@@ -879,6 +879,33 @@ app.get('/api/health', (req, res) => {
   })
 })
 
+// Proxy endpoint for order details API
+app.get('/api/order-details/:orderNumber', async (req, res) => {
+  try {
+    const { orderNumber } = req.params
+    console.log('🔍 Proxying order details request for:', orderNumber)
+    
+    const response = await axios.get(`https://api.getbevvi.com/api/corputil/getOrderInfo?orderNumber=${orderNumber}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000
+    })
+    
+    console.log('📊 Order details response status:', response.status)
+    console.log('📊 Order details response data:', response.data)
+    
+    res.json(response.data)
+  } catch (error) {
+    console.error('❌ Error proxying order details:', error.message)
+    res.status(500).json({
+      error: 'Failed to fetch order details',
+      message: error.message
+    })
+  }
+})
+
 // Auto-refresh control endpoints
 app.post('/api/auto-refresh/start', (req, res) => {
   const { startDate, endDate } = req.body
