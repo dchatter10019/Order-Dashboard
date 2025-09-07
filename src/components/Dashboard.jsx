@@ -342,6 +342,8 @@ const Dashboard = () => {
   )
   const filteredTotalRevenue = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+  const filteredTotalRevenueBasedOnTotal = filteredAcceptedOrders
+    .reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0)
   const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
 
   // Debug logging for status filtering
@@ -938,11 +940,15 @@ const Dashboard = () => {
                     <span className="font-medium">${filteredTotalRevenue.toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between">
+                    <span>Total Revenue (Based on Total):</span>
+                    <span className="font-medium">${filteredTotalRevenueBasedOnTotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between">
                     <span>Accepted Orders Count:</span>
                     <span className="font-medium">{filteredAcceptedOrders.length}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Average per Order:</span>
+                    <span>AOV (On Base Total):</span>
                     <span className="font-medium">${filteredAcceptedOrders.length > 0 ? (filteredTotalRevenue / filteredAcceptedOrders.length).toFixed(2) : '0.00'}</span>
                   </div>
                 </div>
