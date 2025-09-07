@@ -26,7 +26,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
           <input
             type="checkbox"
             name="selectAll"
-            checked={statusFilter.length === 0 || statusFilter.length === statusOptions.length}
+            checked={statusFilter.length === statusOptions.length}
             onChange={(e) => {
               if (e.target.checked) {
                 // Select all options
@@ -50,7 +50,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
               type="checkbox"
               name="statusFilter"
               value={option.value}
-              checked={statusFilter.length === 0 || statusFilter.includes(option.value)}
+              checked={statusFilter.includes(option.value)}
               onChange={(e) => {
                 const value = e.target.value
                 if (e.target.checked) {

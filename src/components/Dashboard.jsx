@@ -210,9 +210,10 @@ const Dashboard = () => {
         }
         
         // For specific date filters, check if order has valid delivery information
+        // If no delivery date, include the order (don't exclude it)
         if (!order.deliveryDate || order.deliveryDate === 'N/A' || order.deliveryDate === 'null' || order.deliveryDate === 'undefined') {
-          console.log(`🔍 Order ${order.id} has no valid delivery date: ${order.deliveryDate} - EXCLUDING from delivery filter`)
-          return false
+          console.log(`🔍 Order ${order.id} has no valid delivery date: ${order.deliveryDate} - INCLUDING in results (no delivery date filter applied)`)
+          return true
         }
         
         // Check ALL selected filters and return true if ANY match (OR logic)
