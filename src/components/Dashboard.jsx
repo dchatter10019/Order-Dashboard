@@ -1072,7 +1072,7 @@ const Dashboard = () => {
           {!isLoading && !apiError && (
             <div>
               {filteredOrdersByStatusAndDelivery.length > 0 ? (
-            <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg max-w-full">
+            <div className="overflow-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg max-w-full max-h-96">
               <table className="w-full table-auto divide-y divide-gray-200 min-w-0">
                     <thead className="bg-gray-50">
                   <tr>
