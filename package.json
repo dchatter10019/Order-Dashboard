@@ -1,6 +1,6 @@
 {
   "name": "bevvi-order-tracking-system",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bevvi Order Tracking System with authentication and filtering capabilities",
   "main": "index.js",
   "scripts": {
