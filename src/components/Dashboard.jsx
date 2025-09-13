@@ -1307,7 +1307,8 @@ const Dashboard = () => {
             )}
             <div className="text-gray-300">
               Orders: {orders.length} | 
-              Total: ${orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0).toFixed(2)}
+              Total: ${orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0).toFixed(2)} |
+              v1.0.0
             </div>
           </div>
         </div>
