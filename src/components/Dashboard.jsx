@@ -218,8 +218,17 @@ const Dashboard = () => {
           const todayString = today.getFullYear() + '-' + 
                              String(today.getMonth() + 1).padStart(2, '0') + '-' + 
                              String(today.getDate()).padStart(2, '0')
-          const deliveryDate = order.deliveryDate
-          const isToday = deliveryDate === todayString
+          
+          // Convert UTC delivery date to local date for comparison
+          let localDeliveryDate = order.deliveryDate
+          if (order.deliveryDateTime) {
+            const utcDeliveryDate = new Date(order.deliveryDateTime)
+            localDeliveryDate = utcDeliveryDate.getFullYear() + '-' + 
+                               String(utcDeliveryDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                               String(utcDeliveryDate.getDate()).padStart(2, '0')
+          }
+          
+          const isToday = localDeliveryDate === todayString
           if (isToday) shouldShow = true
         }
         
@@ -229,8 +238,17 @@ const Dashboard = () => {
           const tomorrowString = tomorrow.getFullYear() + '-' + 
                                 String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + 
                                 String(tomorrow.getDate()).padStart(2, '0')
-          const deliveryDate = order.deliveryDate
-          const isTomorrow = deliveryDate === tomorrowString
+          
+          // Convert UTC delivery date to local date for comparison
+          let localDeliveryDate = order.deliveryDate
+          if (order.deliveryDateTime) {
+            const utcDeliveryDate = new Date(order.deliveryDateTime)
+            localDeliveryDate = utcDeliveryDate.getFullYear() + '-' + 
+                               String(utcDeliveryDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                               String(utcDeliveryDate.getDate()).padStart(2, '0')
+          }
+          
+          const isTomorrow = localDeliveryDate === tomorrowString
           if (isTomorrow) shouldShow = true
         }
         
@@ -242,7 +260,12 @@ const Dashboard = () => {
           const endOfWeek = new Date(startOfWeek)
           endOfWeek.setDate(startOfWeek.getDate() + 6) // End of week (Saturday)
           
-          const deliveryDate = new Date(order.deliveryDate)
+          // Convert UTC delivery date to local date for comparison
+          let deliveryDate = new Date(order.deliveryDate)
+          if (order.deliveryDateTime) {
+            deliveryDate = new Date(order.deliveryDateTime)
+          }
+          
           const isThisWeek = deliveryDate >= startOfWeek && deliveryDate <= endOfWeek
           
           if (isThisWeek) shouldShow = true
@@ -256,7 +279,12 @@ const Dashboard = () => {
           const endOfNextWeek = new Date(startOfNextWeek)
           endOfNextWeek.setDate(startOfNextWeek.getDate() + 6) // End of next week
           
-          const deliveryDate = new Date(order.deliveryDate)
+          // Convert UTC delivery date to local date for comparison
+          let deliveryDate = new Date(order.deliveryDate)
+          if (order.deliveryDateTime) {
+            deliveryDate = new Date(order.deliveryDateTime)
+          }
+          
           const isNextWeek = deliveryDate >= startOfNextWeek && deliveryDate <= endOfNextWeek
           
           if (isNextWeek) shouldShow = true
@@ -1201,25 +1229,29 @@ const Dashboard = () => {
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={order.deliveryDate}>
-                              {order.deliveryDate}
+                              {(() => {
+                                // Convert UTC delivery date to local date for display
+                                if (order.deliveryDate === 'N/A') return 'N/A'
+                                if (order.deliveryDateTime) {
+                                  const utcDate = new Date(order.deliveryDateTime)
+                                  const localDate = utcDate.getFullYear() + '-' + 
+                                                   String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                                   String(utcDate.getDate()).padStart(2, '0')
+                                  return localDate
+                                }
+                                return order.deliveryDate
+                              })()}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={order.deliveryDateTime ? new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : 'N/A'}>
-                              {(() => {
-                                console.log('🕐 Delivery Time Debug:', {
-                                  orderId: order.id,
-                                  deliveryDateTime: order.deliveryDateTime,
-                                  parsed: order.deliveryDateTime ? new Date(order.deliveryDateTime) : null
-                                })
-                                return order.deliveryDateTime ? 
-                                  new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
-                                    hour: 'numeric', 
-                                    minute: '2-digit',
-                                    hour12: true 
-                                  }) : 
-                                  'N/A'
-                              })()}
+                              {order.deliveryDateTime ? 
+                                new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
+                                  hour: 'numeric', 
+                                  minute: '2-digit',
+                                  hour12: true 
+                                }) : 
+                                'N/A'}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">

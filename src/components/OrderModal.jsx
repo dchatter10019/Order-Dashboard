@@ -187,12 +187,22 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                 <div>
                   <p className="text-sm font-medium text-gray-600">Expected Delivery</p>
                   <p className="text-gray-900">
-                    {order.deliveryDate === 'N/A' ? 'N/A' : new Date(order.deliveryDate + 'T00:00:00').toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
+                    {order.deliveryDate === 'N/A' ? 'N/A' : (() => {
+                      // Convert UTC delivery date to local date for display
+                      let displayDate = order.deliveryDate
+                      if (order.deliveryDateTime) {
+                        const utcDate = new Date(order.deliveryDateTime)
+                        displayDate = utcDate.getFullYear() + '-' + 
+                                     String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                     String(utcDate.getDate()).padStart(2, '0')
+                      }
+                      return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })
+                    })()}
                   </p>
                 </div>
               </div>
@@ -409,11 +419,21 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                   <div className="flex justify-between items-center py-2">
                     <span className="text-sm font-medium text-amber-700">Delivery Date</span>
                     <span className="font-semibold text-amber-900">
-                      {order.deliveryDate === 'N/A' ? 'N/A' : new Date(order.deliveryDate + 'T00:00:00').toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric'
-                      })}
+                      {order.deliveryDate === 'N/A' ? 'N/A' : (() => {
+                        // Convert UTC delivery date to local date for display
+                        let displayDate = order.deliveryDate
+                        if (order.deliveryDateTime) {
+                          const utcDate = new Date(order.deliveryDateTime)
+                          displayDate = utcDate.getFullYear() + '-' + 
+                                       String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                       String(utcDate.getDate()).padStart(2, '0')
+                        }
+                        return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        })
+                      })()}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2">

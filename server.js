@@ -341,14 +341,10 @@ function createOrderFromCSV(headers, values, orderDate) {
             try {
               const parsedDeliveryDate = new Date(value)
               if (!isNaN(parsedDeliveryDate.getTime())) {
-                // Convert UTC to local date to handle timezone correctly
-                // This ensures the date is interpreted in the local timezone
-                const localDate = new Date(parsedDeliveryDate.getTime() - (parsedDeliveryDate.getTimezoneOffset() * 60000))
-                
-                // Use local date instead of UTC to avoid timezone issues
-                order.deliveryDate = localDate.getFullYear() + '-' + 
-                                   String(localDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                   String(localDate.getDate()).padStart(2, '0')
+                // Keep the UTC date as-is, frontend will handle timezone conversion for filtering
+                order.deliveryDate = parsedDeliveryDate.getUTCFullYear() + '-' + 
+                                   String(parsedDeliveryDate.getUTCMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(parsedDeliveryDate.getUTCDate()).padStart(2, '0')
                 // Also preserve the full deliveryDateTime for frontend display
                 order.deliveryDateTime = value
                 console.log(`Set deliveryDate to: ${order.deliveryDate} and deliveryDateTime to: ${order.deliveryDateTime}`)
