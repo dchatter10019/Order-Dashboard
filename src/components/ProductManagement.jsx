@@ -158,11 +158,22 @@ const ProductManagement = () => {
         }
         const encodedFilter = encodeURIComponent(JSON.stringify(filter))
         
-        const response = await fetch(`https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}`)
+        // Add cache-busting timestamp to ensure fresh data
+        const cacheBuster = `t=${Date.now()}`
+        const response = await fetch(
+          `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
+          {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          }
+        )
         if (!response.ok) throw new Error('Search failed')
         
         const data = await response.json()
         const results = Array.isArray(data) ? data : (data.results || [])
+        console.log(`🔍 Search for "${debouncedSearchTerm}" found ${results.length} results`)
         setSearchResults(results)
       } catch (error) {
         console.error('Search error:', error)
@@ -212,7 +223,7 @@ const ProductManagement = () => {
       const result = await response.json()
 
       if (response.ok) {
-        setMessage('Product added successfully!')
+        setMessage('✓ Product added successfully! Note: Search results update in real-time from the API.')
         // Reset form
         setSelectedProduct('')
         setProductSearchTerm('')
@@ -222,6 +233,7 @@ const ProductManagement = () => {
         setPrice('')
         setQuantity('')
         setShowProductDropdown(false)
+        setSearchResults([])
       } else {
         setMessage(`Error: ${result.message || 'Failed to add product'}`)
       }
@@ -337,6 +349,24 @@ const ProductManagement = () => {
         )}
       </div>
 
+      {/* Info about real-time updates */}
+      {message.includes('successfully') && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <Package className="h-5 w-5 text-green-600 mt-0.5" />
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-green-800">Product Updates</h3>
+              <div className="mt-2 text-sm text-green-700">
+                <p>Every search queries the API in real-time, so product masterlist updates are always reflected.</p>
+                <p className="mt-1 text-xs">If you don't see an update, click the "Refresh Search" button or re-type your search.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Product Management Form */}
       <div className="bg-white p-6 rounded-lg shadow-md border">
         <h3 className="text-xl font-semibold mb-6">Add Corporate Product</h3>
@@ -345,8 +375,22 @@ const ProductManagement = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Product Selection */}
             <div ref={productSearchRef} className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Product *
+              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
+                <span>Product *</span>
+                {productSearchTerm.length >= 3 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Force re-search by updating the debounced term
+                      setDebouncedSearchTerm('')
+                      setTimeout(() => setDebouncedSearchTerm(productSearchTerm), 10)
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    Refresh Search
+                  </button>
+                )}
               </label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
