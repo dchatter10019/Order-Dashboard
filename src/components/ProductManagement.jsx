@@ -2,14 +2,7 @@ import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Search, Plus, Store, Building, Package, RefreshCw } from 'lucide-react'
 
 const ProductManagement = () => {
-  // Load catalog last updated time from sessionStorage
-  useEffect(() => {
-    const lastUpdated = sessionStorage.getItem('bevvi_catalog_updated')
-    if (lastUpdated) {
-      setCatalogLastUpdated(new Date(lastUpdated))
-    }
-  }, [])
-  
+  // State declarations first
   const [products, setProducts] = useState(() => {
     try {
       const saved = sessionStorage.getItem('bevvi_products')
@@ -42,9 +35,21 @@ const ProductManagement = () => {
   const [productSearchTerm, setProductSearchTerm] = useState('')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [showProductDropdown, setShowProductDropdown] = useState(false)
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState([])
+  const [isRefreshingCatalog, setIsRefreshingCatalog] = useState(false)
+  const [catalogLastUpdated, setCatalogLastUpdated] = useState(null)
   
   const searchTimeoutRef = useRef(null)
   const productSearchRef = useRef(null)
+
+  // Load catalog last updated time from sessionStorage
+  useEffect(() => {
+    const lastUpdated = sessionStorage.getItem('bevvi_catalog_updated')
+    if (lastUpdated) {
+      setCatalogLastUpdated(new Date(lastUpdated))
+    }
+  }, [])
 
   // Debounce only the filtering, not the input value
   useEffect(() => {
@@ -154,12 +159,6 @@ const ProductManagement = () => {
     }
   }
 
-  // State for live search results
-  const [isSearching, setIsSearching] = useState(false)
-  const [searchResults, setSearchResults] = useState([])
-  const [isRefreshingCatalog, setIsRefreshingCatalog] = useState(false)
-  const [catalogLastUpdated, setCatalogLastUpdated] = useState(null)
-  
   // Search products - use local catalog if available, otherwise API search
   useEffect(() => {
     const searchProducts = async () => {
