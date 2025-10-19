@@ -2,12 +2,23 @@ import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Search, Plus, Store, Building, Package, RefreshCw } from 'lucide-react'
 
 const ProductManagement = () => {
-  // Clear any old product cache (we now use on-demand search)
+  // Load catalog last updated time from sessionStorage
   useEffect(() => {
-    sessionStorage.removeItem('bevvi_products')
+    const lastUpdated = sessionStorage.getItem('bevvi_catalog_updated')
+    if (lastUpdated) {
+      setCatalogLastUpdated(new Date(lastUpdated))
+    }
   }, [])
   
-  const [products, setProducts] = useState([]) // Not used anymore, kept for compatibility
+  const [products, setProducts] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('bevvi_products')
+      return saved ? JSON.parse(saved) : []
+    } catch (error) {
+      console.error('Error loading products from sessionStorage:', error)
+      return []
+    }
+  })
   const [stores, setStores] = useState(() => {
     try {
       const saved = sessionStorage.getItem('bevvi_stores')
@@ -66,12 +77,26 @@ const ProductManagement = () => {
     }
   }, [])
 
+  // Persist products to sessionStorage whenever they change
+  useEffect(() => {
+    if (products.length > 0) {
+      sessionStorage.setItem('bevvi_products', JSON.stringify(products))
+    }
+  }, [products])
+
   // Persist stores to sessionStorage whenever they change
   useEffect(() => {
     if (stores.length > 0) {
       sessionStorage.setItem('bevvi_stores', JSON.stringify(stores))
     }
   }, [stores])
+
+  // Persist catalog update time
+  useEffect(() => {
+    if (catalogLastUpdated) {
+      sessionStorage.setItem('bevvi_catalog_updated', catalogLastUpdated.toISOString())
+    }
+  }, [catalogLastUpdated])
 
   // Load only stores on mount (products loaded on-demand during search)
   useEffect(() => {
@@ -132,8 +157,10 @@ const ProductManagement = () => {
   // State for live search results
   const [isSearching, setIsSearching] = useState(false)
   const [searchResults, setSearchResults] = useState([])
+  const [isRefreshingCatalog, setIsRefreshingCatalog] = useState(false)
+  const [catalogLastUpdated, setCatalogLastUpdated] = useState(null)
   
-  // Search products from API as user types (on-demand search)
+  // Search products - use local catalog if available, otherwise API search
   useEffect(() => {
     const searchProducts = async () => {
       if (!debouncedSearchTerm || debouncedSearchTerm.length < 3) {
@@ -143,51 +170,133 @@ const ProductManagement = () => {
       
       setIsSearching(true)
       try {
-        // Search API with the search term
-        const filter = {
-          where: {
-            client: "airculinaire",
-            isActive: true,
-            or: [
-              { name: { like: debouncedSearchTerm, options: 'i' } },
-              { upc: { like: debouncedSearchTerm, options: 'i' } }
-            ]
-          },
-          fields: { name: true, upc: true, id: true },
-          limit: 100
-        }
-        const encodedFilter = encodeURIComponent(JSON.stringify(filter))
-        
-        // Add cache-busting timestamp to ensure fresh data
-        const cacheBuster = `t=${Date.now()}`
-        const response = await fetch(
-          `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
-          {
-            headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache'
-            }
+        // If we have products loaded locally, search them (faster)
+        if (products.length > 0) {
+          console.log(`🔍 Searching local catalog for "${debouncedSearchTerm}"`)
+          const searchLower = debouncedSearchTerm.toLowerCase().trim()
+          const filtered = products.filter(p => {
+            const name = (p.name || p.Name || '').toLowerCase()
+            const upc = (p.upc || p.UPC || '').toString().toLowerCase()
+            return name.includes(searchLower) || upc.includes(searchLower)
+          }).slice(0, 100)
+          console.log(`✅ Found ${filtered.length} results in local catalog`)
+          setSearchResults(filtered)
+          setIsSearching(false)
+        } else {
+          // Otherwise, search API directly
+          console.log(`🔍 Searching API for "${debouncedSearchTerm}"`)
+          const filter = {
+            where: {
+              client: "airculinaire",
+              isActive: true,
+              or: [
+                { name: { like: debouncedSearchTerm, options: 'i' } },
+                { upc: { like: debouncedSearchTerm, options: 'i' } }
+              ]
+            },
+            fields: { name: true, upc: true, id: true },
+            limit: 100
           }
-        )
-        if (!response.ok) throw new Error('Search failed')
-        
-        const data = await response.json()
-        const results = Array.isArray(data) ? data : (data.results || [])
-        console.log(`🔍 Search for "${debouncedSearchTerm}" found ${results.length} results`)
-        setSearchResults(results)
+          const encodedFilter = encodeURIComponent(JSON.stringify(filter))
+          
+          // Add cache-busting timestamp to ensure fresh data
+          const cacheBuster = `t=${Date.now()}`
+          const response = await fetch(
+            `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
+            {
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
+            }
+          )
+          if (!response.ok) throw new Error('Search failed')
+          
+          const data = await response.json()
+          const results = Array.isArray(data) ? data : (data.results || [])
+          console.log(`✅ API search found ${results.length} results`)
+          setSearchResults(results)
+          setIsSearching(false)
+        }
       } catch (error) {
         console.error('Search error:', error)
         setSearchResults([])
-      } finally {
         setIsSearching(false)
       }
     }
     
     searchProducts()
-  }, [debouncedSearchTerm])
+  }, [debouncedSearchTerm, products])
   
   // Use search results instead of filtering local data
   const filteredProducts = searchResults
+
+  // Function to refresh entire product catalog from API
+  const refreshProductCatalog = async () => {
+    setIsRefreshingCatalog(true)
+    setMessage('⏳ Fetching latest product catalog from server...')
+    
+    try {
+      // Fetch all active products with minimal fields (name, upc, id only)
+      // This keeps the payload small (~2-3MB for all products) to prevent freezing
+      const filter = {
+        where: { client: "airculinaire", isActive: true },
+        fields: { name: true, upc: true, id: true }
+      }
+      const encodedFilter = encodeURIComponent(JSON.stringify(filter))
+      const cacheBuster = `t=${Date.now()}`
+      
+      console.log('🔄 Refreshing entire product catalog from server...')
+      console.time('Catalog Refresh')
+      
+      const response = await fetch(
+        `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
+        {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        }
+      )
+      
+      if (!response.ok) throw new Error(`Server error: ${response.status}`)
+      
+      console.log('📥 Parsing server response...')
+      const data = await response.json()
+      const productsList = Array.isArray(data) ? data : (data.results || [])
+      
+      console.timeEnd('Catalog Refresh')
+      console.log(`✅ Catalog refreshed: ${productsList.length} products loaded from server`)
+      
+      // Update state asynchronously (React will batch this)
+      await new Promise(resolve => {
+        setProducts(productsList)
+        setCatalogLastUpdated(new Date())
+        
+        // If user is currently searching, re-run their search with new data
+        if (debouncedSearchTerm && debouncedSearchTerm.length >= 3) {
+          const searchLower = debouncedSearchTerm.toLowerCase().trim()
+          const filtered = productsList.filter(p => {
+            const name = (p.name || p.Name || '').toLowerCase()
+            const upc = (p.upc || p.UPC || '').toString().toLowerCase()
+            return name.includes(searchLower) || upc.includes(searchLower)
+          }).slice(0, 100)
+          setSearchResults(filtered)
+          console.log(`🔍 Re-filtered search: ${filtered.length} results for "${debouncedSearchTerm}"`)
+        }
+        
+        setTimeout(resolve, 0)
+      })
+      
+      setMessage(`✅ Catalog refreshed! ${productsList.length.toLocaleString()} products loaded. Search is now instant!`)
+    } catch (error) {
+      console.error('❌ Error refreshing catalog:', error)
+      setMessage(`❌ Error: ${error.message}. Try again or search directly via API.`)
+    } finally {
+      setIsRefreshingCatalog(false)
+    }
+  }
 
   // Handle form submission
   const handleSubmit = async (e) => {
@@ -251,18 +360,18 @@ const ProductManagement = () => {
         <p className="text-gray-600">Manage product inventory across stores for airculinaire</p>
       </div>
 
-      {/* Helpful banner for on-demand search */}
-      {stores.length === 0 && !isLoadingData && (
+      {/* Helpful banner for catalog refresh */}
+      {products.length === 0 && stores.length === 0 && !isLoadingData && (
         <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-start">
             <div className="flex-shrink-0">
               <Package className="h-5 w-5 text-blue-600 mt-0.5" />
             </div>
             <div className="ml-3 flex-1">
-              <h3 className="text-sm font-medium text-blue-800">Smart Product Search</h3>
+              <h3 className="text-sm font-medium text-blue-800">Product Catalog</h3>
               <div className="mt-2 text-sm text-blue-700">
-                <p>Products are searched on-demand as you type. No bulk loading required!</p>
-                <p className="mt-1 text-xs">Stores will load automatically. Just start searching for products.</p>
+                <p>Click the "Refresh" button in the Products card to load the latest product catalog from the server.</p>
+                <p className="mt-1 text-xs">After loading, search will be instant! Or just start typing to search the API directly.</p>
               </div>
             </div>
           </div>
@@ -273,12 +382,40 @@ const ProductManagement = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         {/* Products Status */}
         <div className="bg-white p-6 rounded-lg shadow-md border">
-          <div className="flex items-center mb-4">
-            <Package className="w-6 h-6 text-blue-600 mr-3" />
-            <h3 className="text-lg font-semibold">Products</h3>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center">
+              <Package className="w-6 h-6 text-blue-600 mr-3" />
+              <h3 className="text-lg font-semibold">Products</h3>
+            </div>
+            <button
+              onClick={refreshProductCatalog}
+              disabled={isRefreshingCatalog}
+              className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center"
+              title="Refresh product catalog from server"
+            >
+              {isRefreshingCatalog ? (
+                <>
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
+                  Syncing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  Refresh
+                </>
+              )}
+            </button>
           </div>
-          <p className="text-sm text-gray-500 mt-2">On-Demand Search</p>
-          <p className="text-sm text-green-600 mt-2">✓ Type to search products live</p>
+          <p className="text-sm text-gray-500 mt-2">
+            {products.length > 0 
+              ? `${products.length.toLocaleString()} products in catalog`
+              : 'On-Demand Search'}
+          </p>
+          {catalogLastUpdated && (
+            <p className="text-xs text-gray-400 mt-1">
+              Last updated: {catalogLastUpdated.toLocaleTimeString()}
+            </p>
+          )}
           {searchResults.length > 0 && (
             <p className="text-xs text-blue-600 mt-1">{searchResults.length} results found</p>
           )}
@@ -312,39 +449,45 @@ const ProductManagement = () => {
         </div>
       </div>
 
-      {/* Refresh Data Button */}
+      {/* Action Buttons */}
       <div className="mb-8 flex justify-center gap-4">
-        <button
-          onClick={loadDataFromAPIs}
-          disabled={isLoadingData}
-          className="flex items-center px-6 py-3 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {isLoadingData ? (
-            <>
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-              Loading Stores...
-            </>
-          ) : (
-            <>
-              <RefreshCw className="w-5 h-5 mr-2" />
-              Refresh Stores
-            </>
-          )}
-        </button>
+        {stores.length === 0 && (
+          <button
+            onClick={loadDataFromAPIs}
+            disabled={isLoadingData}
+            className="flex items-center px-6 py-3 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoadingData ? (
+              <>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                Loading Stores...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-5 h-5 mr-2" />
+                Load Stores
+              </>
+            )}
+          </button>
+        )}
         
-        {stores.length > 0 && (
+        {(stores.length > 0 || products.length > 0) && (
           <button
             onClick={() => {
               sessionStorage.removeItem('bevvi_stores')
+              sessionStorage.removeItem('bevvi_products')
+              sessionStorage.removeItem('bevvi_catalog_updated')
               setStores([])
+              setProducts([])
               setSearchResults([])
               setProductSearchTerm('')
               setDebouncedSearchTerm('')
-              setMessage('Cache cleared. Click "Refresh Stores" to reload.')
+              setCatalogLastUpdated(null)
+              setMessage('Cache cleared. Use "Refresh" buttons to reload data.')
             }}
             className="flex items-center px-4 py-3 bg-gray-500 text-white font-medium rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >
-            Clear Cache
+            Clear All Cache
           </button>
         )}
       </div>
