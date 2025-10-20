@@ -157,7 +157,8 @@ const ProductManagement = () => {
           {
             headers: {
               'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache'
+              'Pragma': 'no-cache',
+              'Expires': '0'
             }
           }
         )
@@ -266,8 +267,9 @@ const ProductManagement = () => {
               <div className="mt-2 text-sm text-blue-700">
                 <p>Just start typing (3+ characters) to search across 50,000+ products!</p>
                 <p className="mt-1 text-xs">✓ Fast API search (~300ms)</p>
-                <p className="mt-1 text-xs">✓ Always fresh data from server</p>
-                <p className="mt-1 text-xs">✓ No freezing, no waiting</p>
+                <p className="mt-1 text-xs">✓ Always fresh data from server (no caching)</p>
+                <p className="mt-1 text-xs">✓ New products from Bevvi master list appear immediately</p>
+                <p className="mt-1 text-xs">✓ "Refresh Search" button available when needed</p>
               </div>
             </div>
           </div>
@@ -366,8 +368,14 @@ const ProductManagement = () => {
             <div className="ml-3 flex-1">
               <h3 className="text-sm font-medium text-green-800">Product Mapping Saved!</h3>
               <div className="mt-2 text-sm text-green-700">
-                <p>Your product mapping is saved. All searches query the API in real-time with latest data.</p>
-                <p className="mt-1 text-xs">Products added in Bevvi admin appear instantly in search results.</p>
+                <p>Your product mapping is saved and ready to use.</p>
+                <p className="mt-2"><strong>💡 Fresh Product Search:</strong></p>
+                <ul className="list-disc list-inside mt-1 text-xs space-y-1">
+                  <li>All searches query the server with latest data (no caching)</li>
+                  <li>Products added to Bevvi master list appear immediately</li>
+                  <li>Click "Refresh Search" button to re-query if needed</li>
+                  <li>Cache-busting ensures you always see current products</li>
+                </ul>
               </div>
             </div>
           </div>
