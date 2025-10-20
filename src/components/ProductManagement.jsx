@@ -141,11 +141,21 @@ const ProductManagement = () => {
         console.log(`🔍 Searching API for "${debouncedSearchTerm}"`)
         const filter = {
           where: {
-            client: "airculinaire",
-            isActive: true,
             or: [
-              { name: { like: debouncedSearchTerm, options: 'i' } },
-              { upc: { like: debouncedSearchTerm, options: 'i' } }
+              { 
+                client: "airculinaire",
+                or: [
+                  { name: { like: debouncedSearchTerm, options: 'i' } },
+                  { upc: { like: debouncedSearchTerm, options: 'i' } }
+                ]
+              },
+              { 
+                client: "ALL",
+                or: [
+                  { name: { like: debouncedSearchTerm, options: 'i' } },
+                  { upc: { like: debouncedSearchTerm, options: 'i' } }
+                ]
+              }
             ]
           },
           fields: { name: true, upc: true, id: true },
