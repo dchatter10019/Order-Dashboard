@@ -3,7 +3,20 @@ import { Search, Plus, Store, Building, Package, RefreshCw } from 'lucide-react'
 
 const ProductManagement = () => {
   // State declarations first
-  const [products, setProducts] = useState([]) // Not cached - search uses API directly
+  const [products, setProducts] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('bevvi_products')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        console.log(`✅ Loaded ${parsed.length} products from cache`)
+        return parsed
+      }
+      return []
+    } catch (error) {
+      console.error('Error loading products from sessionStorage:', error)
+      return []
+    }
+  })
   const [stores, setStores] = useState(() => {
     try {
       const saved = sessionStorage.getItem('bevvi_stores')
@@ -64,6 +77,14 @@ const ProductManagement = () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [])
+
+  // Persist products to sessionStorage whenever they change
+  useEffect(() => {
+    if (products.length > 0) {
+      sessionStorage.setItem('bevvi_products', JSON.stringify(products))
+      console.log(`💾 Cached ${products.length} products to sessionStorage`)
+    }
+  }, [products])
 
   // Persist stores to sessionStorage whenever they change
   useEffect(() => {
@@ -293,7 +314,7 @@ const ProductManagement = () => {
       </div>
 
       {/* Helpful banner */}
-      {stores.length === 0 && !isLoadingData && (
+      {products.length === 0 && stores.length === 0 && !isLoadingData && (
         <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-start">
             <div className="flex-shrink-0">
@@ -304,7 +325,25 @@ const ProductManagement = () => {
               <div className="mt-2 text-sm text-blue-700">
                 <p><strong>Option 1 (Recommended):</strong> Click "Load All" to load all products once (10-15 sec), then search instantly</p>
                 <p className="mt-1"><strong>Option 2:</strong> Just start typing to search via API (real-time, but slower)</p>
-                <p className="mt-1 text-xs">After loading all products, your UPC 03185370303382 will be searchable if it exists in the catalog.</p>
+                <p className="mt-2 text-xs">💡 Products are cached in your browser - load once and they'll stay until you close the browser!</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Success banner when products are loaded from cache */}
+      {products.length > 0 && !isLoadingAllProducts && (
+        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <Package className="h-5 w-5 text-green-600 mt-0.5" />
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-green-800">Products Ready!</h3>
+              <div className="mt-2 text-sm text-green-700">
+                <p>✓ {products.length.toLocaleString()} products loaded and cached</p>
+                <p className="mt-1 text-xs">Search is instant! Products stay cached until you close the browser.</p>
               </div>
             </div>
           </div>
@@ -405,19 +444,21 @@ const ProductManagement = () => {
           </button>
         )}
         
-        {stores.length > 0 && (
+        {(stores.length > 0 || products.length > 0) && (
           <button
             onClick={() => {
               sessionStorage.removeItem('bevvi_stores')
+              sessionStorage.removeItem('bevvi_products')
               setStores([])
+              setProducts([])
               setSearchResults([])
               setProductSearchTerm('')
               setDebouncedSearchTerm('')
-              setMessage('Cache cleared. Stores will reload automatically.')
+              setMessage('✅ Cache cleared. Click "Load All" to reload products, or search will use API directly.')
             }}
             className="flex items-center px-4 py-3 bg-gray-500 text-white font-medium rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >
-            Clear Cache
+            Clear All Cache
           </button>
         )}
       </div>
