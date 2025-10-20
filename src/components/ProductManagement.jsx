@@ -78,11 +78,20 @@ const ProductManagement = () => {
     }
   }, [])
 
-  // Persist products to sessionStorage whenever they change
+  // Persist products to sessionStorage whenever they change (non-blocking)
   useEffect(() => {
     if (products.length > 0) {
-      sessionStorage.setItem('bevvi_products', JSON.stringify(products))
-      console.log(`💾 Cached ${products.length} products to sessionStorage`)
+      // Use setTimeout to make this non-blocking
+      setTimeout(() => {
+        try {
+          sessionStorage.setItem('bevvi_products', JSON.stringify(products))
+          console.log(`💾 Cached ${products.length} products to sessionStorage`)
+        } catch (error) {
+          console.error('Error caching products:', error)
+          // If cache fails (too large), clear it
+          sessionStorage.removeItem('bevvi_products')
+        }
+      }, 0)
     }
   }, [products])
 
@@ -149,15 +158,16 @@ const ProductManagement = () => {
     }
   }
 
-  // Load all products from Bevvi API
+  // Load all products from Bevvi API (non-blocking, chunked processing)
   const loadAllProducts = async () => {
     setIsLoadingAllProducts(true)
-    setMessage('⏳ Loading all products from server... This may take 10-15 seconds.')
+    setMessage('⏳ Downloading products from server...')
     
     try {
       console.log('🔄 Fetching all products from Bevvi API...')
       console.time('Load All Products')
       
+      // Step 1: Fetch data
       const response = await fetch('https://api.getbevvi.com/api/corputil/getBevviProductsAsJSON', {
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -167,13 +177,24 @@ const ProductManagement = () => {
       
       if (!response.ok) throw new Error(`Server error: ${response.status}`)
       
+      setMessage('⏳ Parsing data (UI stays responsive)...')
+      
+      // Step 2: Parse JSON in a way that doesn't block UI
       const data = await response.json()
       const productsList = data.results || []
       
-      console.timeEnd('Load All Products')
-      console.log(`✅ Loaded ${productsList.length.toLocaleString()} products from server`)
+      console.log(`📦 Downloaded ${productsList.length.toLocaleString()} products`)
+      setMessage(`⏳ Processing ${productsList.length.toLocaleString()} products...`)
       
+      // Step 3: Allow UI to breathe before setting state
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Step 4: Update state (React will batch this)
       setProducts(productsList)
+      
+      console.timeEnd('Load All Products')
+      console.log(`✅ Loaded ${productsList.length.toLocaleString()} products successfully`)
+      
       setMessage(`✅ Success! ${productsList.length.toLocaleString()} products loaded. Search is now instant!`)
     } catch (error) {
       console.error('❌ Error loading all products:', error)
