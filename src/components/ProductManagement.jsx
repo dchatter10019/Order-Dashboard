@@ -3,20 +3,7 @@ import { Search, Plus, Store, Building, Package, RefreshCw } from 'lucide-react'
 
 const ProductManagement = () => {
   // State declarations first
-  const [products, setProducts] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem('bevvi_products')
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        console.log(`✅ Loaded ${parsed.length} products from cache`)
-        return parsed
-      }
-      return []
-    } catch (error) {
-      console.error('Error loading products from sessionStorage:', error)
-      return []
-    }
-  })
+  const [products] = useState([]) // Products searched via API only
   const [stores, setStores] = useState(() => {
     try {
       const saved = sessionStorage.getItem('bevvi_stores')
@@ -42,7 +29,6 @@ const ProductManagement = () => {
   const [showProductDropdown, setShowProductDropdown] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchResults, setSearchResults] = useState([])
-  const [isLoadingAllProducts, setIsLoadingAllProducts] = useState(false)
   
   const searchTimeoutRef = useRef(null)
   const productSearchRef = useRef(null)
@@ -77,23 +63,6 @@ const ProductManagement = () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [])
-
-  // Persist products to sessionStorage whenever they change (non-blocking)
-  useEffect(() => {
-    if (products.length > 0) {
-      // Use setTimeout to make this non-blocking
-      setTimeout(() => {
-        try {
-          sessionStorage.setItem('bevvi_products', JSON.stringify(products))
-          console.log(`💾 Cached ${products.length} products to sessionStorage`)
-        } catch (error) {
-          console.error('Error caching products:', error)
-          // If cache fails (too large), clear it
-          sessionStorage.removeItem('bevvi_products')
-        }
-      }, 0)
-    }
-  }, [products])
 
   // Persist stores to sessionStorage whenever they change
   useEffect(() => {
@@ -158,53 +127,7 @@ const ProductManagement = () => {
     }
   }
 
-  // Load all products from Bevvi API (non-blocking, chunked processing)
-  const loadAllProducts = async () => {
-    setIsLoadingAllProducts(true)
-    setMessage('⏳ Downloading products from server...')
-    
-    try {
-      console.log('🔄 Fetching all products from Bevvi API...')
-      console.time('Load All Products')
-      
-      // Step 1: Fetch data
-      const response = await fetch('https://api.getbevvi.com/api/corputil/getBevviProductsAsJSON', {
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
-        }
-      })
-      
-      if (!response.ok) throw new Error(`Server error: ${response.status}`)
-      
-      setMessage('⏳ Parsing data (UI stays responsive)...')
-      
-      // Step 2: Parse JSON in a way that doesn't block UI
-      const data = await response.json()
-      const productsList = data.results || []
-      
-      console.log(`📦 Downloaded ${productsList.length.toLocaleString()} products`)
-      setMessage(`⏳ Processing ${productsList.length.toLocaleString()} products...`)
-      
-      // Step 3: Allow UI to breathe before setting state
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
-      // Step 4: Update state (React will batch this)
-      setProducts(productsList)
-      
-      console.timeEnd('Load All Products')
-      console.log(`✅ Loaded ${productsList.length.toLocaleString()} products successfully`)
-      
-      setMessage(`✅ Success! ${productsList.length.toLocaleString()} products loaded. Search is now instant!`)
-    } catch (error) {
-      console.error('❌ Error loading all products:', error)
-      setMessage(`❌ Error: ${error.message}. Using on-demand API search instead.`)
-    } finally {
-      setIsLoadingAllProducts(false)
-    }
-  }
-
-  // Search products - use local cache if available, otherwise API search
+  // Search products via API only (no local cache)
   useEffect(() => {
     const searchProducts = async () => {
       if (!debouncedSearchTerm || debouncedSearchTerm.length < 3) {
@@ -214,69 +137,46 @@ const ProductManagement = () => {
       
       setIsSearching(true)
       try {
-        // If we have products loaded locally, search them (instant)
-        if (products.length > 0) {
-          console.log(`🔍 Searching local cache for "${debouncedSearchTerm}"`)
-          const searchLower = debouncedSearchTerm.toLowerCase().trim()
-          const filtered = products.filter(p => {
-            const name = (p.name || p.Name || '').toLowerCase()
-            const upc = (p.upc || p.UPC || '').toString().toLowerCase()
-            return name.includes(searchLower) || upc.includes(searchLower)
-          })
-          
-          // Deduplicate by UPC (keep first occurrence)
-          const seen = new Set()
-          const deduped = filtered.filter(p => {
-            const upc = p.upc || p.UPC
-            if (!upc || seen.has(upc)) return false
-            seen.add(upc)
-            return true
-          }).slice(0, 100)
-          
-          console.log(`✅ Found ${deduped.length} unique results in local cache (${filtered.length - deduped.length} duplicates removed)`)
-          setSearchResults(deduped)
-        } else {
-          // Otherwise, search API directly
-          console.log(`🔍 Searching API for "${debouncedSearchTerm}"`)
-          const filter = {
-            where: {
-              or: [
-                { name: { like: debouncedSearchTerm, options: 'i' } },
-                { upc: { like: debouncedSearchTerm, options: 'i' } }
-              ]
-            },
-            fields: { name: true, upc: true, id: true, client: true },
-            limit: 100
-          }
-          const encodedFilter = encodeURIComponent(JSON.stringify(filter))
-          
-          const cacheBuster = `t=${Date.now()}`
-          const response = await fetch(
-            `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
-            {
-              headers: {
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache'
-              }
-            }
-          )
-          if (!response.ok) throw new Error('Search failed')
-          
-          const data = await response.json()
-          const results = Array.isArray(data) ? data : (data.results || [])
-          
-          // Deduplicate API results by UPC
-          const seen = new Set()
-          const deduped = results.filter(p => {
-            const upc = p.upc || p.UPC
-            if (!upc || seen.has(upc)) return false
-            seen.add(upc)
-            return true
-          })
-          
-          console.log(`✅ Found ${deduped.length} unique results from API (${results.length - deduped.length} duplicates removed)`)
-          setSearchResults(deduped)
+        // Search API directly - fast and always fresh
+        console.log(`🔍 Searching API for "${debouncedSearchTerm}"`)
+        const filter = {
+          where: {
+            or: [
+              { name: { like: debouncedSearchTerm, options: 'i' } },
+              { upc: { like: debouncedSearchTerm, options: 'i' } }
+            ]
+          },
+          fields: { name: true, upc: true, id: true, client: true },
+          limit: 100
         }
+        const encodedFilter = encodeURIComponent(JSON.stringify(filter))
+        
+        const cacheBuster = `t=${Date.now()}`
+        const response = await fetch(
+          `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
+          {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          }
+        )
+        if (!response.ok) throw new Error('Search failed')
+        
+        const data = await response.json()
+        const results = Array.isArray(data) ? data : (data.results || [])
+        
+        // Deduplicate API results by UPC
+        const seen = new Set()
+        const deduped = results.filter(p => {
+          const upc = p.upc || p.UPC
+          if (!upc || seen.has(upc)) return false
+          seen.add(upc)
+          return true
+        })
+        
+        console.log(`✅ Found ${deduped.length} unique results from API (${results.length - deduped.length} duplicates removed)`)
+        setSearchResults(deduped)
       } catch (error) {
         console.error('Search error:', error)
         setSearchResults([])
@@ -286,7 +186,7 @@ const ProductManagement = () => {
     }
     
     searchProducts()
-  }, [debouncedSearchTerm, products])
+  }, [debouncedSearchTerm])
   
   // Use search results instead of filtering local data
   const filteredProducts = searchResults
@@ -355,36 +255,19 @@ const ProductManagement = () => {
       </div>
 
       {/* Helpful banner */}
-      {products.length === 0 && stores.length === 0 && !isLoadingData && (
+      {stores.length === 0 && !isLoadingData && (
         <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <div className="flex items-start">
             <div className="flex-shrink-0">
               <Package className="h-5 w-5 text-blue-600 mt-0.5" />
             </div>
             <div className="ml-3 flex-1">
-              <h3 className="text-sm font-medium text-blue-800">Product Search Options</h3>
+              <h3 className="text-sm font-medium text-blue-800">Real-Time Product Search</h3>
               <div className="mt-2 text-sm text-blue-700">
-                <p><strong>Option 1 (Recommended):</strong> Click "Load All" to load all products once (10-15 sec), then search instantly</p>
-                <p className="mt-1"><strong>Option 2:</strong> Just start typing to search via API (real-time, but slower)</p>
-                <p className="mt-2 text-xs">💡 Products are cached in your browser - load once and they'll stay until you close the browser!</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Success banner when products are loaded from cache */}
-      {products.length > 0 && !isLoadingAllProducts && (
-        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
-          <div className="flex items-start">
-            <div className="flex-shrink-0">
-              <Package className="h-5 w-5 text-green-600 mt-0.5" />
-            </div>
-            <div className="ml-3 flex-1">
-              <h3 className="text-sm font-medium text-green-800">Products Ready!</h3>
-              <div className="mt-2 text-sm text-green-700">
-                <p>✓ {products.length.toLocaleString()} products loaded and cached</p>
-                <p className="mt-1 text-xs">Search is instant! Products stay cached until you close the browser.</p>
+                <p>Just start typing (3+ characters) to search across 50,000+ products!</p>
+                <p className="mt-1 text-xs">✓ Fast API search (~300ms)</p>
+                <p className="mt-1 text-xs">✓ Always fresh data from server</p>
+                <p className="mt-1 text-xs">✓ No freezing, no waiting</p>
               </div>
             </div>
           </div>
@@ -395,43 +278,14 @@ const ProductManagement = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
         {/* Products Status */}
         <div className="bg-white p-6 rounded-lg shadow-md border">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <Package className="w-6 h-6 text-blue-600 mr-3" />
-              <h3 className="text-lg font-semibold">Products</h3>
-            </div>
-            <button
-              onClick={loadAllProducts}
-              disabled={isLoadingAllProducts}
-              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center transition-all"
-              title="Load all products from server for instant search"
-            >
-              {isLoadingAllProducts ? (
-                <>
-                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                  <span className="text-xs">Loading...</span>
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-3 h-3 mr-1" />
-                  <span className="text-xs">Load All</span>
-                </>
-              )}
-            </button>
+          <div className="flex items-center mb-4">
+            <Package className="w-6 h-6 text-blue-600 mr-3" />
+            <h3 className="text-lg font-semibold">Products</h3>
           </div>
-          {products.length > 0 ? (
-            <>
-              <p className="text-sm text-green-600 mt-2">✓ {products.length.toLocaleString()} products loaded</p>
-              <p className="text-xs text-gray-400 mt-1">Search is instant (local filter)</p>
-              {searchResults.length > 0 && (
-                <p className="text-xs text-blue-600 mt-1">{searchResults.length} results for your search</p>
-              )}
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-gray-500 mt-2">Real-Time API Search</p>
-              <p className="text-xs text-gray-400 mt-1">Click "Load All" for instant search</p>
-            </>
+          <p className="text-sm text-green-600 mt-2">✓ Real-Time API Search</p>
+          <p className="text-xs text-gray-400 mt-1">Searches 50,000+ products instantly</p>
+          {searchResults.length > 0 && (
+            <p className="text-xs text-blue-600 mt-1">{searchResults.length} results found</p>
           )}
         </div>
 
@@ -485,21 +339,19 @@ const ProductManagement = () => {
           </button>
         )}
         
-        {(stores.length > 0 || products.length > 0) && (
+        {stores.length > 0 && (
           <button
             onClick={() => {
               sessionStorage.removeItem('bevvi_stores')
-              sessionStorage.removeItem('bevvi_products')
               setStores([])
-              setProducts([])
               setSearchResults([])
               setProductSearchTerm('')
               setDebouncedSearchTerm('')
-              setMessage('✅ Cache cleared. Click "Load All" to reload products, or search will use API directly.')
+              setMessage('✅ Store cache cleared. Stores will reload automatically.')
             }}
             className="flex items-center px-4 py-3 bg-gray-500 text-white font-medium rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
           >
-            Clear All Cache
+            Clear Store Cache
           </button>
         )}
       </div>
