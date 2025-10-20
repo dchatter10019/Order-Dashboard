@@ -142,23 +142,11 @@ const ProductManagement = () => {
         const filter = {
           where: {
             or: [
-              { 
-                client: "airculinaire",
-                or: [
-                  { name: { like: debouncedSearchTerm, options: 'i' } },
-                  { upc: { like: debouncedSearchTerm, options: 'i' } }
-                ]
-              },
-              { 
-                client: "ALL",
-                or: [
-                  { name: { like: debouncedSearchTerm, options: 'i' } },
-                  { upc: { like: debouncedSearchTerm, options: 'i' } }
-                ]
-              }
+              { name: { like: debouncedSearchTerm, options: 'i' } },
+              { upc: { like: debouncedSearchTerm, options: 'i' } }
             ]
           },
-          fields: { name: true, upc: true, id: true },
+          fields: { name: true, upc: true, id: true, client: true },
           limit: 100
         }
         const encodedFilter = encodeURIComponent(JSON.stringify(filter))
