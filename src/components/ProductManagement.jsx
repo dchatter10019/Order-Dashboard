@@ -291,9 +291,9 @@ const ProductManagement = () => {
             hasMore = false
           }
           
-          // Safety limit to prevent infinite loops
-          if (batchNum >= 20) {
-            console.warn('⚠️ Reached maximum batch limit (20 batches)')
+          // Safety limit to prevent infinite loops (60 batches = up to 60,000 products)
+          if (batchNum >= 60) {
+            console.warn('⚠️ Reached maximum batch limit (60 batches, 60,000 products)')
             hasMore = false
           }
         }
