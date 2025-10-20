@@ -230,68 +230,98 @@ const ProductManagement = () => {
   // Use search results instead of filtering local data
   const filteredProducts = searchResults
 
-  // Function to refresh entire product catalog from API
+  // Function to refresh entire product catalog from API in batches (prevents freezing)
   const refreshProductCatalog = async () => {
     setIsRefreshingCatalog(true)
-    setMessage('⏳ Fetching latest product catalog from server...')
+    setMessage('⏳ Loading latest products from server (batched to prevent freezing)...')
     
     try {
-      // Fetch all active products with minimal fields (name, upc, id only)
-      // This keeps the payload small (~2-3MB for all products) to prevent freezing
-      const filter = {
-        where: { client: "airculinaire", isActive: true },
-        fields: { name: true, upc: true, id: true }
-      }
-      const encodedFilter = encodeURIComponent(JSON.stringify(filter))
-      const cacheBuster = `t=${Date.now()}`
+      const BATCH_SIZE = 1000
+      let allProducts = []
+      let skip = 0
+      let hasMore = true
+      let batchNum = 0
       
-      console.log('🔄 Refreshing entire product catalog from server...')
-      console.time('Catalog Refresh')
+      console.log('🔄 Starting batched catalog refresh from server...')
+      console.time('Total Catalog Refresh')
       
-      const response = await fetch(
-        `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
-        {
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
+      // Load products in batches to prevent UI freezing
+      while (hasMore) {
+        batchNum++
+        const filter = {
+          where: { client: "airculinaire", isActive: true },
+          fields: { name: true, upc: true, id: true },
+          limit: BATCH_SIZE,
+          skip: skip
+        }
+        const encodedFilter = encodeURIComponent(JSON.stringify(filter))
+        const cacheBuster = `t=${Date.now()}`
+        
+        console.log(`📦 Loading batch ${batchNum} (products ${skip + 1}-${skip + BATCH_SIZE})...`)
+        
+        const response = await fetch(
+          `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
+          {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          }
+        )
+        
+        if (!response.ok) throw new Error(`Server error: ${response.status}`)
+        
+        const batch = await response.json()
+        const batchProducts = Array.isArray(batch) ? batch : (batch.results || [])
+        
+        if (batchProducts.length === 0) {
+          hasMore = false
+        } else {
+          allProducts = [...allProducts, ...batchProducts]
+          skip += BATCH_SIZE
+          
+          // Update UI progress without blocking
+          setMessage(`⏳ Loading... ${allProducts.length.toLocaleString()} products loaded so far`)
+          
+          // Small delay to keep UI responsive
+          await new Promise(resolve => setTimeout(resolve, 50))
+          
+          // Stop if we got less than batch size (last batch)
+          if (batchProducts.length < BATCH_SIZE) {
+            hasMore = false
+          }
+          
+          // Safety limit to prevent infinite loops
+          if (batchNum >= 20) {
+            console.warn('⚠️ Reached maximum batch limit (20 batches)')
+            hasMore = false
           }
         }
-      )
+      }
       
-      if (!response.ok) throw new Error(`Server error: ${response.status}`)
+      console.timeEnd('Total Catalog Refresh')
+      console.log(`✅ Catalog refresh complete: ${allProducts.length} products loaded in ${batchNum} batches`)
       
-      console.log('📥 Parsing server response...')
-      const data = await response.json()
-      const productsList = Array.isArray(data) ? data : (data.results || [])
+      // Update state with all products
+      setProducts(allProducts)
+      setCatalogLastUpdated(new Date())
       
-      console.timeEnd('Catalog Refresh')
-      console.log(`✅ Catalog refreshed: ${productsList.length} products loaded from server`)
+      // If user is currently searching, re-run their search with new data
+      if (debouncedSearchTerm && debouncedSearchTerm.length >= 3) {
+        const searchLower = debouncedSearchTerm.toLowerCase().trim()
+        const filtered = allProducts.filter(p => {
+          const name = (p.name || p.Name || '').toLowerCase()
+          const upc = (p.upc || p.UPC || '').toString().toLowerCase()
+          return name.includes(searchLower) || upc.includes(searchLower)
+        }).slice(0, 100)
+        setSearchResults(filtered)
+        console.log(`🔍 Re-filtered search: ${filtered.length} results for "${debouncedSearchTerm}"`)
+      }
       
-      // Update state asynchronously (React will batch this)
-      await new Promise(resolve => {
-        setProducts(productsList)
-        setCatalogLastUpdated(new Date())
-        
-        // If user is currently searching, re-run their search with new data
-        if (debouncedSearchTerm && debouncedSearchTerm.length >= 3) {
-          const searchLower = debouncedSearchTerm.toLowerCase().trim()
-          const filtered = productsList.filter(p => {
-            const name = (p.name || p.Name || '').toLowerCase()
-            const upc = (p.upc || p.UPC || '').toString().toLowerCase()
-            return name.includes(searchLower) || upc.includes(searchLower)
-          }).slice(0, 100)
-          setSearchResults(filtered)
-          console.log(`🔍 Re-filtered search: ${filtered.length} results for "${debouncedSearchTerm}"`)
-        }
-        
-        setTimeout(resolve, 0)
-      })
-      
-      setMessage(`✅ Catalog refreshed! ${productsList.length.toLocaleString()} products loaded. Search is now instant!`)
+      setMessage(`✅ Catalog refreshed! ${allProducts.length.toLocaleString()} products loaded. Search is now instant!`)
     } catch (error) {
       console.error('❌ Error refreshing catalog:', error)
-      setMessage(`❌ Error: ${error.message}. Try again or search directly via API.`)
+      setMessage(`❌ Error: ${error.message}. Try searching directly via API instead.`)
     } finally {
       setIsRefreshingCatalog(false)
     }
@@ -389,18 +419,18 @@ const ProductManagement = () => {
             <button
               onClick={refreshProductCatalog}
               disabled={isRefreshingCatalog}
-              className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center"
-              title="Refresh product catalog from server"
+              className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center transition-all"
+              title="Load complete product catalog from server (batched loading to prevent freezing)"
             >
               {isRefreshingCatalog ? (
                 <>
                   <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white mr-1"></div>
-                  Syncing...
+                  <span className="text-xs">Loading...</span>
                 </>
               ) : (
                 <>
                   <RefreshCw className="w-3 h-3 mr-1" />
-                  Refresh
+                  <span className="text-xs">Refresh Catalog</span>
                 </>
               )}
             </button>
