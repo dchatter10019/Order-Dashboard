@@ -222,9 +222,19 @@ const ProductManagement = () => {
             const name = (p.name || p.Name || '').toLowerCase()
             const upc = (p.upc || p.UPC || '').toString().toLowerCase()
             return name.includes(searchLower) || upc.includes(searchLower)
+          })
+          
+          // Deduplicate by UPC (keep first occurrence)
+          const seen = new Set()
+          const deduped = filtered.filter(p => {
+            const upc = p.upc || p.UPC
+            if (!upc || seen.has(upc)) return false
+            seen.add(upc)
+            return true
           }).slice(0, 100)
-          console.log(`✅ Found ${filtered.length} results in local cache`)
-          setSearchResults(filtered)
+          
+          console.log(`✅ Found ${deduped.length} unique results in local cache (${filtered.length - deduped.length} duplicates removed)`)
+          setSearchResults(deduped)
         } else {
           // Otherwise, search API directly
           console.log(`🔍 Searching API for "${debouncedSearchTerm}"`)
@@ -254,8 +264,18 @@ const ProductManagement = () => {
           
           const data = await response.json()
           const results = Array.isArray(data) ? data : (data.results || [])
-          console.log(`✅ Found ${results.length} results from API`)
-          setSearchResults(results)
+          
+          // Deduplicate API results by UPC
+          const seen = new Set()
+          const deduped = results.filter(p => {
+            const upc = p.upc || p.UPC
+            if (!upc || seen.has(upc)) return false
+            seen.add(upc)
+            return true
+          })
+          
+          console.log(`✅ Found ${deduped.length} unique results from API (${results.length - deduped.length} duplicates removed)`)
+          setSearchResults(deduped)
         }
       } catch (error) {
         console.error('Search error:', error)
