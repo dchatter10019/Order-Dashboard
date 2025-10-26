@@ -14,10 +14,19 @@ const ProductManagement = () => {
       return []
     }
   })
-  // Set company to "airculinaire" by default
-  const [companies] = useState([{ name: 'airculinaire' }])
+  // Set companies list with airculinaire, sendoso, and OnGoody
+  const [companies] = useState([
+    { name: 'airculinaire' },
+    { name: 'sendoso' },
+    { name: 'OnGoody' }
+  ])
   const [selectedProduct, setSelectedProduct] = useState('')
   const [selectedStore, setSelectedStore] = useState('')
+  const [storeSearchTerm, setStoreSearchTerm] = useState('')
+  const [debouncedStoreSearchTerm, setDebouncedStoreSearchTerm] = useState('')
+  const [showStoreDropdown, setShowStoreDropdown] = useState(false)
+  const [isSearchingStores, setIsSearchingStores] = useState(false)
+  const [storeSearchResults, setStoreSearchResults] = useState([])
   const [selectedCompany, setSelectedCompany] = useState('airculinaire')
   const [price, setPrice] = useState('')
   const [quantity, setQuantity] = useState('')
@@ -31,9 +40,11 @@ const ProductManagement = () => {
   const [searchResults, setSearchResults] = useState([])
   
   const searchTimeoutRef = useRef(null)
+  const storeSearchTimeoutRef = useRef(null)
   const productSearchRef = useRef(null)
+  const storeSearchRef = useRef(null)
 
-  // Debounce only the filtering, not the input value
+  // Debounce product search
   useEffect(() => {
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current)
@@ -50,11 +61,31 @@ const ProductManagement = () => {
     }
   }, [productSearchTerm])
 
+  // Debounce store search
+  useEffect(() => {
+    if (storeSearchTimeoutRef.current) {
+      clearTimeout(storeSearchTimeoutRef.current)
+    }
+    
+    storeSearchTimeoutRef.current = setTimeout(() => {
+      setDebouncedStoreSearchTerm(storeSearchTerm)
+    }, 150)
+    
+    return () => {
+      if (storeSearchTimeoutRef.current) {
+        clearTimeout(storeSearchTimeoutRef.current)
+      }
+    }
+  }, [storeSearchTerm])
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (productSearchRef.current && !productSearchRef.current.contains(event.target)) {
         setShowProductDropdown(false)
+      }
+      if (storeSearchRef.current && !storeSearchRef.current.contains(event.target)) {
+        setShowStoreDropdown(false)
       }
     }
 
@@ -188,9 +219,42 @@ const ProductManagement = () => {
     
     searchProducts()
   }, [debouncedSearchTerm])
+
+  // Search stores based on debounced search term
+  useEffect(() => {
+    const searchStores = () => {
+      if (!debouncedStoreSearchTerm || debouncedStoreSearchTerm.length < 2) {
+        setStoreSearchResults([])
+        return
+      }
+      
+      setIsSearchingStores(true)
+      try {
+        console.log(`🏪 Searching stores for "${debouncedStoreSearchTerm}"`)
+        
+        // Filter stores based on search term
+        const filtered = stores.filter(store => {
+          const storeName = (store.name || store.Name || '').toLowerCase()
+          const searchTerm = debouncedStoreSearchTerm.toLowerCase()
+          return storeName.includes(searchTerm)
+        })
+        
+        console.log(`✅ Found ${filtered.length} stores matching "${debouncedStoreSearchTerm}"`)
+        setStoreSearchResults(filtered)
+      } catch (error) {
+        console.error('Store search error:', error)
+        setStoreSearchResults([])
+      } finally {
+        setIsSearchingStores(false)
+      }
+    }
+    
+    searchStores()
+  }, [debouncedStoreSearchTerm, stores])
   
   // Use search results instead of filtering local data
   const filteredProducts = searchResults
+  const filteredStores = storeSearchResults
 
 
   // Handle form submission
@@ -233,11 +297,15 @@ const ProductManagement = () => {
         setProductSearchTerm('')
         setDebouncedSearchTerm('')
         setSelectedStore('')
-        setSelectedCompany('airculinaire')
+        setStoreSearchTerm('')
+        setDebouncedStoreSearchTerm('')
+        setSelectedCompany(companies[0].name)
         setPrice('')
         setQuantity('')
         setShowProductDropdown(false)
+        setShowStoreDropdown(false)
         setSearchResults([])
+        setStoreSearchResults([])
       } else {
         setMessage(`Error: ${result.message || 'Failed to add product'}`)
       }
@@ -252,7 +320,7 @@ const ProductManagement = () => {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Product Management</h1>
-        <p className="text-gray-600">Manage product inventory across stores for airculinaire</p>
+        <p className="text-gray-600">Manage product inventory across stores for multiple companies</p>
       </div>
 
       {/* Helpful banner */}
@@ -312,10 +380,14 @@ const ProductManagement = () => {
         <div className="bg-white p-6 rounded-lg shadow-md border">
           <div className="flex items-center mb-4">
             <Building className="w-6 h-6 text-purple-600 mr-3" />
-            <h3 className="text-lg font-semibold">Company</h3>
+            <h3 className="text-lg font-semibold">Companies</h3>
           </div>
-          <p className="text-sm text-gray-500 mt-2">Active Company</p>
-          <p className="text-sm text-green-600 mt-2 font-semibold">✓ airculinaire</p>
+          <p className="text-sm text-gray-500 mt-2">Available Companies</p>
+          <div className="mt-2 space-y-1">
+            {companies.map((company, index) => (
+              <p key={index} className="text-sm text-green-600 font-semibold">✓ {company.name}</p>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -347,8 +419,11 @@ const ProductManagement = () => {
               sessionStorage.removeItem('bevvi_stores')
               setStores([])
               setSearchResults([])
+              setStoreSearchResults([])
               setProductSearchTerm('')
               setDebouncedSearchTerm('')
+              setStoreSearchTerm('')
+              setDebouncedStoreSearchTerm('')
               setMessage('✅ Store cache cleared. Stores will reload automatically.')
             }}
             className="flex items-center px-4 py-3 bg-gray-500 text-white font-medium rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
@@ -478,24 +553,85 @@ const ProductManagement = () => {
             </div>
 
             {/* Store Selection */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Store *
+            <div ref={storeSearchRef} className="relative">
+              <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
+                <span>Store *</span>
+                {storeSearchTerm.length >= 2 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDebouncedStoreSearchTerm('')
+                      setTimeout(() => setDebouncedStoreSearchTerm(storeSearchTerm), 10)
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
+                  >
+                    <RefreshCw className="w-3 h-3 mr-1" />
+                    Refresh Search
+                  </button>
+                )}
               </label>
-              <select
-                value={selectedStore}
-                onChange={(e) => setSelectedStore(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Select a store</option>
-                {stores.map((store, index) => (
-                  <option key={index} value={store.name || store.Name}>
-                    {store.name || store.Name}
-                  </option>
-                ))}
-              </select>
-
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
+                <input
+                  type="text"
+                  value={storeSearchTerm}
+                  placeholder="Type at least 2 characters to search stores..."
+                  onChange={(e) => {
+                    setStoreSearchTerm(e.target.value)
+                    setShowStoreDropdown(true)
+                  }}
+                  onFocus={() => {
+                    if (storeSearchTerm.length >= 2) {
+                      setShowStoreDropdown(true)
+                    }
+                  }}
+                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  autoComplete="off"
+                />
+                {(isSearchingStores || (debouncedStoreSearchTerm !== storeSearchTerm && storeSearchTerm.length >= 2)) && (
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Store dropdown results */}
+              {showStoreDropdown && storeSearchTerm.length >= 2 && (
+                <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
+                  {isSearchingStores ? (
+                    <div className="px-3 py-4 text-gray-400 text-sm text-center flex items-center justify-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                      Searching stores...
+                    </div>
+                  ) : filteredStores.length > 0 ? (
+                    <>
+                      {filteredStores.map((store, index) => (
+                        <div
+                          key={index}
+                          onClick={() => {
+                            const storeName = store.name || store.Name
+                            setSelectedStore(storeName)
+                            setStoreSearchTerm(storeName)
+                            setDebouncedStoreSearchTerm(storeName)
+                            setShowStoreDropdown(false)
+                          }}
+                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                        >
+                          <div className="font-medium text-gray-900">{store.name || store.Name}</div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div className="px-3 py-4 text-gray-500 text-sm text-center">
+                      No stores found matching "{storeSearchTerm}"
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {storeSearchTerm.length > 0 && storeSearchTerm.length < 2 && (
+                <p className="text-xs text-gray-500 mt-1">Type at least 2 characters to search</p>
+              )}
             </div>
 
             {/* Company Selection */}
@@ -503,13 +639,19 @@ const ProductManagement = () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Company *
               </label>
-              <input
-                type="text"
+              <select
                 value={selectedCompany}
-                disabled
-                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-700 cursor-not-allowed"
-              />
-              <p className="text-xs text-gray-500 mt-1">Company is set to airculinaire</p>
+                onChange={(e) => setSelectedCompany(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              >
+                <option value="">Select a company</option>
+                {companies.map((company, index) => (
+                  <option key={index} value={company.name}>
+                    {company.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Price Input */}

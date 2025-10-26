@@ -4,6 +4,7 @@ import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
+import { formatDollarAmount } from '../utils/formatCurrency'
 
 const Dashboard = () => {
   console.log('🔍 Dashboard component rendering')
@@ -931,7 +932,7 @@ const Dashboard = () => {
               </div>
               <div className="ml-4">
                   <p className="text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
-                  <dd className="text-lg font-medium text-gray-900">${filteredTotalRevenue.toFixed(2)}</dd>
+                  <dd className="text-lg font-medium text-gray-900">{formatDollarAmount(filteredTotalRevenue)}</dd>
                 </div>
               </div>
                   <button
@@ -952,11 +953,11 @@ const Dashboard = () => {
                 <div className="space-y-2 text-sm text-gray-600">
                   <div className="flex justify-between">
                     <span>Base Revenue:</span>
-                    <span className="font-medium">${filteredTotalRevenue.toFixed(2)}</span>
+                    <span className="font-medium">{formatDollarAmount(filteredTotalRevenue)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Total Revenue (Based on Total):</span>
-                    <span className="font-medium">${filteredTotalRevenueBasedOnTotal.toFixed(2)}</span>
+                    <span className="font-medium">{formatDollarAmount(filteredTotalRevenueBasedOnTotal)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Accepted Orders Count:</span>
@@ -964,7 +965,7 @@ const Dashboard = () => {
                   </div>
                   <div className="flex justify-between">
                     <span>AOV (On Base Total):</span>
-                    <span className="font-medium">${filteredAcceptedOrders.length > 0 ? (filteredTotalRevenue / filteredAcceptedOrders.length).toFixed(2) : '0.00'}</span>
+                    <span className="font-medium">{formatDollarAmount(filteredAcceptedOrders.length > 0 ? (filteredTotalRevenue / filteredAcceptedOrders.length) : 0)}</span>
                   </div>
                 </div>
               </div>
@@ -1005,7 +1006,7 @@ const Dashboard = () => {
                 <div className="space-y-2 text-sm text-gray-600">
                   <div className="flex justify-between">
                     <span>Total Revenue:</span>
-                    <span className="font-medium">${filteredTotalRevenue.toFixed(2)}</span>
+                    <span className="font-medium">{formatDollarAmount(filteredTotalRevenue)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Revenue Orders:</span>
@@ -1013,7 +1014,7 @@ const Dashboard = () => {
           </div>
                   <div className="flex justify-between">
                     <span>Calculation:</span>
-                    <span className="font-medium">{filteredAcceptedOrders.length > 0 ? `${filteredTotalRevenue.toFixed(2)} ÷ ${filteredAcceptedOrders.length} = $${filteredAverageOrderValue.toFixed(2)}` : 'N/A'}</span>
+                    <span className="font-medium">{filteredAcceptedOrders.length > 0 ? `${formatDollarAmount(filteredTotalRevenue)} ÷ ${filteredAcceptedOrders.length} = ${formatDollarAmount(filteredAverageOrderValue)}` : 'N/A'}</span>
             </div>
                 </div>
                 </div>
@@ -1284,8 +1285,8 @@ const Dashboard = () => {
                             </span>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={`$${(parseFloat(order.revenue) || 0).toFixed(2)}`}>
-                              ${(parseFloat(order.revenue) || 0).toFixed(2)}
+                            <div className="truncate" title={formatDollarAmount(order.revenue)}>
+                              {formatDollarAmount(order.revenue)}
                             </div>
                           </td>
 
@@ -1339,7 +1340,7 @@ const Dashboard = () => {
             )}
             <div className="text-gray-300">
               Orders: {orders.length} | 
-              Total: ${orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0).toFixed(2)} |
+              Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
               v1.0.3
             </div>
           </div>

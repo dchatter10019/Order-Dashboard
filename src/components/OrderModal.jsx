@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react'
 import { X, Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle, AlertTriangle } from 'lucide-react'
+import { formatDollarAmount } from '../utils/formatCurrency'
 
 const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, detailsError, setOrderDetails }) => {
   if (!isOpen || !order) return null
@@ -132,7 +133,7 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
             </div>
             <div className="text-right">
               <p className="text-3xl font-bold text-blue-600">
-                ${order.total.toFixed(2)}
+                {formatDollarAmount(order.total)}
               </p>
               <p className="text-sm text-gray-500">Total Amount</p>
             </div>
@@ -252,13 +253,13 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                         <div className="text-right ml-4">
                           <div className="bg-green-50 rounded-lg p-3 min-w-[120px]">
                             <div className="text-sm text-gray-600 mb-1">Unit Price</div>
-                            <div className="text-xl font-bold text-green-800">${product.price?.toFixed(2) || '0.00'}</div>
+                            <div className="text-xl font-bold text-green-800">{formatDollarAmount(product.price || 0)}</div>
                             <div className="text-sm text-gray-600 mt-2 mb-1">Quantity</div>
                             <div className="text-lg font-semibold text-gray-900">{product.quantity}</div>
                             <div className="border-t border-green-200 mt-2 pt-2">
                               <div className="text-sm text-gray-600 mb-1">Item Total</div>
                               <div className="text-xl font-bold text-green-900">
-                                ${((product.price || 0) * (product.quantity || 0)).toFixed(2)}
+                                {formatDollarAmount((product.price || 0) * (product.quantity || 0))}
                               </div>
                             </div>
                           </div>
@@ -278,7 +279,7 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                     <div className="flex justify-between items-center mt-2">
                       <span className="text-lg font-semibold text-gray-900">Subtotal:</span>
                       <span className="text-xl font-bold text-green-900">
-                        ${orderDetails.products.reduce((sum, product) => sum + ((product.price || 0) * (product.quantity || 0)), 0).toFixed(2)}
+                        {formatDollarAmount(orderDetails.products.reduce((sum, product) => sum + ((product.price || 0) * (product.quantity || 0)), 0))}
                       </span>
                     </div>
                   </div>
@@ -324,23 +325,23 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                 <div className="space-y-3">
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Base Revenue</span>
-                    <span className="font-semibold text-blue-900">${(order.revenue || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.revenue || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Gift Note Charge</span>
-                    <span className="font-semibold text-blue-900">${(order.giftNoteCharge || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.giftNoteCharge || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Promo Discount</span>
-                    <span className="font-semibold text-red-600">-${(order.promoDiscAmt || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-red-600">-{formatDollarAmount(order.promoDiscAmt || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Tax</span>
-                    <span className="font-semibold text-blue-900">${(order.tax || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.tax || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Tip</span>
-                    <span className="font-semibold text-blue-900">${(order.tip || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.tip || 0)}</span>
                   </div>
                 </div>
 
@@ -348,23 +349,23 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                 <div className="space-y-3">
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Shipping Fee</span>
-                    <span className="font-semibold text-blue-900">${(order.shippingFee || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.shippingFee || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Delivery Fee</span>
-                    <span className="font-semibold text-blue-900">${(order.deliveryFee || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.deliveryFee || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Service Charge</span>
-                    <span className="font-semibold text-blue-900">${(order.serviceCharge || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceCharge || 0)}</span>
                     </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Service Charge Tax</span>
-                    <span className="font-semibold text-blue-900">${(order.serviceChargeTax || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">Service Charge Tax</span>
-                    <span className="font-semibold text-blue-900">${(order.serviceChargeTax || 0).toFixed(2)}</span>
+                    <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-blue-200">
                     <span className="text-sm font-medium text-blue-700">API Total Amount</span>
