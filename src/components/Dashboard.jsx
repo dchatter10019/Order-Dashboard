@@ -828,7 +828,8 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Summary Tiles */}
+        {/* Summary Tiles - Hidden during loading */}
+        {!isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           {/* Total Orders Tile */}
           <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-4' : 'p-6'}`}>
@@ -941,8 +942,8 @@ const Dashboard = () => {
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-500">Average Order Value (Excluding Pending/Cancelled/Rejected)</p>
-                  <dd className="text-lg font-medium text-gray-900">${filteredAverageOrderValue.toFixed(2)}</dd>
-              </div>
+                  <dd className="text-lg font-medium text-gray-900">{formatDollarAmount(filteredAverageOrderValue)}</dd>
+                </div>
               </div>
               <button
                 onClick={() => toggleTile('averageOrderValue')}
@@ -977,11 +978,13 @@ const Dashboard = () => {
               )}
           </div>
         </div>
+        )}
 
         {/* Order Types Tile */}
 
 
-        {/* Search Bar */}
+        {/* Search Bar - Hidden during loading */}
+        {!isLoading && (
         <div className="mb-6">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1013,7 +1016,9 @@ const Dashboard = () => {
             </p>
           )}
         </div>
+        )}
 
+        {!isLoading && (
         <div className="bg-white rounded-lg shadow p-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-gray-900">Orders Dashboard</h2>
@@ -1257,6 +1262,7 @@ const Dashboard = () => {
             </button>
           </div>
         </div>
+        )}
       </div>
 
       {/* Status Band */}
