@@ -791,24 +791,34 @@ const Dashboard = () => {
 
 
 
-        {/* Loading Overlay - Covers entire data area */}
+        {/* Loading Overlay - Covers entire screen */}
         {isLoading && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4">
+          <div className="fixed inset-0 bg-gradient-to-br from-blue-900 to-blue-800 bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-lg mx-4 border-4 border-blue-500">
               <div className="flex flex-col items-center">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mb-4"></div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading Orders...</h3>
-                <p className="text-gray-600 text-center">
+                {/* Large Spinner */}
+                <div className="relative mb-6">
+                  <div className="animate-spin rounded-full h-24 w-24 border-8 border-gray-200"></div>
+                  <div className="animate-spin rounded-full h-24 w-24 border-8 border-blue-600 border-t-transparent absolute top-0"></div>
+                </div>
+                
+                {/* Loading Text */}
+                <h3 className="text-2xl font-bold text-gray-900 mb-3 animate-pulse">
+                  🔄 Fetching Orders...
+                </h3>
+                
+                <p className="text-gray-600 text-center text-lg mb-4">
                   {(() => {
                     const start = new Date(dateRange.startDate)
                     const end = new Date(dateRange.endDate)
                     const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24))
                     if (diffDays > 90) {
-                      return `Processing large date range (${diffDays} days)...`
+                      return `Processing large date range (${diffDays} days)`
                     }
-                    return 'Please wait while we fetch your data...'
+                    return 'Please wait while we retrieve your data'
                   })()}
                 </p>
+                
                 {(() => {
                   const start = new Date(dateRange.startDate)
                   const end = new Date(dateRange.endDate)
@@ -816,12 +826,23 @@ const Dashboard = () => {
                   if (diffDays > 90) {
                     const chunks = Math.ceil(diffDays / 30)
                     return (
-                      <p className="text-sm text-blue-600 mt-2">
-                        Processing {chunks} chunks for better performance
-                      </p>
+                      <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mt-2">
+                        <p className="text-sm text-blue-800 font-medium text-center">
+                          📦 Processing {chunks} chunks for optimal performance
+                        </p>
+                        <p className="text-xs text-blue-600 mt-2 text-center">
+                          This may take a moment for large datasets
+                        </p>
+                      </div>
                     )
                   }
-                  return null
+                  return (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mt-2">
+                      <p className="text-xs text-gray-600 text-center">
+                        Data will appear once completely loaded
+                      </p>
+                    </div>
+                  )
                 })()}
               </div>
             </div>
@@ -1275,22 +1296,34 @@ const Dashboard = () => {
                 Auto-refresh: {autoRefresh ? 'Active (20 min)' : 'Inactive'}
               </span>
             </div>
-            {lastRefreshTime && (
+            {lastRefreshTime && !isLoading && (
               <div className="text-gray-300">
                 Last refresh: {lastRefreshTime.toLocaleTimeString()}
               </div>
             )}
+            {isLoading && (
+              <div className="flex items-center text-yellow-300">
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-yellow-300 mr-2"></div>
+                Fetching data...
+              </div>
+            )}
           </div>
           <div className="flex items-center space-x-6">
-            {nextRefreshTime && autoRefresh && (
+            {nextRefreshTime && autoRefresh && !isLoading && (
               <div className="text-gray-300">
                 Next refresh: {nextRefreshTime.toLocaleTimeString()}
               </div>
             )}
             <div className="text-gray-300">
-              Orders: {orders.length} | 
-              Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-              v1.0.3
+              {isLoading ? (
+                'Loading...'
+              ) : (
+                <>
+                  Orders: {orders.length} | 
+                  Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
+                  v1.0.3
+                </>
+              )}
             </div>
           </div>
         </div>
