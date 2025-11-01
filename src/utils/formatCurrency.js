@@ -22,3 +22,16 @@ export const formatDollarAmount = (amount, decimals = 2) => {
   return `$${formatCurrency(amount, decimals)}`
 }
 
+/**
+ * Format a number with comma separators (no currency symbol)
+ * @param {number|string} number - The number to format
+ * @param {number} decimals - Number of decimal places (default: 0)
+ * @returns {string} Formatted number string with commas
+ */
+export const formatNumber = (number, decimals = 0) => {
+  const num = parseFloat(number) || 0
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  })
+}

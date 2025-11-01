@@ -4,7 +4,7 @@ import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
-import { formatDollarAmount } from '../utils/formatCurrency'
+import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
 const Dashboard = () => {
   const [orders, setOrders] = useState([])
@@ -861,7 +861,7 @@ const Dashboard = () => {
               </div>
               <div className="ml-4">
                   <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">{filteredTotalOrders}</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatNumber(filteredTotalOrders)}</p>
                 </div>
               </div>
               <button
@@ -882,15 +882,15 @@ const Dashboard = () => {
                 <div className="space-y-2 text-sm text-gray-600">
                   <div className="flex justify-between">
                     <span>All Orders:</span>
-                    <span className="font-medium">{filteredTotalOrders}</span>
+                    <span className="font-medium">{formatNumber(filteredTotalOrders)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Accepted Orders:</span>
-                    <span className="font-medium">{filteredAcceptedOrders.length}</span>
+                    <span className="font-medium">{formatNumber(filteredAcceptedOrders.length)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Pending/Cancelled/Rejected:</span>
-                    <span className="font-medium">{filteredTotalOrders - filteredAcceptedOrders.length}</span>
+                    <span className="font-medium">{formatNumber(filteredTotalOrders - filteredAcceptedOrders.length)}</span>
           </div>
               </div>
               </div>
@@ -939,7 +939,7 @@ const Dashboard = () => {
                   </div>
                   <div className="flex justify-between">
                     <span>Accepted Orders Count:</span>
-                    <span className="font-medium">{filteredAcceptedOrders.length}</span>
+                    <span className="font-medium">{formatNumber(filteredAcceptedOrders.length)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>AOV (On Base Total):</span>
@@ -988,11 +988,11 @@ const Dashboard = () => {
                   </div>
                   <div className="flex justify-between">
                     <span>Revenue Orders:</span>
-                    <span className="font-medium">{filteredAcceptedOrders.length}</span>
+                    <span className="font-medium">{formatNumber(filteredAcceptedOrders.length)}</span>
           </div>
                   <div className="flex justify-between">
                     <span>Calculation:</span>
-                    <span className="font-medium">{filteredAcceptedOrders.length > 0 ? `${formatDollarAmount(filteredTotalRevenue)} ÷ ${filteredAcceptedOrders.length} = ${formatDollarAmount(filteredAverageOrderValue)}` : 'N/A'}</span>
+                    <span className="font-medium">{filteredAcceptedOrders.length > 0 ? `${formatDollarAmount(filteredTotalRevenue)} ÷ ${formatNumber(filteredAcceptedOrders.length)} = ${formatDollarAmount(filteredAverageOrderValue)}` : 'N/A'}</span>
             </div>
                 </div>
                 </div>
@@ -1033,7 +1033,7 @@ const Dashboard = () => {
           </div>
           {searchTerm && (
             <p className="mt-2 text-sm text-gray-600">
-              Found {filteredOrders.length} orders matching "{searchTerm}"
+              Found {formatNumber(filteredOrders.length)} orders matching "{searchTerm}"
             </p>
           )}
         </div>
@@ -1044,7 +1044,7 @@ const Dashboard = () => {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-xl font-semibold text-gray-900">Orders Dashboard</h2>
             <div className="text-sm text-gray-600">
-              Showing {filteredOrdersByStatusAndDelivery.length} of {totalOrders} orders
+              Showing {formatNumber(filteredOrdersByStatusAndDelivery.length)} of {formatNumber(totalOrders)} orders
             </div>
           </div>
 
@@ -1319,7 +1319,7 @@ const Dashboard = () => {
                 'Loading...'
               ) : (
                 <>
-                  Orders: {orders.length} | 
+                  Orders: {formatNumber(orders.length)} | 
                   Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
                   v1.0.3
                 </>
