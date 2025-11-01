@@ -476,6 +476,65 @@ function getMockOrders(orderDate) {
   ]
 }
 
+// Helper function to fetch orders for a specific date range
+async function fetchOrdersForDateRange(startDate, endDate) {
+  // Convert local dates to UTC
+  const localStartDate = new Date(startDate + 'T00:00:00')
+  const localEndDate = new Date(endDate + 'T23:59:59')
+  
+  const utcStartDate = new Date(localStartDate.getTime() - (localStartDate.getTimezoneOffset() * 60000))
+  const utcEndDate = new Date(localEndDate.getTime() - (localEndDate.getTimezoneOffset() * 60000))
+  
+  const utcStartString = utcStartDate.toISOString().split('T')[0]
+  const utcEndString = utcEndDate.toISOString().split('T')[0]
+  
+  const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${utcStartString}&endDate=${utcEndString}`
+  
+  let response
+  let retryCount = 0
+  const maxRetries = 2
+  
+  while (retryCount < maxRetries) {
+    try {
+      response = await axios.get(apiUrl, {
+        timeout: 120000,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Bevvi-Order-Tracking-System/1.0'
+        }
+      })
+      break
+    } catch (retryError) {
+      retryCount++
+      if (retryCount >= maxRetries) {
+        throw retryError
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000))
+    }
+  }
+  
+  if (response.status === 200 && response.data && response.data.results) {
+    const csvData = response.data.results
+    const allOrders = parseCSVToOrders(csvData, startDate)
+    
+    // Filter orders by date range
+    const filteredOrders = allOrders.filter(order => {
+      if (!order.deliveryDate || order.deliveryDate === 'N/A') {
+        return order.orderDate >= startDate && order.orderDate <= endDate
+      }
+      
+      const deliveryInRange = order.deliveryDate >= startDate && order.deliveryDate <= endDate
+      const orderInRange = order.orderDate >= startDate && order.orderDate <= endDate
+      
+      return deliveryInRange || orderInRange
+    })
+    
+    return filteredOrders
+  }
+  
+  return []
+}
+
 // API Routes
 app.get('/api/orders', async (req, res) => {
   try {
@@ -524,6 +583,71 @@ app.get('/api/orders', async (req, res) => {
     // Update auto-refresh range when new dates are requested
     updateAutoRefreshRange(startDate, endDate)
     
+    // Check cache first
+    const cacheKey = `${startDate}-${endDate}`
+    const cached = ordersCache.get(cacheKey)
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+      console.log('✅ Returning cached data for:', cacheKey)
+      return res.json({
+        success: true,
+        data: cached.data,
+        dateRange: { startDate, endDate },
+        totalOrders: cached.data.length,
+        message: `Orders fetched for ${startDate} to ${endDate}`,
+        source: 'Cache',
+        cached: true
+      })
+    }
+    
+    // Calculate date range in days
+    const diffTime = Math.abs(new Date(endDate) - new Date(startDate))
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    
+    console.log(`📅 Date range: ${startDate} to ${endDate} (${diffDays} days)`)
+    
+    // For large date ranges (>90 days), use chunking
+    if (diffDays > 90) {
+      console.log('🔄 Large date range detected, using chunked requests...')
+      const chunks = splitDateRange(startDate, endDate, 30) // Split into 30-day chunks
+      console.log(`📦 Split into ${chunks.length} chunks`)
+      
+      let allOrders = []
+      let successfulChunks = 0
+      
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i]
+        console.log(`🔄 Processing chunk ${i + 1}/${chunks.length}: ${chunk.startDate} to ${chunk.endDate}`)
+        
+        try {
+          const chunkOrders = await fetchOrdersForDateRange(chunk.startDate, chunk.endDate)
+          allOrders = allOrders.concat(chunkOrders)
+          successfulChunks++
+          console.log(`✅ Chunk ${i + 1} complete: ${chunkOrders.length} orders`)
+        } catch (error) {
+          console.log(`❌ Chunk ${i + 1} failed: ${error.message}`)
+          // Continue with other chunks even if one fails
+        }
+      }
+      
+      // Cache the combined results
+      ordersCache.set(cacheKey, { data: allOrders, timestamp: Date.now() })
+      
+      console.log(`✅ All chunks processed: ${allOrders.length} total orders from ${successfulChunks}/${chunks.length} successful chunks`)
+      
+      return res.json({
+        success: true,
+        data: allOrders,
+        dateRange: { startDate, endDate },
+        totalOrders: allOrders.length,
+        message: `Orders fetched for ${startDate} to ${endDate} (${chunks.length} chunks)`,
+        source: 'Bevvi API (Chunked)',
+        chunked: true,
+        chunks: chunks.length,
+        successfulChunks: successfulChunks
+      })
+    }
+    
+    // For smaller date ranges, use single request
     // Convert local dates to UTC before calling the Bevvi API
     // This ensures we get orders that are scheduled for delivery on the requested local dates
     const localStartDate = new Date(startDate + 'T00:00:00') // Start of day in local time
@@ -543,10 +667,6 @@ app.get('/api/orders', async (req, res) => {
     console.log('🕐 Converting local dates to UTC for API call:')
     console.log('  Local requested range:', startDate, 'to', endDate)
     console.log('  UTC API range:', utcStartString, 'to', utcEndString)
-    console.log('  Local start time:', localStartDate.toLocaleString())
-    console.log('  Local end time:', localEndDate.toLocaleString())
-    console.log('  UTC start time:', utcStartDate.toISOString())
-    console.log('  UTC end time:', utcEndDate.toISOString())
     console.log('Calling Bevvi API:', apiUrl)
     
     try {
@@ -558,7 +678,7 @@ app.get('/api/orders', async (req, res) => {
       while (retryCount < maxRetries) {
         try {
           response = await axios.get(apiUrl, {
-            timeout: 60000, // Increased from 30s to 60s for larger date ranges
+            timeout: 120000, // Increased to 120s (2 minutes) for large date ranges
             headers: {
               'Accept': 'application/json',
               'User-Agent': 'Bevvi-Order-Tracking-System/1.0'
@@ -617,6 +737,9 @@ app.get('/api/orders', async (req, res) => {
           console.log(`🔍 Orders with delivery dates in range: ${filteredOrders.filter(o => o.deliveryDate && o.deliveryDate !== 'N/A' && o.deliveryDate >= startDate && o.deliveryDate <= endDate).length}`)
           console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate >= startDate && o.orderDate <= endDate).length}`)
           
+          // Cache the results
+          ordersCache.set(cacheKey, { data: filteredOrders, timestamp: Date.now() })
+          
           // Check if we got real orders from API
           if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
             // Real orders from API
@@ -627,7 +750,7 @@ app.get('/api/orders', async (req, res) => {
               totalOrders: filteredOrders.length,
               message: `Orders fetched for ${startDate} to ${endDate}`,
               source: 'Bevvi API',
-              rawData: csvData.substring(0, 500) + '...' // First 500 chars for debugging
+              cached: false
             })
           } else {
             // No real orders found - return empty array instead of mock data
@@ -638,7 +761,8 @@ app.get('/api/orders', async (req, res) => {
               totalOrders: 0,
               message: `No orders found for ${startDate} to ${endDate}`,
               source: 'Bevvi API',
-              note: 'The selected date range has no orders.'
+              note: 'The selected date range has no orders.',
+              cached: false
             })
           }
         } else {
@@ -729,6 +853,10 @@ let lastAutoRefreshRange = null
 
 // Store connected clients for real-time updates
 let connectedClients = []
+
+// Cache configuration
+const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
+const ordersCache = new Map() // key: "startDate-endDate", value: { data, timestamp }
 
 // Function to start auto-refresh
 function startAutoRefresh() {

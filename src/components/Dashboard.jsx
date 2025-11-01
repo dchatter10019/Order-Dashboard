@@ -7,7 +7,6 @@ import OrderModal from './OrderModal'
 import { formatDollarAmount } from '../utils/formatCurrency'
 
 const Dashboard = () => {
-  console.log('🔍 Dashboard component rendering')
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -140,53 +139,11 @@ const Dashboard = () => {
       (searchLower === 'delayed' && order.deliveryStatus?.toLowerCase() === 'delayed')
     )
     
-    console.log('🔍 Search results:', {
-      searchTerm,
-      totalOrders: orders.length,
-      filteredCount: results.length,
-      results: results.map(order => ({
-        id: order.id,
-        customerName: order.customerName,
-        status: order.status,
-        deliveryStatus: order.deliveryStatus,
-        revenue: order.revenue,
-        ordernum: order.ordernum
-      })),
-      allStatuses: [...new Set(results.map(order => order.status))],
-      deliveryStatuses: [...new Set(results.map(order => order.deliveryStatus))],
-      revenueValues: results.map(order => ({
-        id: order.id,
-        revenue: order.revenue,
-        revenueType: typeof order.revenue,
-        parsedRevenue: parseFloat(order.revenue)
-      }))
-    })
-    
-    // Debug: Log delivery status values for troubleshooting
-    if (searchLower === 'delayed') {
-      console.log('🔍 Searching for delayed orders...')
-      console.log('📊 All orders delivery statuses:', orders.map(order => ({
-        id: order.id,
-        deliveryStatus: order.deliveryStatus,
-        status: order.status,
-        shippingFee: order.shippingFee
-      })))
-      console.log('🎯 Orders with deliveryStatus === "Delayed":', orders.filter(order => order.deliveryStatus === 'Delayed').length)
-      console.log('🎯 Orders with deliveryStatus === "delayed":', orders.filter(order => order.deliveryStatus === 'delayed').length)
-      console.log('🎯 Orders with deliveryStatus containing "delayed":', orders.filter(order => order.deliveryStatus?.toLowerCase().includes('delayed')).length)
-    }
-    
     return results
   }, [orders, searchTerm])
 
   // Filter orders based on status and delivery filters
   const filteredOrdersByStatusAndDelivery = useMemo(() => {
-    console.log('🔍 filteredOrdersByStatusAndDelivery called with:', {
-      filteredOrdersLength: filteredOrders.length,
-      statusFilter: statusFilter,
-      deliveryFilter: deliveryFilter
-    })
-    
     let filtered = filteredOrders
     
     // Apply status filter - if none selected, show all (default to "Select All")
@@ -362,20 +319,6 @@ const Dashboard = () => {
     .reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0)
   const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
 
-  // Debug logging for status filtering
-  console.log('🔍 Status Filtering Debug:', {
-    totalFilteredOrders: filteredOrdersByStatusAndDelivery.length,
-    acceptedOrdersCount: filteredAcceptedOrders.length,
-    allStatuses: [...new Set(filteredOrdersByStatusAndDelivery.map(order => order.status))],
-    acceptedOrders: filteredAcceptedOrders.map(order => ({
-      id: order.id,
-      status: order.status,
-      revenue: order.revenue
-    })),
-    totalRevenue: filteredTotalRevenue,
-    averageOrderValue: filteredAverageOrderValue
-  })
-
   // Fetch orders function
   const fetchOrders = async () => {
     try {
@@ -396,14 +339,13 @@ const Dashboard = () => {
       
       setIsLoading(true)
       setApiError(null)
+      // Clear old orders to prevent showing stale data while loading
+      setOrders([])
       
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
       const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
-      console.log('🔍 Fetching orders from:', apiUrl)
-      console.log('📅 Date range:', dateRange)
-      console.log('⏰ Timestamp:', timestamp)
-      console.log('🎲 Random ID:', randomId)
+      console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
       
       const response = await fetch(apiUrl)
       
@@ -412,21 +354,17 @@ const Dashboard = () => {
       }
       
       const data = await response.json()
-      console.log('📊 API Response:', data)
-      console.log('📋 Orders count:', data.data?.length || 0)
-      console.log('🎯 Orders array:', data.data)
-      console.log('🔍 Orders data type:', typeof data.data)
-      console.log('🔍 Orders is array:', Array.isArray(data.data))
+      console.log(`✅ Received ${data.data?.length || 0} orders ${data.cached ? '(cached)' : ''}${data.chunked ? ` (${data.chunks} chunks)` : ''}`)
       
+      // Only update orders after ALL data is retrieved (not during chunking)
       if (data.data && Array.isArray(data.data)) {
-        console.log('✅ Setting real orders from API')
-        console.log('📊 Orders before setState:', orders)
         setOrders(data.data)
-        console.log('🔄 setOrders called with:', data.data)
       } else {
-        console.log('❌ No valid orders data, setting empty array')
         setOrders([])
       }
+      
+      // Clear loading state AFTER orders are set to prevent number jumping
+      setIsLoading(false)
       
       // Update last refresh time
       const now = new Date()
@@ -442,7 +380,6 @@ const Dashboard = () => {
         status: 'Network Error',
         details: error.message
       })
-    } finally {
       setIsLoading(false)
     }
   }
@@ -515,9 +452,6 @@ const Dashboard = () => {
       setIsLoadingDetails(true)
       setDetailsError(null)
       
-      console.log('🔍 Fetching order details for:', orderNumber)
-      console.log('🌐 API URL:', `https://api.getbevvi.com/api/corputil/getOrderInfo?orderNumber=${orderNumber}`)
-      
       const response = await fetch(`/api/order-details/${orderNumber}`, {
         method: 'GET',
         headers: {
@@ -526,28 +460,14 @@ const Dashboard = () => {
         }
       })
       
-      console.log('📡 Response status:', response.status)
-      console.log('📡 Response headers:', response.headers)
-      
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error('❌ API Error Response:', errorText)
-        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`)
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
       
       const data = await response.json()
-      console.log('📊 Order details response:', data)
-      console.log('📊 Products array:', data.products)
-      console.log('📊 Products count:', data.products ? data.products.length : 'No products array')
-      
       setOrderDetails(data)
     } catch (error) {
-      console.error('❌ Error fetching order details:', error)
-      console.error('❌ Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      })
+      console.error('❌ Error fetching order details:', error.message)
       setDetailsError({
         message: 'Failed to fetch order details',
         details: error.message
@@ -565,7 +485,10 @@ const Dashboard = () => {
   }
 
   useEffect(() => {
-    fetchOrders()
+    // Debounce fetchOrders to prevent rapid API calls when date changes
+    const debounceTimer = setTimeout(() => {
+      fetchOrders()
+    }, 500) // Wait 500ms after last date change before fetching
     
     // Update backend auto-refresh with new date range if auto-refresh is active
     if (autoRefresh) {
@@ -599,6 +522,9 @@ const Dashboard = () => {
       
       updateBackendAutoRefresh()
     }
+    
+    // Cleanup: cancel the timer if dateRange changes again before it fires
+    return () => clearTimeout(debounceTimer)
   }, [dateRange, autoRefresh])
 
   // Real-time updates using Server-Sent Events
@@ -742,13 +668,6 @@ const Dashboard = () => {
       }
     }
   }, [autoRefreshInterval])
-  
-  // Debug effect to log orders changes
-  useEffect(() => {
-    console.log('🔄 Orders state changed:', orders)
-    console.log('📊 Orders count:', orders.length)
-    console.log('🎯 First order:', orders[0])
-  }, [orders])
 
   // Toggle tile collapse state
   const toggleTile = (tileKey) => {
@@ -871,6 +790,43 @@ const Dashboard = () => {
         </div>
 
 
+
+        {/* Loading Overlay - Covers entire data area */}
+        {isLoading && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md mx-4">
+              <div className="flex flex-col items-center">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 mb-4"></div>
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">Loading Orders...</h3>
+                <p className="text-gray-600 text-center">
+                  {(() => {
+                    const start = new Date(dateRange.startDate)
+                    const end = new Date(dateRange.endDate)
+                    const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24))
+                    if (diffDays > 90) {
+                      return `Processing large date range (${diffDays} days)...`
+                    }
+                    return 'Please wait while we fetch your data...'
+                  })()}
+                </p>
+                {(() => {
+                  const start = new Date(dateRange.startDate)
+                  const end = new Date(dateRange.endDate)
+                  const diffDays = Math.ceil(Math.abs(end - start) / (1000 * 60 * 60 * 24))
+                  if (diffDays > 90) {
+                    const chunks = Math.ceil(diffDays / 30)
+                    return (
+                      <p className="text-sm text-blue-600 mt-2">
+                        Processing {chunks} chunks for better performance
+                      </p>
+                    )
+                  }
+                  return null
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Summary Tiles */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
@@ -1075,14 +1031,6 @@ const Dashboard = () => {
                 </div>
           )}
 
-          {/* Loading State */}
-          {isLoading && (
-            <div className="text-center py-8">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-              <p className="text-gray-600">Loading orders...</p>
-            </div>
-          )}
-
           {/* Orders Display */}
           {!isLoading && !apiError && (
             <div>
@@ -1199,17 +1147,12 @@ const Dashboard = () => {
                           <td className="px-3 py-4 text-sm font-medium text-gray-900">
                             <button
                               onClick={() => {
-                                console.log('🖱️ Order clicked:', order)
-                                console.log('🖱️ Order number:', order.ordernum || order.id)
                                 setSelectedOrder(order)
                                 setIsModalOpen(true)
                                 // Fetch detailed order information
                                 const orderNumber = order.ordernum || order.id
                                 if (orderNumber) {
-                                  console.log('🔄 Calling fetchOrderDetails for:', orderNumber)
                                   fetchOrderDetails(orderNumber)
-                                } else {
-                                  console.error('❌ No order number found for order:', order)
                                 }
                               }}
                               className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer truncate block w-full text-left"

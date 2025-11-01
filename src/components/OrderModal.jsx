@@ -5,33 +5,18 @@ import { formatDollarAmount } from '../utils/formatCurrency'
 const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, detailsError, setOrderDetails }) => {
   if (!isOpen || !order) return null
 
-  // Debug logging
-  console.log('🔍 OrderModal rendered with:', {
-    order: order?.id || order?.ordernum,
-    orderDetails: orderDetails ? 'Present' : 'Missing',
-    products: orderDetails?.products ? orderDetails.products.length : 'No products',
-    isLoadingDetails,
-    detailsError: detailsError ? 'Present' : 'None'
-  })
-
   // Auto-trigger API call when modal opens
   useEffect(() => {
     if (isOpen && order && !orderDetails && !isLoadingDetails) {
       const orderNumber = order.ordernum || order.id
-      console.log('🚀 Auto-triggering API call for:', orderNumber)
       
       fetch(`/api/order-details/${orderNumber}`)
-        .then(response => {
-          console.log('🚀 Auto-trigger - Response status:', response.status)
-          return response.json()
-        })
+        .then(response => response.json())
         .then(data => {
-          console.log('🚀 Auto-trigger - Response data:', data)
-          console.log('🚀 Auto-trigger - Products:', data.products)
           setOrderDetails(data)
         })
         .catch(error => {
-          console.error('🚀 Auto-trigger - Error:', error)
+          console.error('Error loading order details:', error)
         })
     }
   }, [isOpen, order, orderDetails, isLoadingDetails, setOrderDetails])
