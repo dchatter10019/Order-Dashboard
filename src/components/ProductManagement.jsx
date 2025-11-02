@@ -38,6 +38,7 @@ const ProductManagement = () => {
   const [showProductDropdown, setShowProductDropdown] = useState(false)
   const [isSearching, setIsSearching] = useState(false)
   const [searchResults, setSearchResults] = useState([])
+  const [productCacheStatus, setProductCacheStatus] = useState(null)
   
   const searchTimeoutRef = useRef(null)
   const storeSearchTimeoutRef = useRef(null)
@@ -102,18 +103,27 @@ const ProductManagement = () => {
     }
   }, [stores])
 
-  // Load only stores on mount (products loaded on-demand during search)
+  // Load stores and check product cache status on mount
   useEffect(() => {
     const loadInitialData = async () => {
-      // Check if stores are in sessionStorage
+      // Check product cache status from backend
+      try {
+        const statusResponse = await fetch('/api/products/status')
+        const statusData = await statusResponse.json()
+        setProductCacheStatus(statusData)
+        console.log('📦 Product cache status:', statusData)
+      } catch (error) {
+        console.error('Error checking product cache status:', error)
+      }
+      
+      // Always load stores on mount (check cache first)
       const hasStoresInStorage = sessionStorage.getItem('bevvi_stores')
       
-      // Only load stores if not cached
-      if (!hasStoresInStorage) {
+      if (!hasStoresInStorage || stores.length === 0) {
         setIsLoadingData(true)
         try {
           await loadStores()
-          setMessage('✓ Stores loaded from API. Products will load as you search.')
+          console.log('✅ Stores loaded successfully')
         } catch (error) {
           setMessage(`Error loading stores: ${error.message}`)
         } finally {
@@ -298,25 +308,23 @@ const ProductManagement = () => {
       </div>
 
       {/* Helpful banner */}
-      {stores.length === 0 && !isLoadingData && (
-        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-start">
-            <div className="flex-shrink-0">
-              <Package className="h-5 w-5 text-blue-600 mt-0.5" />
-            </div>
-            <div className="ml-3 flex-1">
-              <h3 className="text-sm font-medium text-blue-800">Fast Product Search</h3>
-              <div className="mt-2 text-sm text-blue-700">
-                <p>Just start typing (3+ characters) to search the entire Bevvi catalog!</p>
-                <p className="mt-1 text-xs">✓ Lightning-fast backend search (all products cached)</p>
-                <p className="mt-1 text-xs">✓ Searches ALL Bevvi products (not just company-specific)</p>
-                <p className="mt-1 text-xs">✓ Cache refreshes automatically every hour</p>
-                <p className="mt-1 text-xs">✓ Instant results from server memory</p>
-              </div>
+      <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex items-start">
+          <div className="flex-shrink-0">
+            <Package className="h-5 w-5 text-blue-600 mt-0.5" />
+          </div>
+          <div className="ml-3 flex-1">
+            <h3 className="text-sm font-medium text-blue-800">Backend-Cached Product Search</h3>
+            <div className="mt-2 text-sm text-blue-700">
+              <p>All products and stores are loaded automatically!</p>
+              <p className="mt-1 text-xs">✓ ALL Bevvi products cached in backend (50,000+)</p>
+              <p className="mt-1 text-xs">✓ Instant search results from server memory (&lt; 10ms)</p>
+              <p className="mt-1 text-xs">✓ Stores loaded from API automatically</p>
+              <p className="mt-1 text-xs">✓ Type 3+ characters to search products</p>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* API Data Status Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -326,10 +334,24 @@ const ProductManagement = () => {
             <Package className="w-6 h-6 text-blue-600 mr-3" />
             <h3 className="text-lg font-semibold">Products</h3>
           </div>
-          <p className="text-sm text-green-600 mt-2">✓ Cached in Backend</p>
-          <p className="text-xs text-gray-400 mt-1">All Bevvi products loaded on server startup</p>
-          {searchResults.length > 0 && (
-            <p className="text-xs text-blue-600 mt-1">{searchResults.length} results found</p>
+          {productCacheStatus ? (
+            <>
+              <p className="text-sm text-green-600 mt-2">✓ {productCacheStatus.totalProducts.toLocaleString()} products cached</p>
+              <p className="text-xs text-gray-400 mt-1">All Bevvi products loaded in backend</p>
+              {productCacheStatus.lastUpdated && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Last updated: {new Date(productCacheStatus.lastUpdated).toLocaleTimeString()}
+                </p>
+              )}
+              {searchResults.length > 0 && (
+                <p className="text-xs text-blue-600 mt-1">{searchResults.length} results found</p>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center text-sm text-blue-600 mt-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+              Checking cache status...
+            </div>
           )}
         </div>
 
@@ -367,44 +389,64 @@ const ProductManagement = () => {
 
       {/* Action Buttons */}
       <div className="mb-8 flex justify-center gap-4">
-        {stores.length === 0 && (
+        {stores.length > 0 && (
           <button
-            onClick={loadDataFromAPIs}
+            onClick={async () => {
+              setIsLoadingData(true)
+              try {
+                // Refresh stores from API
+                await loadStores()
+                // Refresh product cache status
+                const statusResponse = await fetch('/api/products/status')
+                const statusData = await statusResponse.json()
+                setProductCacheStatus(statusData)
+                setMessage('✅ Stores and product cache refreshed from API')
+              } catch (error) {
+                setMessage(`Error refreshing data: ${error.message}`)
+              } finally {
+                setIsLoadingData(false)
+              }
+            }}
             disabled={isLoadingData}
-            className="flex items-center px-6 py-3 bg-indigo-600 text-white font-medium rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoadingData ? (
               <>
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                Loading Stores...
+                Refreshing...
               </>
             ) : (
               <>
                 <RefreshCw className="w-5 h-5 mr-2" />
-                Load Stores
+                Refresh Stores
               </>
             )}
           </button>
         )}
         
-        {stores.length > 0 && (
-          <button
-            onClick={() => {
-              sessionStorage.removeItem('bevvi_stores')
-              setStores([])
-              setSearchResults([])
-              setStoreSearchResults([])
-              setProductSearchTerm('')
-              setDebouncedSearchTerm('')
-              setStoreSearchTerm('')
-              setDebouncedStoreSearchTerm('')
-              setMessage('✅ Store cache cleared. Stores will reload automatically.')
-            }}
-            className="flex items-center px-4 py-3 bg-gray-500 text-white font-medium rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
-          >
-            Clear Store Cache
-          </button>
-        )}
+        <button
+          onClick={async () => {
+            try {
+              const response = await fetch('/api/products/refresh', { method: 'POST' })
+              const data = await response.json()
+              if (data.success) {
+                setProductCacheStatus({
+                  totalProducts: data.totalProducts,
+                  lastUpdated: data.timestamp
+                })
+                setMessage(`✅ Product cache refreshed: ${data.totalProducts.toLocaleString()} products`)
+              } else {
+                setMessage(`Error: ${data.message}`)
+              }
+            } catch (error) {
+              setMessage(`Error refreshing products: ${error.message}`)
+            }
+          }}
+          className="flex items-center px-6 py-3 bg-green-600 text-white font-medium rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+        >
+          <RefreshCw className="w-5 h-5 mr-2" />
+          Refresh Product Cache
+        </button>
       </div>
 
       {/* Info about real-time updates */}
