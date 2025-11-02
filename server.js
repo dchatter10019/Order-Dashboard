@@ -858,6 +858,11 @@ let connectedClients = []
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
 const ordersCache = new Map() // key: "startDate-endDate", value: { data, timestamp }
 
+// Products cache - loaded on server startup
+let productsCache = []
+let productsCacheTimestamp = null
+const PRODUCTS_CACHE_DURATION = 60 * 60 * 1000 // 1 hour cache for products
+
 // Function to start auto-refresh
 function startAutoRefresh() {
   if (autoRefreshTimer) {
@@ -970,6 +975,134 @@ function removeClient(client) {
     console.log(`📱 Client disconnected. Total clients: ${connectedClients.length}`)
   }
 }
+
+// Function to load all Bevvi products
+async function loadAllProducts() {
+  try {
+    console.log('📦 Loading all Bevvi products from API...')
+    const response = await axios.get('https://api.getbevvi.com/api/corputil/getBevviProductsAsJSON', {
+      timeout: 120000, // 2 minutes for large dataset
+      headers: {
+        'Accept': 'application/json'
+      }
+    })
+    
+    if (response.status === 200 && response.data && response.data.results) {
+      productsCache = response.data.results
+      productsCacheTimestamp = Date.now()
+      console.log(`✅ Loaded ${productsCache.length} products into cache`)
+      return productsCache.length
+    } else {
+      console.error('❌ Failed to load products: Invalid response format')
+      return 0
+    }
+  } catch (error) {
+    console.error('❌ Error loading products:', error.message)
+    return 0
+  }
+}
+
+// Function to search cached products
+function searchProducts(searchTerm) {
+  if (!searchTerm || searchTerm.length < 3) {
+    return []
+  }
+  
+  const searchLower = searchTerm.toLowerCase()
+  const results = productsCache.filter(product => {
+    const name = (product.name || '').toLowerCase()
+    const upc = (product.upc || '').toLowerCase()
+    return name.includes(searchLower) || upc.includes(searchLower)
+  })
+  
+  // Deduplicate by UPC
+  const seen = new Set()
+  const deduped = results.filter(p => {
+    const upc = p.upc
+    if (!upc || seen.has(upc)) return false
+    seen.add(upc)
+    return true
+  })
+  
+  // Limit to 100 results for performance
+  return deduped.slice(0, 100)
+}
+
+// Product search endpoint - searches cached products
+app.get('/api/products/search', (req, res) => {
+  try {
+    const { q } = req.query
+    
+    if (!q || q.length < 3) {
+      return res.json({
+        success: true,
+        results: [],
+        message: 'Search term must be at least 3 characters'
+      })
+    }
+    
+    // Check if cache needs refresh (older than 1 hour)
+    const cacheAge = productsCacheTimestamp ? Date.now() - productsCacheTimestamp : null
+    const cacheExpired = !productsCacheTimestamp || cacheAge > PRODUCTS_CACHE_DURATION
+    
+    if (cacheExpired) {
+      console.log('⚠️ Products cache expired or empty, may need refresh')
+    }
+    
+    const results = searchProducts(q)
+    
+    res.json({
+      success: true,
+      results: results,
+      totalProducts: productsCache.length,
+      searchTerm: q,
+      cacheAge: cacheAge ? Math.floor(cacheAge / 1000) : null,
+      cacheExpired: cacheExpired
+    })
+  } catch (error) {
+    console.error('Error searching products:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to search products',
+      message: error.message
+    })
+  }
+})
+
+// Refresh products cache endpoint
+app.post('/api/products/refresh', async (req, res) => {
+  try {
+    console.log('🔄 Refreshing products cache...')
+    const count = await loadAllProducts()
+    
+    res.json({
+      success: true,
+      message: 'Products cache refreshed',
+      totalProducts: count,
+      timestamp: new Date().toISOString()
+    })
+  } catch (error) {
+    console.error('Error refreshing products cache:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to refresh products cache',
+      message: error.message
+    })
+  }
+})
+
+// Get products cache status
+app.get('/api/products/status', (req, res) => {
+  const cacheAge = productsCacheTimestamp ? Date.now() - productsCacheTimestamp : null
+  
+  res.json({
+    totalProducts: productsCache.length,
+    cacheTimestamp: productsCacheTimestamp,
+    cacheAge: cacheAge ? Math.floor(cacheAge / 1000) : null,
+    cacheExpired: !productsCacheTimestamp || cacheAge > PRODUCTS_CACHE_DURATION,
+    lastUpdated: productsCacheTimestamp ? new Date(productsCacheTimestamp).toISOString() : null
+  })
+})
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -1150,7 +1283,7 @@ app.use((error, req, res, next) => {
   })
 })
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Bevvi Order Tracking System server running on port ${PORT}`)
   console.log(`📊 API available at http://localhost:${PORT}/api`)
   console.log(`🌐 Frontend available at http://localhost:${PORT}`)
@@ -1159,4 +1292,12 @@ app.listen(PORT, () => {
   console.log(`   POST /api/auto-refresh/start - Start auto-refresh with date range`)
   console.log(`   POST /api/auto-refresh/stop - Stop auto-refresh`)
   console.log(`   GET  /api/auto-refresh/status - Check auto-refresh status`)
+  console.log(`📦 Product endpoints:`)
+  console.log(`   GET  /api/products/search?q=<term> - Search products`)
+  console.log(`   POST /api/products/refresh - Refresh products cache`)
+  console.log(`   GET  /api/products/status - Get cache status`)
+  console.log(``)
+  console.log(`📦 Loading all Bevvi products on startup...`)
+  await loadAllProducts()
+  console.log(`✅ Server ready with products cache loaded`)
 })

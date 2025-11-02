@@ -158,7 +158,7 @@ const ProductManagement = () => {
     }
   }
 
-  // Search products via API only (no local cache)
+  // Search products via backend cache (all Bevvi products)
   useEffect(() => {
     const searchProducts = async () => {
       if (!debouncedSearchTerm || debouncedSearchTerm.length < 3) {
@@ -168,47 +168,21 @@ const ProductManagement = () => {
       
       setIsSearching(true)
       try {
-        // Search API directly - fast and always fresh
-        console.log(`🔍 Searching API for "${debouncedSearchTerm}"`)
-        const filter = {
-          where: {
-            or: [
-              { name: { like: debouncedSearchTerm, options: 'i' } },
-              { upc: { like: debouncedSearchTerm, options: 'i' } }
-            ]
-          },
-          fields: { name: true, upc: true, id: true, client: true },
-          limit: 100
-        }
-        const encodedFilter = encodeURIComponent(JSON.stringify(filter))
+        // Search backend cache - all Bevvi products
+        console.log(`🔍 Searching backend cache for "${debouncedSearchTerm}"`)
         
-        const cacheBuster = `t=${Date.now()}`
-        const response = await fetch(
-          `https://api.getbevvi.com/api/corpproducts?filter=${encodedFilter}&${cacheBuster}`,
-          {
-            headers: {
-              'Cache-Control': 'no-cache, no-store, must-revalidate',
-              'Pragma': 'no-cache',
-              'Expires': '0'
-            }
-          }
-        )
+        const response = await fetch(`/api/products/search?q=${encodeURIComponent(debouncedSearchTerm)}`)
         if (!response.ok) throw new Error('Search failed')
         
         const data = await response.json()
-        const results = Array.isArray(data) ? data : (data.results || [])
         
-        // Deduplicate API results by UPC
-        const seen = new Set()
-        const deduped = results.filter(p => {
-          const upc = p.upc || p.UPC
-          if (!upc || seen.has(upc)) return false
-          seen.add(upc)
-          return true
-        })
-        
-        console.log(`✅ Found ${deduped.length} unique results from API (${results.length - deduped.length} duplicates removed)`)
-        setSearchResults(deduped)
+        if (data.success && data.results) {
+          console.log(`✅ Found ${data.results.length} products from cache (${data.totalProducts} total products available)`)
+          setSearchResults(data.results)
+        } else {
+          console.log('❌ No results found')
+          setSearchResults([])
+        }
       } catch (error) {
         console.error('Search error:', error)
         setSearchResults([])
@@ -291,7 +265,7 @@ const ProductManagement = () => {
       const result = await response.json()
 
       if (response.ok) {
-        setMessage('✓ Product added successfully! Note: Search results update in real-time from the API.')
+        setMessage('✓ Product added successfully! Search the product to verify it was added.')
         // Reset form
         setSelectedProduct('')
         setProductSearchTerm('')
@@ -331,13 +305,13 @@ const ProductManagement = () => {
               <Package className="h-5 w-5 text-blue-600 mt-0.5" />
             </div>
             <div className="ml-3 flex-1">
-              <h3 className="text-sm font-medium text-blue-800">Real-Time Product Search</h3>
+              <h3 className="text-sm font-medium text-blue-800">Fast Product Search</h3>
               <div className="mt-2 text-sm text-blue-700">
-                <p>Just start typing (3+ characters) to search across 50,000+ products!</p>
-                <p className="mt-1 text-xs">✓ Fast API search (~300ms)</p>
-                <p className="mt-1 text-xs">✓ Always fresh data from server (no caching)</p>
-                <p className="mt-1 text-xs">✓ New products from Bevvi master list appear immediately</p>
-                <p className="mt-1 text-xs">✓ "Refresh Search" button available when needed</p>
+                <p>Just start typing (3+ characters) to search the entire Bevvi catalog!</p>
+                <p className="mt-1 text-xs">✓ Lightning-fast backend search (all products cached)</p>
+                <p className="mt-1 text-xs">✓ Searches ALL Bevvi products (not just company-specific)</p>
+                <p className="mt-1 text-xs">✓ Cache refreshes automatically every hour</p>
+                <p className="mt-1 text-xs">✓ Instant results from server memory</p>
               </div>
             </div>
           </div>
@@ -352,8 +326,8 @@ const ProductManagement = () => {
             <Package className="w-6 h-6 text-blue-600 mr-3" />
             <h3 className="text-lg font-semibold">Products</h3>
           </div>
-          <p className="text-sm text-green-600 mt-2">✓ Real-Time API Search</p>
-          <p className="text-xs text-gray-400 mt-1">Searches 50,000+ products instantly</p>
+          <p className="text-sm text-green-600 mt-2">✓ Cached in Backend</p>
+          <p className="text-xs text-gray-400 mt-1">All Bevvi products loaded on server startup</p>
           {searchResults.length > 0 && (
             <p className="text-xs text-blue-600 mt-1">{searchResults.length} results found</p>
           )}
@@ -444,12 +418,12 @@ const ProductManagement = () => {
               <h3 className="text-sm font-medium text-green-800">Product Mapping Saved!</h3>
               <div className="mt-2 text-sm text-green-700">
                 <p>Your product mapping is saved and ready to use.</p>
-                <p className="mt-2"><strong>💡 Fresh Product Search:</strong></p>
+                <p className="mt-2"><strong>💡 Backend Product Cache:</strong></p>
                 <ul className="list-disc list-inside mt-1 text-xs space-y-1">
-                  <li>All searches query the server with latest data (no caching)</li>
-                  <li>Products added to Bevvi master list appear immediately</li>
-                  <li>Click "Refresh Search" button to re-query if needed</li>
-                  <li>Cache-busting ensures you always see current products</li>
+                  <li>All Bevvi products cached in backend for fast searching</li>
+                  <li>Search across the entire product catalog (all companies)</li>
+                  <li>Cache refreshes automatically every hour</li>
+                  <li>Instant search results from server memory</li>
                 </ul>
               </div>
             </div>
@@ -467,20 +441,6 @@ const ProductManagement = () => {
             <div ref={productSearchRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
                 <span>Product *</span>
-                {productSearchTerm.length >= 3 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Force re-search by updating the debounced term
-                      setDebouncedSearchTerm('')
-                      setTimeout(() => setDebouncedSearchTerm(productSearchTerm), 10)
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
-                  >
-                    <RefreshCw className="w-3 h-3 mr-1" />
-                    Refresh Search
-                  </button>
-                )}
               </label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -556,19 +516,6 @@ const ProductManagement = () => {
             <div ref={storeSearchRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
                 <span>Store *</span>
-                {storeSearchTerm.length >= 2 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDebouncedStoreSearchTerm('')
-                      setTimeout(() => setDebouncedStoreSearchTerm(storeSearchTerm), 10)
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-800 flex items-center"
-                  >
-                    <RefreshCw className="w-3 h-3 mr-1" />
-                    Refresh Search
-                  </button>
-                )}
               </label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
