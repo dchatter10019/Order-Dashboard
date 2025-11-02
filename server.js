@@ -20,7 +20,15 @@ app.use((req, res, next) => {
   next()
 })
 
-// Serve static files from the dist directory
+// Serve static files from the dist directory with no-cache headers for HTML
+app.use((req, res, next) => {
+  if (req.url.endsWith('.html') || req.url === '/' || req.url === '/dashboard' || req.url === '/products') {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+  }
+  next()
+})
 app.use(express.static(path.join(__dirname, 'dist')))
 
 // CSV parsing function
