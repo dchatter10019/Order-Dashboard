@@ -1321,7 +1321,7 @@ const Dashboard = () => {
                 <>
                   Orders: {formatNumber(orders.length)} | 
                   Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                  v1.0.3
+                  v1.0.4
                 </>
               )}
             </div>
