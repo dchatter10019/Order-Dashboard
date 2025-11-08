@@ -7,6 +7,34 @@ import Logo from './Logo'
 
 const MainDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('orders')
+  
+  // Persist AI Assistant state across tab switches
+  const [aiAssistantState, setAIAssistantState] = useState({
+    orders: [],
+    dateRange: (() => {
+      const today = new Date()
+      const todayString = today.getFullYear() + '-' + 
+                         String(today.getMonth() + 1).padStart(2, '0') + '-' + 
+                         String(today.getDate()).padStart(2, '0')
+      return {
+        startDate: todayString,
+        endDate: todayString
+      }
+    })(),
+    messages: [
+      {
+        type: 'assistant',
+        content: 'Hi! I can help you analyze your orders. Try asking me things like:',
+        suggestions: [
+          'Find all delayed orders from Oct 1 to Oct 31',
+          'What\'s the revenue for October?',
+          'Show me pending orders',
+          'How many orders were delivered this week?',
+          'What\'s the total revenue for November 2025?'
+        ]
+      }
+    ]
+  })
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -85,7 +113,12 @@ const MainDashboard = ({ onLogout }) => {
       <main className="max-w-7xl mx-auto">
         {activeTab === 'orders' && <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />}
         {activeTab === 'products' && <ProductManagement />}
-        {activeTab === 'ai-assistant' && <AIAssistant />}
+        {activeTab === 'ai-assistant' && (
+          <AIAssistant 
+            persistedState={aiAssistantState}
+            onStateChange={setAIAssistantState}
+          />
+        )}
       </main>
     </div>
   )

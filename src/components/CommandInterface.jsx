@@ -2,9 +2,17 @@ import React, { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
-const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOrders, isLoadingData }) => {
+const CommandInterface = ({ 
+  orders, 
+  onFilterChange, 
+  onDateRangeChange, 
+  onFetchOrders, 
+  isLoadingData,
+  messages: externalMessages,
+  setMessages: externalSetMessages
+}) => {
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState([
+  const [internalMessages, setInternalMessages] = useState([
     {
       type: 'assistant',
       content: 'Hi! I can help you analyze your orders. Try asking me things like:',
@@ -20,6 +28,10 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
   const messagesEndRef = useRef(null)
   const pendingCommandRef = useRef(null)
   const loadingTimeoutRef = useRef(null)
+  
+  // Use external messages if provided, otherwise use internal
+  const messages = externalMessages || internalMessages
+  const setMessages = externalSetMessages || setInternalMessages
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

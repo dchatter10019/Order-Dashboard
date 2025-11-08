@@ -1,19 +1,30 @@
 import React, { useState, useEffect } from 'react'
 import CommandInterface from './CommandInterface'
 
-const AIAssistant = () => {
-  const [orders, setOrders] = useState([])
+const AIAssistant = ({ persistedState, onStateChange }) => {
   const [isLoading, setIsLoading] = useState(false)
-  const [dateRange, setDateRange] = useState(() => {
-    const today = new Date()
-    const todayString = today.getFullYear() + '-' + 
-                       String(today.getMonth() + 1).padStart(2, '0') + '-' + 
-                       String(today.getDate()).padStart(2, '0')
-    return {
-      startDate: todayString,
-      endDate: todayString
+  
+  // Use persisted state from parent
+  const orders = persistedState.orders
+  const dateRange = persistedState.dateRange
+  const messages = persistedState.messages
+  
+  // Update persisted state
+  const setOrders = (newOrders) => {
+    onStateChange(prev => ({ ...prev, orders: newOrders }))
+  }
+  
+  const setDateRange = (newDateRange) => {
+    onStateChange(prev => ({ ...prev, dateRange: newDateRange }))
+  }
+  
+  const setMessages = (messagesOrUpdater) => {
+    if (typeof messagesOrUpdater === 'function') {
+      onStateChange(prev => ({ ...prev, messages: messagesOrUpdater(prev.messages) }))
+    } else {
+      onStateChange(prev => ({ ...prev, messages: messagesOrUpdater }))
     }
-  })
+  }
 
   const fetchOrders = async () => {
     try {
@@ -85,6 +96,8 @@ const AIAssistant = () => {
           onDateRangeChange={setDateRange}
           onFetchOrders={fetchOrders}
           isLoadingData={isLoading}
+          messages={messages}
+          setMessages={setMessages}
         />
         
         {/* Info Section */}
