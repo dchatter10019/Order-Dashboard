@@ -1331,17 +1331,20 @@ Today's date is ${new Date().toISOString().split('T')[0]}.
 
 Extract the following information from the user's query:
 - intent: The type of query. Choose from:
-  * revenue: asking about revenue/sales amounts
+  * revenue: asking about TOTAL revenue/sales amounts for a period (e.g., "revenue for Nov", "revenue for Oct 2025")
   * tax: asking about tax amounts
-  * service_charge: asking about service charge amounts
+  * service_charge: asking about service charge amounts (NOT tips or delivery)
+  * tip: asking about tip/gratuity amounts
+  * delivery_charge: asking about delivery fee/charge amounts (shipping fee, delivery fee)
   * delayed_orders: specifically asking for DELAYED orders
   * pending_orders: specifically asking for PENDING STATUS orders (must mention "pending")
   * delivered_orders: specifically asking for DELIVERED STATUS orders (must mention "delivered")
   * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries)
   * average_order_value: asking for AOV or average
-  * revenue_by_month: asking for revenue breakdown by month
+  * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
   * revenue_by_customer: asking for revenue for a specific customer
   * delayed_orders_by_customer: asking for delayed orders for a specific customer
+  * unknown: if the query is NOT about orders, revenue, tax, tips, delivery, or customer data (e.g., weather, personal questions, unrelated topics)
   
 - customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire). Always extract full company name, not partial words.
 - startDate: Start date in YYYY-MM-DD format

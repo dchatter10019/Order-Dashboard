@@ -160,6 +160,16 @@ const CommandInterface = ({
     console.log('🤖 GPT parsed data:', gptParsedData)
     const lower = command.toLowerCase()
     
+    // Check if GPT identified this as an unknown/unrelated query
+    if (gptParsedData?.intent === 'unknown') {
+      console.log('❌ GPT identified query as unrelated to orders')
+      return {
+        type: 'assistant',
+        content: "Sorry, I don't know how to handle this request.\n\nI'm designed to help with order data queries like:\n• Revenue, tax, tips, service charges, delivery charges\n• Delayed, pending, or delivered orders\n• Orders by customer (Sendoso, OnGoody, Air Culinaire)\n• Date-based queries (MTD, YTD, specific months)\n\nPlease ask a question about your orders.",
+        data: null
+      }
+    }
+    
     // Use GPT-parsed date range if available, otherwise fall back to rule-based
     const dateRange = gptParsedData?.dateRange || parseDate(command)
     console.log('📅 Date range from command:', dateRange)
@@ -502,6 +512,60 @@ const CommandInterface = ({
         averageServiceChargePerOrder: acceptedOrders.length > 0 ? totalServiceCharge / acceptedOrders.length : 0
       } : null
     }
+    // Tip query
+    else if ((gptParsedData?.intent === 'tip') || (!gptParsedData && (lower.includes('tip') || lower.includes('gratuity')))) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      const totalTip = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.tip) || 0), 0
+      )
+      
+      if (relevantOrders.length === 0) {
+        response.content = dateRange
+          ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
+          : 'No orders currently loaded. Try specifying a date range.'
+      } else {
+        const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+        response.content = dateRange
+          ? `Total tips for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalTip)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          : `Total tips: ${formatDollarAmount(totalTip)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+      }
+      
+      response.data = acceptedOrders.length > 0 ? {
+        type: 'tip',
+        totalTip: totalTip,
+        orderCount: acceptedOrders.length,
+        averageTipPerOrder: acceptedOrders.length > 0 ? totalTip / acceptedOrders.length : 0
+      } : null
+    }
+    // Delivery charge query
+    else if ((gptParsedData?.intent === 'delivery_charge') || (!gptParsedData && (lower.includes('delivery') && (lower.includes('charge') || lower.includes('fee'))))) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      const totalDeliveryCharge = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.shippingFee) || 0) + (parseFloat(order.deliveryFee) || 0), 0
+      )
+      
+      if (relevantOrders.length === 0) {
+        response.content = dateRange
+          ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
+          : 'No orders currently loaded. Try specifying a date range.'
+      } else {
+        const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+        response.content = dateRange
+          ? `Total delivery charges (shipping + delivery fees) for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalDeliveryCharge)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          : `Total delivery charges: ${formatDollarAmount(totalDeliveryCharge)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+      }
+      
+      response.data = acceptedOrders.length > 0 ? {
+        type: 'delivery_charge',
+        totalDeliveryCharge: totalDeliveryCharge,
+        orderCount: acceptedOrders.length,
+        averageDeliveryChargePerOrder: acceptedOrders.length > 0 ? totalDeliveryCharge / acceptedOrders.length : 0
+      } : null
+    }
     // General tax query
     else if ((gptParsedData?.intent === 'tax') || (!gptParsedData && lower.includes('tax'))) {
       const acceptedOrders = relevantOrders.filter(order => 
@@ -612,7 +676,9 @@ const CommandInterface = ({
       }
     }
     else {
-      response.content = "I'm not sure what you're asking. Try questions like:\n• Find delayed orders from Oct 1 to Oct 31\n• What's the revenue for October?\n• Show me pending orders\n• How many orders were delivered this week?"
+      console.log('⚠️ No matching intent handler found')
+      console.log('⚠️ GPT intent:', gptParsedData?.intent)
+      response.content = "Sorry, I don't know how to handle this request.\n\nI can help you with:\n• Revenue, tax, tips, service charges, delivery charges\n• Delayed, pending, or delivered orders\n• Orders by customer (Sendoso, OnGoody, Air Culinaire)\n• Date-based queries (MTD, YTD, specific months)\n\nTry rephrasing your question or use one of the examples above."
     }
     
     console.log('✅ Response generated:', {
@@ -918,6 +984,52 @@ const CommandInterface = ({
                     <div className="flex justify-between">
                       <span className="text-gray-600">Avg. Service Charge Per Order:</span>
                       <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageServiceChargePerOrder)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {message.data && message.data.type === 'tip' && (
+                <div className="mt-3 bg-teal-50 rounded-lg p-3 border border-teal-200">
+                  <div className="flex items-center mb-2">
+                    <DollarSign className="h-4 w-4 text-teal-600 mr-1" />
+                    <span className="text-xs font-medium text-teal-800">Tip Breakdown</span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Tips:</span>
+                      <span className="font-bold text-teal-900">{formatDollarAmount(message.data.totalTip)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Orders:</span>
+                      <span className="font-semibold text-gray-900">{formatNumber(message.data.orderCount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Avg. Tip Per Order:</span>
+                      <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageTipPerOrder)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {message.data && message.data.type === 'delivery_charge' && (
+                <div className="mt-3 bg-cyan-50 rounded-lg p-3 border border-cyan-200">
+                  <div className="flex items-center mb-2">
+                    <DollarSign className="h-4 w-4 text-cyan-600 mr-1" />
+                    <span className="text-xs font-medium text-cyan-800">Delivery Charge Breakdown</span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Delivery Charges:</span>
+                      <span className="font-bold text-cyan-900">{formatDollarAmount(message.data.totalDeliveryCharge)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Orders:</span>
+                      <span className="font-semibold text-gray-900">{formatNumber(message.data.orderCount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Avg. Delivery Charge Per Order:</span>
+                      <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageDeliveryChargePerOrder)}</span>
                     </div>
                   </div>
                 </div>
