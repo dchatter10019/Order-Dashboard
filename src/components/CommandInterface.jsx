@@ -12,6 +12,7 @@ const CommandInterface = ({
   setMessages: providedSetMessages
 }) => {
   const [input, setInput] = useState('')
+  const [expandedOrders, setExpandedOrders] = useState({}) // Track which message's orders are expanded
   const messagesEndRef = useRef(null)
   const pendingCommandRef = useRef(null)
   const loadingTimeoutRef = useRef(null)
@@ -187,7 +188,7 @@ const CommandInterface = ({
       
       response.data = {
         type: 'orders',
-        orders: delayedOrders.slice(0, 10),
+        orders: delayedOrders, // Store all orders
         total: delayedOrders.length
       }
       
@@ -238,7 +239,7 @@ const CommandInterface = ({
       response.content = `Found ${formatNumber(pendingOrders.length)} pending orders`
       response.data = {
         type: 'orders',
-        orders: pendingOrders.slice(0, 10),
+        orders: pendingOrders, // Store all orders
         total: pendingOrders.length
       }
     }
@@ -255,7 +256,7 @@ const CommandInterface = ({
       
       response.data = {
         type: 'orders',
-        orders: deliveredOrders.slice(0, 10),
+        orders: deliveredOrders, // Store all orders
         total: deliveredOrders.length
       }
     }
@@ -463,10 +464,15 @@ const CommandInterface = ({
                 <div className="mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200">
                   <div className="flex items-center mb-2">
                     <Package className="h-4 w-4 text-blue-600 mr-1" />
-                    <span className="text-xs font-medium text-blue-800">Sample Orders (showing {Math.min(10, message.data.total)})</span>
+                    <span className="text-xs font-medium text-blue-800">
+                      {expandedOrders[index] 
+                        ? `All Orders (${message.data.total})`
+                        : `Sample Orders (showing ${Math.min(10, message.data.total)} of ${message.data.total})`
+                      }
+                    </span>
                   </div>
                   <div className="space-y-2">
-                    {message.data.orders.map((order, idx) => (
+                    {(expandedOrders[index] ? message.data.orders : message.data.orders.slice(0, 10)).map((order, idx) => (
                       <div key={idx} className="text-xs bg-white rounded p-2 border border-blue-100">
                         <div className="font-semibold text-gray-900">{order.ordernum || order.id}</div>
                         <div className="text-gray-600">{order.customerName} - {formatDollarAmount(order.total)}</div>
@@ -474,9 +480,16 @@ const CommandInterface = ({
                       </div>
                     ))}
                     {message.data.total > 10 && (
-                      <div className="text-xs text-blue-600 text-center pt-1">
-                        +{formatNumber(message.data.total - 10)} more orders
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedOrders(prev => ({ ...prev, [index]: !prev[index] }))}
+                        className="w-full text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-100 text-center py-2 rounded transition-colors duration-200"
+                      >
+                        {expandedOrders[index] 
+                          ? 'Show less' 
+                          : `+${formatNumber(message.data.total - 10)} more orders`
+                        }
+                      </button>
                     )}
                   </div>
                 </div>
