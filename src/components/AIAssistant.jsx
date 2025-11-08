@@ -94,9 +94,11 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   return (
     <div className="bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Minimal Header with Data Context */}
-        <div className="mb-4">
-          <div className="bg-white border border-gray-200 rounded-xl p-3 flex items-center justify-between shadow-sm">
+        {/* Header with Data Context */}
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold text-gray-900 mb-4">AI Order Assistant</h1>
+          
+          <div className="bg-white border border-gray-300 rounded-lg p-3 flex items-center justify-between shadow-sm">
             <div className="text-sm">
               <span className="text-gray-600">Loaded: </span>
               <span className="font-semibold text-gray-900">{orders.length.toLocaleString()} orders</span>

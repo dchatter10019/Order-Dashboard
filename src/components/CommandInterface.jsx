@@ -417,10 +417,10 @@ const CommandInterface = ({
         
         {messages.length > 1 && messages.map((message, index) => (
           <div key={index} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-2xl p-4 ${
+            <div className={`max-w-[80%] rounded-lg p-4 ${
               message.type === 'user' 
-                ? 'bg-blue-600 text-white shadow-lg' 
-                : 'bg-white border border-gray-200 shadow-lg text-gray-900'
+                ? 'bg-blue-600 text-white shadow-sm' 
+                : 'bg-white border border-gray-300 shadow-sm text-gray-900'
             }`}>
               <p className="text-sm whitespace-pre-line leading-relaxed">{message.content}</p>
               
@@ -489,22 +489,22 @@ const CommandInterface = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - ChatGPT Style */}
+      {/* Input Area */}
       <form onSubmit={handleSubmit} className="p-6 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto">
-          <div className="relative bg-gray-100 rounded-full border border-gray-300 shadow-lg hover:border-gray-400 transition-all duration-200">
+          <div className="relative bg-white rounded-lg border border-gray-300 shadow-sm hover:border-gray-400 transition-all duration-200">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isLoadingData ? "Loading data..." : "Ask anything"}
+              placeholder={isLoadingData ? "Loading data..." : "Ask me anything about your orders..."}
               disabled={isLoadingData}
-              className="w-full px-6 py-4 bg-transparent text-gray-900 placeholder-gray-500 focus:outline-none rounded-full text-base disabled:cursor-not-allowed"
+              className="w-full px-4 py-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none rounded-lg text-base disabled:cursor-not-allowed disabled:bg-gray-50"
             />
             <button
               type="submit"
               disabled={!input.trim() || isLoadingData}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-lg"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
             >
               {isLoadingData ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -515,41 +515,41 @@ const CommandInterface = ({
           </div>
         </div>
         
-        {/* Suggestion Prompts - Show when minimal messages (GPT-style) */}
+        {/* Suggestion Prompts - Show when minimal messages */}
         {messages.length <= 1 && (
-          <div className="mt-4 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="mt-4 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => setInput('Find all delayed orders from Oct 1 to Oct 31')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
             >
               Find all delayed orders from Oct 1 to Oct 31
             </button>
             <button
               type="button"
               onClick={() => setInput('What\'s the revenue for October?')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
             >
               What's the revenue for October?
             </button>
             <button
               type="button"
               onClick={() => setInput('Show me pending orders')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
             >
               Show me pending orders
             </button>
             <button
               type="button"
               onClick={() => setInput('How many orders were delivered this week?')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
             >
               How many orders were delivered this week?
             </button>
             <button
               type="button"
               onClick={() => setInput('What\'s the total revenue for November 2025?')}
-              className="md:col-span-2 text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
+              className="md:col-span-2 text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
             >
               What's the total revenue for November 2025?
             </button>
