@@ -521,35 +521,35 @@ const CommandInterface = ({
             <button
               type="button"
               onClick={() => setInput('Find all delayed orders from Oct 1 to Oct 31')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
+              className="text-left px-4 py-3 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-red-700 hover:text-red-800 transition-all duration-200 border border-red-200 hover:border-red-300 shadow-sm"
             >
               Find all delayed orders from Oct 1 to Oct 31
             </button>
             <button
               type="button"
               onClick={() => setInput('What\'s the revenue for October?')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
+              className="text-left px-4 py-3 bg-green-50 hover:bg-green-100 rounded-lg text-sm text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300 shadow-sm"
             >
               What's the revenue for October?
             </button>
             <button
               type="button"
               onClick={() => setInput('Show me pending orders')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
+              className="text-left px-4 py-3 bg-amber-50 hover:bg-amber-100 rounded-lg text-sm text-amber-700 hover:text-amber-800 transition-all duration-200 border border-amber-200 hover:border-amber-300 shadow-sm"
             >
               Show me pending orders
             </button>
             <button
               type="button"
               onClick={() => setInput('How many orders were delivered this week?')}
-              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
+              className="text-left px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm text-blue-700 hover:text-blue-800 transition-all duration-200 border border-blue-200 hover:border-blue-300 shadow-sm"
             >
               How many orders were delivered this week?
             </button>
             <button
               type="button"
               onClick={() => setInput('What\'s the total revenue for November 2025?')}
-              className="md:col-span-2 text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-lg text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-300 hover:border-gray-400 shadow-sm"
+              className="md:col-span-2 text-left px-4 py-3 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300 shadow-sm"
             >
               What's the total revenue for November 2025?
             </button>
