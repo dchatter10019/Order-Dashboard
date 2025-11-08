@@ -368,6 +368,33 @@ const CommandInterface = ({
         averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
       } : null
     }
+    // Tax query
+    else if (lower.includes('tax')) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      const totalTax = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.tax) || 0), 0
+      )
+      
+      if (relevantOrders.length === 0) {
+        response.content = dateRange
+          ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
+          : 'No orders currently loaded. Try specifying a date range.'
+      } else {
+        const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+        response.content = dateRange
+          ? `Total tax for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          : `Total tax: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+      }
+      
+      response.data = acceptedOrders.length > 0 ? {
+        type: 'tax',
+        totalTax: totalTax,
+        orderCount: acceptedOrders.length,
+        averageTaxPerOrder: acceptedOrders.length > 0 ? totalTax / acceptedOrders.length : 0
+      } : null
+    }
     // Pending orders
     else if (lower.includes('pending')) {
       const pendingOrders = relevantOrders.filter(order => 
@@ -607,6 +634,29 @@ const CommandInterface = ({
                 </div>
               )}
               
+              {message.data && message.data.type === 'tax' && (
+                <div className="mt-3 bg-orange-50 rounded-lg p-3 border border-orange-200">
+                  <div className="flex items-center mb-2">
+                    <DollarSign className="h-4 w-4 text-orange-600 mr-1" />
+                    <span className="text-xs font-medium text-orange-800">Tax Breakdown</span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Tax:</span>
+                      <span className="font-bold text-orange-900">{formatDollarAmount(message.data.totalTax)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Orders:</span>
+                      <span className="font-semibold text-gray-900">{formatNumber(message.data.orderCount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Average Tax Per Order:</span>
+                      <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageTaxPerOrder)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {message.data && message.data.type === 'orders' && message.data.orders.length > 0 && (
                 <div className="mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200">
                   <div className="flex items-center mb-2">
@@ -741,6 +791,13 @@ const CommandInterface = ({
               className="text-left px-4 py-3 bg-indigo-50 hover:bg-indigo-100 rounded-lg text-sm text-indigo-700 hover:text-indigo-800 transition-all duration-200 border border-indigo-200 hover:border-indigo-300 shadow-sm"
             >
               Show me the revenue for Sendoso for Oct 2025
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput('How much tax for October 2025?')}
+              className="text-left px-4 py-3 bg-orange-50 hover:bg-orange-100 rounded-lg text-sm text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm"
+            >
+              How much tax for October 2025?
             </button>
             <button
               type="button"
