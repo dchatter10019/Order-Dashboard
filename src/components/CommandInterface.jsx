@@ -155,10 +155,12 @@ const CommandInterface = ({
 
   // Process user command
   const processCommand = (command) => {
+    console.log('🔄 Processing command:', command, 'with', orders.length, 'orders')
     const lower = command.toLowerCase()
     
     // Parse date range if present
     const dateRange = parseDate(command)
+    console.log('📅 Date range from command:', dateRange)
     
     // Filter orders by date range if specified
     let relevantOrders = orders
@@ -166,6 +168,9 @@ const CommandInterface = ({
       relevantOrders = orders.filter(order => {
         return order.orderDate >= dateRange.startDate && order.orderDate <= dateRange.endDate
       })
+      console.log('📊 Filtered to', relevantOrders.length, 'orders for date range')
+    } else {
+      console.log('📊 Using all', orders.length, 'orders (no date filter in command)')
     }
     
     // Determine what the user is asking for
@@ -278,10 +283,12 @@ const CommandInterface = ({
       if (forMatch && forMatch[1]) {
         customerName = forMatch[1].trim()
         // Remove common date-related words that might have been captured
-        customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on)\s*$/i, '').trim()
+        customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|20\d{2})\s*$/i, '').trim()
       }
       
-      if (customerName) {
+      console.log('💼 Extracted customer name:', customerName)
+      
+      if (customerName && customerName.length >= 3 && !/^\d/.test(customerName)) {
         // Filter orders by customer name (case-insensitive partial match)
         const customerOrders = relevantOrders.filter(order => 
           order.customerName?.toLowerCase().includes(customerName.toLowerCase())
@@ -397,13 +404,16 @@ const CommandInterface = ({
       } : null
     }
     // General revenue query
-    else if (lower.includes('revenue')) {
+    else if (lower.includes('revenue') || lower.includes('sales')) {
+      console.log('💰 General revenue query - relevant orders:', relevantOrders.length)
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
       )
+      console.log('💰 Accepted orders:', acceptedOrders.length)
       const totalRevenue = acceptedOrders.reduce((sum, order) => 
         sum + (parseFloat(order.revenue) || 0), 0
       )
+      console.log('💰 Total revenue:', totalRevenue)
       
       if (relevantOrders.length === 0) {
         response.content = dateRange
@@ -758,6 +768,12 @@ const CommandInterface = ({
     else {
       response.content = "I'm not sure what you're asking. Try questions like:\n• Find delayed orders from Oct 1 to Oct 31\n• What's the revenue for October?\n• Show me pending orders\n• How many orders were delivered this week?"
     }
+    
+    console.log('✅ Response generated:', {
+      content: response.content.substring(0, 100),
+      hasData: !!response.data,
+      dataType: response.data?.type
+    })
     
     return response
   }
