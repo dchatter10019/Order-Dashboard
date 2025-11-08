@@ -92,25 +92,22 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   }, [dateRange, hasMounted])
 
   return (
-    <div className="bg-gray-50 min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">AI Order Assistant</h1>
-          <p className="text-gray-600 mt-2">Ask questions about your orders in natural language</p>
-          
-          {/* Current Data Context */}
-          <div className="mt-4 bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+    <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Minimal Header with Data Context */}
+        <div className="mb-4">
+          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-3 flex items-center justify-between backdrop-blur shadow-lg">
             <div className="text-sm">
-              <span className="text-gray-600">Currently loaded: </span>
-              <span className="font-semibold text-gray-900">{orders.length.toLocaleString()} orders</span>
-              <span className="text-gray-600 ml-2">from</span>
-              <span className="font-semibold text-blue-600 ml-1">{dateRange.startDate}</span>
-              <span className="text-gray-600 mx-1">to</span>
-              <span className="font-semibold text-blue-600">{dateRange.endDate}</span>
+              <span className="text-gray-400">Loaded: </span>
+              <span className="font-semibold text-white">{orders.length.toLocaleString()} orders</span>
+              <span className="text-gray-500 ml-2">•</span>
+              <span className="font-semibold text-blue-400 ml-2">{dateRange.startDate}</span>
+              <span className="text-gray-500 mx-1">→</span>
+              <span className="font-semibold text-blue-400">{dateRange.endDate}</span>
             </div>
             {isLoading && (
-              <div className="flex items-center text-blue-600 text-sm">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+              <div className="flex items-center text-blue-400 text-sm">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400 mr-2"></div>
                 Loading...
               </div>
             )}
