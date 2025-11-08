@@ -178,7 +178,39 @@ function checkOrderDeliveryStatus(order, currentStatus) {
 function extractStateFromText(text) {
   if (!text) return null
   
-  // Common US state abbreviations and names
+  // Airport code to state mapping (major US airports)
+  const airportToState = {
+    'LGB': 'CA', 'LAX': 'CA', 'SFO': 'CA', 'SAN': 'CA', 'SMF': 'CA', 'SJC': 'CA',
+    'TEB': 'NJ', 'EWR': 'NJ',
+    'DAL': 'TX', 'DFW': 'TX', 'IAH': 'TX', 'AUS': 'TX',
+    'SDL': 'AZ', 'PHX': 'AZ',
+    'PBI': 'FL', 'MIA': 'FL', 'FLL': 'FL', 'TPA': 'FL', 'MCO': 'FL', 'JAX': 'FL',
+    'BOS': 'MA', 'ORH': 'MA',
+    'JFK': 'NY', 'LGA': 'NY', 'EWR': 'NJ', 'BUF': 'NY',
+    'ORD': 'IL', 'CHI': 'IL', 'MDW': 'IL',
+    'ATL': 'GA',
+    'DEN': 'CO',
+    'SEA': 'WA',
+    'PDX': 'OR',
+    'LAS': 'NV',
+    'PHX': 'AZ',
+    'MSP': 'MN',
+    'DTW': 'MI',
+    'PHL': 'PA',
+    'CLT': 'NC',
+    'BWI': 'MD',
+    'DCA': 'DC', 'IAD': 'VA',
+    'SLC': 'UT',
+    'HNL': 'HI'
+  }
+  
+  // Try to find airport code (3 capital letters, like "LGB", "TEB", "DAL")
+  const airportMatch = text.match(/\b([A-Z]{3})\b/)
+  if (airportMatch && airportToState[airportMatch[1]]) {
+    return airportToState[airportMatch[1]]
+  }
+  
+  // Common US state abbreviations
   const stateMap = {
     'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
     'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
