@@ -400,17 +400,17 @@ const CommandInterface = ({
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-12rem)] bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 rounded-xl shadow-2xl overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-12rem)] bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-200">
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50">
         {/* Centered Greeting for Empty State */}
         {messages.length <= 1 && (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
-              <h2 className="text-3xl font-medium text-white mb-2">
+              <h2 className="text-3xl font-medium text-gray-900 mb-2">
                 Hey there. Ready to dive in?
               </h2>
-              <p className="text-gray-400 text-lg">Ask me anything about your orders</p>
+              <p className="text-gray-600 text-lg">Ask me anything about your orders</p>
             </div>
           </div>
         )}
@@ -420,50 +420,50 @@ const CommandInterface = ({
             <div className={`max-w-[80%] rounded-2xl p-4 ${
               message.type === 'user' 
                 ? 'bg-blue-600 text-white shadow-lg' 
-                : 'bg-gray-800 border border-gray-700 shadow-lg text-white'
+                : 'bg-white border border-gray-200 shadow-lg text-gray-900'
             }`}>
               <p className="text-sm whitespace-pre-line leading-relaxed">{message.content}</p>
               
               {/* Data Display */}
               {message.data && message.data.type === 'revenue' && (
-                <div className="mt-3 bg-green-900/30 rounded-lg p-3 border border-green-700/50 backdrop-blur">
+                <div className="mt-3 bg-green-50 rounded-lg p-3 border border-green-200">
                   <div className="flex items-center mb-2">
-                    <DollarSign className="h-4 w-4 text-green-400 mr-1" />
-                    <span className="text-xs font-medium text-green-300">Revenue Breakdown</span>
+                    <DollarSign className="h-4 w-4 text-green-600 mr-1" />
+                    <span className="text-xs font-medium text-green-800">Revenue Breakdown</span>
                   </div>
                   <div className="space-y-1 text-sm">
                     <div className="flex justify-between">
-                      <span className="text-gray-300">Total Revenue:</span>
-                      <span className="font-bold text-green-400">{formatDollarAmount(message.data.revenue)}</span>
+                      <span className="text-gray-600">Total Revenue:</span>
+                      <span className="font-bold text-green-900">{formatDollarAmount(message.data.revenue)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-300">Orders:</span>
-                      <span className="font-semibold text-white">{formatNumber(message.data.orderCount)}</span>
+                      <span className="text-gray-600">Orders:</span>
+                      <span className="font-semibold text-gray-900">{formatNumber(message.data.orderCount)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-300">Average Order Value:</span>
-                      <span className="font-semibold text-white">{formatDollarAmount(message.data.averageOrderValue)}</span>
+                      <span className="text-gray-600">Average Order Value:</span>
+                      <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageOrderValue)}</span>
                     </div>
                   </div>
                 </div>
               )}
               
               {message.data && message.data.type === 'orders' && message.data.orders.length > 0 && (
-                <div className="mt-3 bg-blue-900/30 rounded-lg p-3 border border-blue-700/50 backdrop-blur">
+                <div className="mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200">
                   <div className="flex items-center mb-2">
-                    <Package className="h-4 w-4 text-blue-400 mr-1" />
-                    <span className="text-xs font-medium text-blue-300">Sample Orders (showing {Math.min(10, message.data.total)})</span>
+                    <Package className="h-4 w-4 text-blue-600 mr-1" />
+                    <span className="text-xs font-medium text-blue-800">Sample Orders (showing {Math.min(10, message.data.total)})</span>
                   </div>
                   <div className="space-y-2">
                     {message.data.orders.map((order, idx) => (
-                      <div key={idx} className="text-xs bg-gray-900/50 rounded p-2 border border-gray-700">
-                        <div className="font-semibold text-white">{order.ordernum || order.id}</div>
-                        <div className="text-gray-300">{order.customerName} - {formatDollarAmount(order.total)}</div>
-                        <div className="text-gray-400">{order.orderDate} - {order.status}</div>
+                      <div key={idx} className="text-xs bg-white rounded p-2 border border-blue-100">
+                        <div className="font-semibold text-gray-900">{order.ordernum || order.id}</div>
+                        <div className="text-gray-600">{order.customerName} - {formatDollarAmount(order.total)}</div>
+                        <div className="text-gray-500">{order.orderDate} - {order.status}</div>
                       </div>
                     ))}
                     {message.data.total > 10 && (
-                      <div className="text-xs text-blue-400 text-center pt-1">
+                      <div className="text-xs text-blue-600 text-center pt-1">
                         +{formatNumber(message.data.total - 10)} more orders
                       </div>
                     )}
@@ -472,14 +472,14 @@ const CommandInterface = ({
               )}
               
               {message.data && message.data.type === 'aov' && (
-                <div className="mt-3 bg-purple-900/30 rounded-lg p-3 border border-purple-700/50 backdrop-blur">
+                <div className="mt-3 bg-purple-50 rounded-lg p-3 border border-purple-200">
                   <div className="flex items-center mb-2">
-                    <TrendingUp className="h-4 w-4 text-purple-400 mr-1" />
-                    <span className="text-xs font-medium text-purple-300">Order Statistics</span>
+                    <TrendingUp className="h-4 w-4 text-purple-600 mr-1" />
+                    <span className="text-xs font-medium text-purple-800">Order Statistics</span>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-purple-400">{formatDollarAmount(message.data.average)}</div>
-                    <div className="text-xs text-gray-400">Based on {formatNumber(message.data.orderCount)} orders</div>
+                    <div className="text-2xl font-bold text-purple-900">{formatDollarAmount(message.data.average)}</div>
+                    <div className="text-xs text-gray-600">Based on {formatNumber(message.data.orderCount)} orders</div>
                   </div>
                 </div>
               )}
@@ -490,16 +490,16 @@ const CommandInterface = ({
       </div>
 
       {/* Input Area - ChatGPT Style */}
-      <form onSubmit={handleSubmit} className="p-6 bg-gradient-to-t from-gray-900 to-transparent">
+      <form onSubmit={handleSubmit} className="p-6 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto">
-          <div className="relative bg-gray-800 rounded-full border border-gray-700 shadow-2xl hover:border-gray-600 transition-all duration-200">
+          <div className="relative bg-gray-100 rounded-full border border-gray-300 shadow-lg hover:border-gray-400 transition-all duration-200">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={isLoadingData ? "Loading data..." : "Ask anything"}
               disabled={isLoadingData}
-              className="w-full px-6 py-4 bg-transparent text-white placeholder-gray-500 focus:outline-none rounded-full text-base disabled:cursor-not-allowed"
+              className="w-full px-6 py-4 bg-transparent text-gray-900 placeholder-gray-500 focus:outline-none rounded-full text-base disabled:cursor-not-allowed"
             />
             <button
               type="submit"
@@ -521,35 +521,35 @@ const CommandInterface = ({
             <button
               type="button"
               onClick={() => setInput('Find all delayed orders from Oct 1 to Oct 31')}
-              className="text-left px-4 py-3 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl text-sm text-gray-300 hover:text-white transition-all duration-200 border border-gray-700/50 hover:border-gray-600"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
             >
               Find all delayed orders from Oct 1 to Oct 31
             </button>
             <button
               type="button"
               onClick={() => setInput('What\'s the revenue for October?')}
-              className="text-left px-4 py-3 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl text-sm text-gray-300 hover:text-white transition-all duration-200 border border-gray-700/50 hover:border-gray-600"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
             >
               What's the revenue for October?
             </button>
             <button
               type="button"
               onClick={() => setInput('Show me pending orders')}
-              className="text-left px-4 py-3 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl text-sm text-gray-300 hover:text-white transition-all duration-200 border border-gray-700/50 hover:border-gray-600"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
             >
               Show me pending orders
             </button>
             <button
               type="button"
               onClick={() => setInput('How many orders were delivered this week?')}
-              className="text-left px-4 py-3 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl text-sm text-gray-300 hover:text-white transition-all duration-200 border border-gray-700/50 hover:border-gray-600"
+              className="text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
             >
               How many orders were delivered this week?
             </button>
             <button
               type="button"
               onClick={() => setInput('What\'s the total revenue for November 2025?')}
-              className="md:col-span-2 text-left px-4 py-3 bg-gray-800/50 hover:bg-gray-700/50 rounded-xl text-sm text-gray-300 hover:text-white transition-all duration-200 border border-gray-700/50 hover:border-gray-600"
+              className="md:col-span-2 text-left px-4 py-3 bg-white hover:bg-gray-50 rounded-xl text-sm text-gray-700 hover:text-gray-900 transition-all duration-200 border border-gray-200 hover:border-gray-300 shadow-sm"
             >
               What's the total revenue for November 2025?
             </button>
