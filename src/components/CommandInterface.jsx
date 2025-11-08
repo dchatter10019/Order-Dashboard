@@ -664,10 +664,22 @@ const CommandInterface = ({
     }
     setMessages(prev => [...prev, userMessage])
     
+    // Check if this is a query with specific filters (state, customer) that should use existing data
+    const lower = input.toLowerCase()
+    const hasSpecificFilter = 
+      lower.includes('by state') || 
+      lower.includes('for state') || 
+      lower.includes('in state') ||
+      (lower.includes('for ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody'))) ||
+      (lower.includes('from ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody')))
+    
     // Check if we need to fetch data for a different date range
     const dateRange = parseDate(input)
     
-    if (dateRange && onDateRangeChange && onFetchOrders) {
+    // Only fetch new data if:
+    // 1. A date range is detected
+    // 2. AND it's NOT a query with specific filters (those use existing data)
+    if (dateRange && onDateRangeChange && onFetchOrders && !hasSpecificFilter) {
       console.log('🔍 Date range detected, fetching data:', dateRange)
       // Show loading message
       const loadingMessage = {
