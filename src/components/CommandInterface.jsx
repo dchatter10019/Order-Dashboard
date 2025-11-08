@@ -73,7 +73,7 @@ const CommandInterface = ({
     for (const [monthName, monthNum] of Object.entries(months)) {
       if (lower.includes(monthName)) {
         // Try to extract year (e.g., "Nov 2025", "October 2024")
-        const yearMatch = command.match(/\b(20\d{2})\b/)
+        const yearMatch = text.match(/\b(20\d{2})\b/)
         const year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear()
         
         const startDate = new Date(year, monthNum, 1)
