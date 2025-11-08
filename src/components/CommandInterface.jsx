@@ -8,30 +8,36 @@ const CommandInterface = ({
   onDateRangeChange, 
   onFetchOrders, 
   isLoadingData,
-  messages: externalMessages,
-  setMessages: externalSetMessages
+  messages: providedMessages,
+  setMessages: providedSetMessages
 }) => {
   const [input, setInput] = useState('')
-  const [internalMessages, setInternalMessages] = useState([
-    {
-      type: 'assistant',
-      content: 'Hi! I can help you analyze your orders. Try asking me things like:',
-      suggestions: [
-        'Find all delayed orders from Oct 1 to Oct 31',
-        'What\'s the revenue for October?',
-        'Show me pending orders',
-        'How many orders were delivered this week?',
-        'What\'s the total revenue for November 2025?'
-      ]
-    }
-  ])
   const messagesEndRef = useRef(null)
   const pendingCommandRef = useRef(null)
   const loadingTimeoutRef = useRef(null)
   
-  // Use external messages if provided, otherwise use internal
-  const messages = externalMessages || internalMessages
-  const setMessages = externalSetMessages || setInternalMessages
+  // Default messages if none provided
+  const defaultMessages = [
+    {
+      type: 'assistant',
+      content: 'Hi! I can help you analyze your orders. Try one of the suggestions below or ask me anything!'
+    }
+  ]
+  
+  // Use provided messages/setMessages or create local state
+  const [localMessages, setLocalMessages] = useState(defaultMessages)
+  const messages = providedMessages !== undefined ? providedMessages : localMessages
+  const setMessages = providedSetMessages || setLocalMessages
+
+  // Debug logging
+  useEffect(() => {
+    console.log('💬 CommandInterface - Messages State:', {
+      providedMessages: providedMessages?.length,
+      localMessages: localMessages.length,
+      activeMessages: messages.length,
+      hasProvidedSetMessages: !!providedSetMessages
+    })
+  }, [messages, providedMessages, localMessages, providedSetMessages])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -415,21 +421,6 @@ const CommandInterface = ({
             }`}>
               <p className="text-sm whitespace-pre-line">{message.content}</p>
               
-              {/* Suggestions */}
-              {message.suggestions && (
-                <div className="mt-3 space-y-2">
-                  {message.suggestions.map((suggestion, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleSuggestionClick(suggestion)}
-                      className="block w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-md text-sm text-blue-800 transition-colors"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              )}
-              
               {/* Data Display */}
               {message.data && message.data.type === 'revenue' && (
                 <div className="mt-3 bg-green-50 rounded-lg p-3 border border-green-200">
@@ -524,29 +515,47 @@ const CommandInterface = ({
             )}
           </button>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setInput('Find all delayed orders')}
-            className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700 transition-colors"
-          >
-            Delayed orders
-          </button>
-          <button
-            type="button"
-            onClick={() => setInput('What\'s the revenue for this month?')}
-            className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700 transition-colors"
-          >
-            This month's revenue
-          </button>
-          <button
-            type="button"
-            onClick={() => setInput('Show me pending orders')}
-            className="text-xs px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-full text-gray-700 transition-colors"
-          >
-            Pending orders
-          </button>
-        </div>
+        
+        {/* Suggestion Prompts - Show when minimal messages (GPT-style) */}
+        {messages.length <= 1 && (
+          <div className="mt-3 space-y-2">
+            <button
+              type="button"
+              onClick={() => setInput('Find all delayed orders from Oct 1 to Oct 31')}
+              className="block w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-md text-sm text-blue-800 transition-colors"
+            >
+              Find all delayed orders from Oct 1 to Oct 31
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput('What\'s the revenue for October?')}
+              className="block w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-md text-sm text-blue-800 transition-colors"
+            >
+              What's the revenue for October?
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput('Show me pending orders')}
+              className="block w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-md text-sm text-blue-800 transition-colors"
+            >
+              Show me pending orders
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput('How many orders were delivered this week?')}
+              className="block w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-md text-sm text-blue-800 transition-colors"
+            >
+              How many orders were delivered this week?
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput('What\'s the total revenue for November 2025?')}
+              className="block w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-md text-sm text-blue-800 transition-colors"
+            >
+              What's the total revenue for November 2025?
+            </button>
+          </div>
+        )}
       </form>
     </div>
   )

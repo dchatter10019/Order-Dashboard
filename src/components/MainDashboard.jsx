@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { LogOut, Package, FileText, Sparkles } from 'lucide-react'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
@@ -24,17 +24,20 @@ const MainDashboard = ({ onLogout }) => {
     messages: [
       {
         type: 'assistant',
-        content: 'Hi! I can help you analyze your orders. Try asking me things like:',
-        suggestions: [
-          'Find all delayed orders from Oct 1 to Oct 31',
-          'What\'s the revenue for October?',
-          'Show me pending orders',
-          'How many orders were delivered this week?',
-          'What\'s the total revenue for November 2025?'
-        ]
+        content: 'Hi! I can help you analyze your orders. Try one of the suggestions below or ask me anything!'
       }
     ]
   })
+  
+  // Debug logging for tab switches
+  useEffect(() => {
+    console.log('📑 MainDashboard - Tab changed to:', activeTab)
+    console.log('📑 MainDashboard - AI State:', {
+      messagesCount: aiAssistantState.messages.length,
+      ordersCount: aiAssistantState.orders.length,
+      dateRange: aiAssistantState.dateRange
+    })
+  }, [activeTab, aiAssistantState])
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -113,12 +116,13 @@ const MainDashboard = ({ onLogout }) => {
       <main className="max-w-7xl mx-auto">
         {activeTab === 'orders' && <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />}
         {activeTab === 'products' && <ProductManagement />}
-        {activeTab === 'ai-assistant' && (
+        {/* Always render AIAssistant to preserve state, just hide it */}
+        <div style={{ display: activeTab === 'ai-assistant' ? 'block' : 'none' }}>
           <AIAssistant 
             persistedState={aiAssistantState}
             onStateChange={setAIAssistantState}
           />
-        )}
+        </div>
       </main>
     </div>
   )

@@ -3,11 +3,22 @@ import CommandInterface from './CommandInterface'
 
 const AIAssistant = ({ persistedState, onStateChange }) => {
   const [isLoading, setIsLoading] = useState(false)
+  const [hasMounted, setHasMounted] = useState(false)
   
   // Use persisted state from parent
   const orders = persistedState.orders
   const dateRange = persistedState.dateRange
   const messages = persistedState.messages
+  
+  // Debug logging
+  useEffect(() => {
+    console.log('🤖 AIAssistant - State from parent:', {
+      orders: orders.length,
+      messagesCount: messages.length,
+      dateRange,
+      persistedState
+    })
+  }, [orders, messages, dateRange, persistedState])
   
   // Update persisted state
   const setOrders = (newOrders) => {
@@ -56,14 +67,29 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
     }
   }
 
+  // Handle initial mount - only fetch if no orders exist
   useEffect(() => {
-    const debounceTimer = setTimeout(() => {
+    if (orders.length === 0) {
+      console.log('🔄 AIAssistant initial mount - no orders, fetching...')
       fetchOrders()
-    }, 500)
-    
-    return () => clearTimeout(debounceTimer)
+    } else {
+      console.log('✅ AIAssistant initial mount - using existing', orders.length, 'orders')
+    }
+    setHasMounted(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange])
+  }, [])
+
+  // Handle date range changes AFTER initial mount
+  useEffect(() => {
+    if (hasMounted) {
+      console.log('📅 Date range changed after mount, fetching new orders')
+      const debounceTimer = setTimeout(() => {
+        fetchOrders()
+      }, 500)
+      return () => clearTimeout(debounceTimer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, hasMounted])
 
   return (
     <div className="bg-gray-50 min-h-screen">
@@ -99,19 +125,6 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
           messages={messages}
           setMessages={setMessages}
         />
-        
-        {/* Info Section */}
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-sm font-medium text-blue-800 mb-2">💡 Tips:</h3>
-          <ul className="text-sm text-blue-700 space-y-1">
-            <li>• Ask about specific months: "What's the revenue for October?" or "What's the revenue for Nov 2025?"</li>
-            <li>• Find specific order types: "Show me all delayed orders"</li>
-            <li>• Query date ranges: "Find pending orders from Oct 1 to Oct 31"</li>
-            <li>• Get statistics: "What's the average order value this month?"</li>
-            <li>• Use natural language: "How many orders were delivered this week?"</li>
-            <li>• <strong>Smart MTD:</strong> Future months automatically use Month-to-Date (e.g., "Nov 2025" = Nov 1 - Today)</li>
-          </ul>
-        </div>
       </div>
     </div>
   )
