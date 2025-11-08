@@ -83,7 +83,7 @@ const MainDashboard = ({ onLogout }) => {
 
       {/* Tab Content */}
       <main className="max-w-7xl mx-auto">
-        {activeTab === 'orders' && <Dashboard />}
+        {activeTab === 'orders' && <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />}
         {activeTab === 'products' && <ProductManagement />}
         {activeTab === 'ai-assistant' && <AIAssistant />}
       </main>

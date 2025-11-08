@@ -6,7 +6,7 @@ import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
-const Dashboard = () => {
+const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -703,6 +703,34 @@ const Dashboard = () => {
             {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
           </button>
         </div>
+
+        {/* AI Assistant Promotion Banner */}
+        {onSwitchToAI && (
+          <div className="mb-6 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+            <button
+              onClick={onSwitchToAI}
+              className="w-full px-6 py-4 flex items-center justify-between text-left group"
+            >
+              <div className="flex items-center">
+                <div className="bg-white bg-opacity-20 rounded-full p-3 mr-4 group-hover:bg-opacity-30 transition-all">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-lg">✨ Try Our AI Assistant!</h3>
+                  <p className="text-purple-100 text-sm mt-1">Ask questions like "What's the revenue for October?" or "Find all delayed orders"</p>
+                </div>
+              </div>
+              <div className="flex items-center">
+                <span className="text-white font-semibold mr-2">Try It Now</span>
+                <svg className="w-5 h-5 text-white group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </div>
+            </button>
+          </div>
+        )}
         
         {/* Date Range and Filters */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
