@@ -368,7 +368,153 @@ const CommandInterface = ({
         averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
       } : null
     }
-    // Tax query
+    // Sales/Revenue by state query
+    else if ((lower.includes('sales') || lower.includes('revenue')) && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state') || lower.includes(' for ') || lower.includes(' in '))) {
+      // Try to extract state name or abbreviation
+      let stateName = ''
+      const stateMatch = text.match(/(?:sales|revenue)\s+(?:by|for|in|from)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      
+      if (stateMatch && stateMatch[1]) {
+        stateName = stateMatch[1].trim()
+        // Remove common date-related words
+        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month)\s*$/i, '').trim()
+      }
+      
+      if (stateName && stateName.length >= 2) {
+        // Filter orders by state (check both shipping and billing state)
+        const stateOrders = relevantOrders.filter(order => 
+          order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
+          order.billingState?.toLowerCase().includes(stateName.toLowerCase())
+        )
+        
+        const acceptedOrders = stateOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        
+        const totalRevenue = acceptedOrders.reduce((sum, order) => 
+          sum + (parseFloat(order.revenue) || 0), 0
+        )
+        
+        if (stateOrders.length === 0) {
+          response.content = `No orders found for state "${stateName}"`
+          if (dateRange) {
+            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
+          }
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+          response.content = `Revenue for ${stateName}${dateInfo}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(stateOrders.length)} total orders)`
+        }
+        
+        response.data = acceptedOrders.length > 0 ? {
+          type: 'revenue',
+          revenue: totalRevenue,
+          orderCount: acceptedOrders.length,
+          averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0,
+          stateName: stateName
+        } : null
+      } else {
+        // Fall through to general revenue if state can't be extracted
+        const acceptedOrders = relevantOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        const totalRevenue = acceptedOrders.reduce((sum, order) => 
+          sum + (parseFloat(order.revenue) || 0), 0
+        )
+        
+        if (relevantOrders.length === 0) {
+          response.content = dateRange
+            ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}.`
+            : 'No orders currently loaded. Try specifying a date range.'
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          response.content = dateRange
+            ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+            : `Total revenue: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+        }
+        
+        response.data = acceptedOrders.length > 0 ? {
+          type: 'revenue',
+          revenue: totalRevenue,
+          orderCount: acceptedOrders.length,
+          averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
+        } : null
+      }
+    }
+    // Tax by state query
+    else if (lower.includes('tax') && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state') || lower.includes(' for ') || lower.includes(' in '))) {
+      // Try to extract state name or abbreviation
+      let stateName = ''
+      const stateMatch = text.match(/tax\s+(?:by|for|in|from)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      
+      if (stateMatch && stateMatch[1]) {
+        stateName = stateMatch[1].trim()
+        // Remove common date-related words
+        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month)\s*$/i, '').trim()
+      }
+      
+      if (stateName && stateName.length >= 2) {
+        // Filter orders by state (check both shipping and billing state)
+        const stateOrders = relevantOrders.filter(order => 
+          order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
+          order.billingState?.toLowerCase().includes(stateName.toLowerCase())
+        )
+        
+        const acceptedOrders = stateOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        
+        const totalTax = acceptedOrders.reduce((sum, order) => 
+          sum + (parseFloat(order.tax) || 0), 0
+        )
+        
+        if (stateOrders.length === 0) {
+          response.content = `No orders found for state "${stateName}"`
+          if (dateRange) {
+            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
+          }
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+          response.content = `Tax for ${stateName}${dateInfo}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(stateOrders.length)} total orders)`
+        }
+        
+        response.data = acceptedOrders.length > 0 ? {
+          type: 'tax',
+          totalTax: totalTax,
+          orderCount: acceptedOrders.length,
+          averageTaxPerOrder: acceptedOrders.length > 0 ? totalTax / acceptedOrders.length : 0,
+          stateName: stateName
+        } : null
+      } else {
+        // Fall through to general tax if state can't be extracted
+        const acceptedOrders = relevantOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        const totalTax = acceptedOrders.reduce((sum, order) => 
+          sum + (parseFloat(order.tax) || 0), 0
+        )
+        
+        if (relevantOrders.length === 0) {
+          response.content = dateRange
+            ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}.`
+            : 'No orders currently loaded. Try specifying a date range.'
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          response.content = dateRange
+            ? `Total tax for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+            : `Total tax: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+        }
+        
+        response.data = acceptedOrders.length > 0 ? {
+          type: 'tax',
+          totalTax: totalTax,
+          orderCount: acceptedOrders.length,
+          averageTaxPerOrder: acceptedOrders.length > 0 ? totalTax / acceptedOrders.length : 0
+        } : null
+      }
+    }
+    // General tax query
     else if (lower.includes('tax')) {
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
@@ -608,7 +754,11 @@ const CommandInterface = ({
                   <div className="flex items-center mb-2">
                     <DollarSign className="h-4 w-4 text-green-600 mr-1" />
                     <span className="text-xs font-medium text-green-800">
-                      {message.data.customerName ? `Revenue for ${message.data.customerName}` : 'Revenue Breakdown'}
+                      {message.data.customerName 
+                        ? `Revenue for ${message.data.customerName}` 
+                        : message.data.stateName
+                          ? `Revenue for ${message.data.stateName}`
+                          : 'Revenue Breakdown'}
                     </span>
                   </div>
                   <div className="space-y-1 text-sm">
@@ -616,6 +766,12 @@ const CommandInterface = ({
                       <div className="flex justify-between pb-1 border-b border-green-200">
                         <span className="text-gray-600">Customer:</span>
                         <span className="font-semibold text-gray-900">{message.data.customerName}</span>
+                      </div>
+                    )}
+                    {message.data.stateName && (
+                      <div className="flex justify-between pb-1 border-b border-green-200">
+                        <span className="text-gray-600">State:</span>
+                        <span className="font-semibold text-gray-900">{message.data.stateName}</span>
                       </div>
                     )}
                     <div className="flex justify-between">
@@ -638,9 +794,17 @@ const CommandInterface = ({
                 <div className="mt-3 bg-orange-50 rounded-lg p-3 border border-orange-200">
                   <div className="flex items-center mb-2">
                     <DollarSign className="h-4 w-4 text-orange-600 mr-1" />
-                    <span className="text-xs font-medium text-orange-800">Tax Breakdown</span>
+                    <span className="text-xs font-medium text-orange-800">
+                      {message.data.stateName ? `Tax for ${message.data.stateName}` : 'Tax Breakdown'}
+                    </span>
                   </div>
                   <div className="space-y-1 text-sm">
+                    {message.data.stateName && (
+                      <div className="flex justify-between pb-1 border-b border-orange-200">
+                        <span className="text-gray-600">State:</span>
+                        <span className="font-semibold text-gray-900">{message.data.stateName}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Total Tax:</span>
                       <span className="font-bold text-orange-900">{formatDollarAmount(message.data.totalTax)}</span>
@@ -766,10 +930,10 @@ const CommandInterface = ({
             </button>
             <button
               type="button"
-              onClick={() => setInput('What\'s the revenue for October?')}
+              onClick={() => setInput('Sales by state California for Oct 2025')}
               className="text-left px-4 py-3 bg-green-50 hover:bg-green-100 rounded-lg text-sm text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300 shadow-sm"
             >
-              What's the revenue for October?
+              Sales by state California for Oct 2025
             </button>
             <button
               type="button"
@@ -794,10 +958,10 @@ const CommandInterface = ({
             </button>
             <button
               type="button"
-              onClick={() => setInput('How much tax for October 2025?')}
+              onClick={() => setInput('Tax by state New York for Oct 2025')}
               className="text-left px-4 py-3 bg-orange-50 hover:bg-orange-100 rounded-lg text-sm text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm"
             >
-              How much tax for October 2025?
+              Tax by state New York for Oct 2025
             </button>
             <button
               type="button"
