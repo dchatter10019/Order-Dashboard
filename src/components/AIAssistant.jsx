@@ -94,26 +94,10 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   return (
     <div className="bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Header with Data Context */}
+        {/* Header */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-4">AI Order Assistant</h1>
-          
-          <div className="bg-white border border-gray-300 rounded-lg p-3 flex items-center justify-between shadow-sm">
-            <div className="text-sm">
-              <span className="text-gray-600">Loaded: </span>
-              <span className="font-semibold text-gray-900">{orders.length.toLocaleString()} orders</span>
-              <span className="text-gray-400 ml-2">•</span>
-              <span className="font-semibold text-blue-600 ml-2">{dateRange.startDate}</span>
-              <span className="text-gray-400 mx-1">→</span>
-              <span className="font-semibold text-blue-600">{dateRange.endDate}</span>
-            </div>
-            {isLoading && (
-              <div className="flex items-center text-blue-600 text-sm">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                Loading...
-              </div>
-            )}
-          </div>
+          <h1 className="text-3xl font-bold text-gray-900">AI Order Assistant</h1>
+          <p className="text-gray-600 mt-2">Ask questions about your orders in natural language</p>
         </div>
         
         <CommandInterface 
