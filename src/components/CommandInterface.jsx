@@ -2,8 +2,9 @@ import React, { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
-const CommandInterface = ({ orders, onFilterChange, onDateRangeChange }) => {
+const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOrders }) => {
   const [input, setInput] = useState('')
+  const [isProcessing, setIsProcessing] = useState(false)
   const [messages, setMessages] = useState([
     {
       type: 'assistant',
@@ -18,6 +19,7 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange }) => {
     }
   ])
   const messagesEndRef = useRef(null)
+  const pendingCommandRef = useRef(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -250,20 +252,57 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange }) => {
     return response
   }
 
-  const handleSubmit = (e) => {
+  // Watch for orders change after date range update
+  useEffect(() => {
+    if (pendingCommandRef.current && !isProcessing && orders.length > 0) {
+      const response = processCommand(pendingCommandRef.current)
+      setMessages(prev => [...prev, response])
+      pendingCommandRef.current = null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, isProcessing])
+
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim()) return
+    if (!input.trim() || isProcessing) return
     
     // Add user message
     const userMessage = {
       type: 'user',
       content: input
     }
+    setMessages(prev => [...prev, userMessage])
     
-    // Process command
-    const response = processCommand(input)
+    // Check if we need to fetch data for a different date range
+    const dateRange = parseDate(input)
     
-    setMessages(prev => [...prev, userMessage, response])
+    if (dateRange && onDateRangeChange && onFetchOrders) {
+      // Show loading message
+      const loadingMessage = {
+        type: 'assistant',
+        content: `📊 Fetching orders for ${dateRange.startDate} to ${dateRange.endDate}...`,
+        loading: true
+      }
+      setMessages(prev => [...prev, loadingMessage])
+      
+      setIsProcessing(true)
+      pendingCommandRef.current = input
+      
+      // Update date range and trigger fetch
+      onDateRangeChange(dateRange)
+      
+      // Wait for the fetch to complete (increase timeout for large date ranges)
+      setTimeout(() => {
+        setIsProcessing(false)
+        // Remove loading message
+        setMessages(prev => prev.filter(m => !m.loading))
+      }, 5000) // 5 seconds to allow for chunked requests
+    } else {
+      // Process command immediately with current data
+      const response = processCommand(input)
+      setMessages(prev => [...prev, response])
+    }
+    
     setInput('')
   }
 

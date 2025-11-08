@@ -798,6 +798,7 @@ const Dashboard = () => {
             orders={orders}
             onFilterChange={setStatusFilter}
             onDateRangeChange={setDateRange}
+            onFetchOrders={fetchOrders}
           />
         </div>
 
