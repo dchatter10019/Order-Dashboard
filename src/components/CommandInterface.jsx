@@ -412,8 +412,8 @@ const CommandInterface = ({
         orderCount: acceptedOrders.length
       } : null
     }
-    // General revenue query
-    else if (lower.includes('revenue') || lower.includes('sales')) {
+    // General revenue query (but not if it's a tax query)
+    else if ((lower.includes('revenue') || lower.includes('sales')) && !lower.includes('tax')) {
       console.log('💰 General revenue query - relevant orders:', relevantOrders.length)
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
