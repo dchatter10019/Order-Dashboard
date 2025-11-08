@@ -369,18 +369,67 @@ const CommandInterface = ({
       } : null
     }
     // Sales/Revenue by state query
-    else if ((lower.includes('sales') || lower.includes('revenue')) && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state'))) {
-      // Try to extract state name or abbreviation
+    else if ((lower.includes('sales') || lower.includes('revenue')) && lower.includes('by state')) {
+      // Check if asking for breakdown by ALL states or a specific state
+      const specificStateMatch = text.match(/(?:sales|revenue)\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       let stateName = ''
-      const stateMatch = text.match(/(?:sales|revenue)\s+(?:by|for|in)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       
-      if (stateMatch && stateMatch[1]) {
-        stateName = stateMatch[1].trim()
+      if (specificStateMatch && specificStateMatch[1]) {
+        stateName = specificStateMatch[1].trim()
         // Remove common date-related words and years
         stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month|20\d{2})\s*$/i, '').trim()
       }
       
-      if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
+      // If no specific state, show breakdown by ALL states
+      if (!stateName || stateName === 'for' || stateName === 'in' || stateName.length < 2) {
+        // Group revenue by state
+        const acceptedOrders = relevantOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        
+        const revenueByState = {}
+        acceptedOrders.forEach(order => {
+          const state = order.shippingState || order.billingState || 'Unknown'
+          if (!revenueByState[state]) {
+            revenueByState[state] = { revenue: 0, count: 0 }
+          }
+          revenueByState[state].revenue += parseFloat(order.revenue) || 0
+          revenueByState[state].count += 1
+        })
+        
+        // Sort by revenue amount descending
+        const sortedStates = Object.entries(revenueByState)
+          .sort((a, b) => b[1].revenue - a[1].revenue)
+          .slice(0, 10) // Top 10 states
+        
+        const totalRevenue = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+        
+        if (sortedStates.length === 0) {
+          response.content = 'No sales data available for the selected period'
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          const dateInfo = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+          const stateList = sortedStates.map(([state, data]) => 
+            `  • ${state}: ${formatDollarAmount(data.revenue)} (${formatNumber(data.count)} orders)`
+          ).join('\n')
+          
+          response.content = `Sales breakdown by state${dateInfo}:\n\n${stateList}\n\nTotal: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} orders`
+        }
+        
+        response.data = sortedStates.length > 0 ? {
+          type: 'stateBreakdown',
+          breakdownType: 'revenue',
+          states: sortedStates.map(([state, data]) => ({
+            state,
+            amount: data.revenue,
+            count: data.count
+          })),
+          total: totalRevenue,
+          orderCount: acceptedOrders.length
+        } : null
+      }
+      // Specific state query
+      else if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
         // Filter orders by state (check both shipping and billing state)
         const stateOrders = relevantOrders.filter(order => 
           order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
@@ -442,18 +491,67 @@ const CommandInterface = ({
       }
     }
     // Tax by state query
-    else if (lower.includes('tax') && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state'))) {
-      // Try to extract state name or abbreviation
+    else if (lower.includes('tax') && lower.includes('by state')) {
+      // Check if asking for breakdown by ALL states or a specific state
+      const specificStateMatch = text.match(/tax\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       let stateName = ''
-      const stateMatch = text.match(/tax\s+(?:by|for|in)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       
-      if (stateMatch && stateMatch[1]) {
-        stateName = stateMatch[1].trim()
+      if (specificStateMatch && specificStateMatch[1]) {
+        stateName = specificStateMatch[1].trim()
         // Remove common date-related words
         stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month|20\d{2})\s*$/i, '').trim()
       }
       
-      if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
+      // If no specific state, show breakdown by ALL states
+      if (!stateName || stateName === 'for' || stateName === 'in' || stateName.length < 2) {
+        // Group tax by state
+        const acceptedOrders = relevantOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        
+        const taxByState = {}
+        acceptedOrders.forEach(order => {
+          const state = order.shippingState || order.billingState || 'Unknown'
+          if (!taxByState[state]) {
+            taxByState[state] = { tax: 0, count: 0 }
+          }
+          taxByState[state].tax += parseFloat(order.tax) || 0
+          taxByState[state].count += 1
+        })
+        
+        // Sort by tax amount descending
+        const sortedStates = Object.entries(taxByState)
+          .sort((a, b) => b[1].tax - a[1].tax)
+          .slice(0, 10) // Top 10 states
+        
+        const totalTax = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.tax) || 0), 0)
+        
+        if (sortedStates.length === 0) {
+          response.content = 'No tax data available for the selected period'
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          const dateInfo = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+          const stateList = sortedStates.map(([state, data]) => 
+            `  • ${state}: ${formatDollarAmount(data.tax)} (${formatNumber(data.count)} orders)`
+          ).join('\n')
+          
+          response.content = `Tax breakdown by state${dateInfo}:\n\n${stateList}\n\nTotal: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} orders`
+        }
+        
+        response.data = sortedStates.length > 0 ? {
+          type: 'stateBreakdown',
+          breakdownType: 'tax',
+          states: sortedStates.map(([state, data]) => ({
+            state,
+            amount: data.tax,
+            count: data.count
+          })),
+          total: totalTax,
+          orderCount: acceptedOrders.length
+        } : null
+      }
+      // Specific state query
+      else if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
         // Filter orders by state (check both shipping and billing state)
         const stateOrders = relevantOrders.filter(order => 
           order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
@@ -664,12 +762,15 @@ const CommandInterface = ({
     }
     setMessages(prev => [...prev, userMessage])
     
-    // Check if this is a query with specific filters (state, customer) that should use existing data
+    // Check if this is a query with specific filters (customer, specific state) that should use existing data
     const lower = input.toLowerCase()
+    
+    // Check for specific state name (not just "by state" which is a breakdown query)
+    const hasSpecificState = 
+      (/(?:by|for|in)\s+state\s+([a-z]{2,})/i.test(input) && !/(by state for |by state in |by state from )/i.test(input))
+    
     const hasSpecificFilter = 
-      lower.includes('by state') || 
-      lower.includes('for state') || 
-      lower.includes('in state') ||
+      hasSpecificState ||
       (lower.includes('for ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody'))) ||
       (lower.includes('from ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody')))
     
@@ -833,6 +934,49 @@ const CommandInterface = ({
                 </div>
               )}
               
+              {message.data && message.data.type === 'stateBreakdown' && (
+                <div className={`mt-3 rounded-lg p-3 border ${
+                  message.data.breakdownType === 'tax' 
+                    ? 'bg-gradient-to-br from-orange-50 to-yellow-50 border-orange-200'
+                    : 'bg-gradient-to-br from-green-50 to-emerald-50 border-green-200'
+                }`}>
+                  <div className="flex items-center mb-2">
+                    <TrendingUp className={`h-4 w-4 mr-1 ${
+                      message.data.breakdownType === 'tax' ? 'text-orange-600' : 'text-green-600'
+                    }`} />
+                    <span className={`text-xs font-medium ${
+                      message.data.breakdownType === 'tax' ? 'text-orange-800' : 'text-green-800'
+                    }`}>
+                      {message.data.breakdownType === 'tax' ? 'Tax by State' : 'Sales by State'}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {message.data.states.map((stateData, idx) => (
+                      <div key={idx} className={`flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border ${
+                        message.data.breakdownType === 'tax' ? 'border-orange-100' : 'border-green-100'
+                      }`}>
+                        <div className="flex items-center">
+                          <span className="text-gray-700 font-medium mr-2">{idx + 1}.</span>
+                          <span className="text-gray-900 font-semibold">{stateData.state}</span>
+                          <span className="text-gray-500 text-xs ml-2">({formatNumber(stateData.count)} orders)</span>
+                        </div>
+                        <span className={`font-bold ${
+                          message.data.breakdownType === 'tax' ? 'text-orange-900' : 'text-green-900'
+                        }`}>{formatDollarAmount(stateData.amount)}</span>
+                      </div>
+                    ))}
+                    <div className={`flex justify-between items-center text-sm pt-2 mt-2 border-t ${
+                      message.data.breakdownType === 'tax' ? 'border-orange-200' : 'border-green-200'
+                    }`}>
+                      <span className="text-gray-700 font-bold">Total ({formatNumber(message.data.orderCount)} orders):</span>
+                      <span className={`font-bold text-base ${
+                        message.data.breakdownType === 'tax' ? 'text-orange-900' : 'text-green-900'
+                      }`}>{formatDollarAmount(message.data.total)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {message.data && message.data.type === 'orders' && message.data.orders.length > 0 && (
                 <div className="mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200">
                   <div className="flex items-center mb-2">
@@ -942,10 +1086,10 @@ const CommandInterface = ({
             </button>
             <button
               type="button"
-              onClick={() => setInput('Sales by state California for Oct 2025')}
+              onClick={() => setInput('Sales by state for Oct 2025')}
               className="text-left px-4 py-3 bg-green-50 hover:bg-green-100 rounded-lg text-sm text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300 shadow-sm"
             >
-              Sales by state California for Oct 2025
+              Sales by state for Oct 2025
             </button>
             <button
               type="button"
@@ -970,10 +1114,10 @@ const CommandInterface = ({
             </button>
             <button
               type="button"
-              onClick={() => setInput('Tax by state New York for Oct 2025')}
+              onClick={() => setInput('Tax by state for Oct 2025')}
               className="text-left px-4 py-3 bg-orange-50 hover:bg-orange-100 rounded-lg text-sm text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm"
             >
-              Tax by state New York for Oct 2025
+              Tax by state for Oct 2025
             </button>
             <button
               type="button"
