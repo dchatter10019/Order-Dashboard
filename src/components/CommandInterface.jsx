@@ -369,18 +369,18 @@ const CommandInterface = ({
       } : null
     }
     // Sales/Revenue by state query
-    else if ((lower.includes('sales') || lower.includes('revenue')) && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state') || lower.includes(' for ') || lower.includes(' in '))) {
+    else if ((lower.includes('sales') || lower.includes('revenue')) && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state'))) {
       // Try to extract state name or abbreviation
       let stateName = ''
-      const stateMatch = text.match(/(?:sales|revenue)\s+(?:by|for|in|from)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      const stateMatch = text.match(/(?:sales|revenue)\s+(?:by|for|in)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       
       if (stateMatch && stateMatch[1]) {
         stateName = stateMatch[1].trim()
-        // Remove common date-related words
-        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month)\s*$/i, '').trim()
+        // Remove common date-related words and years
+        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month|20\d{2})\s*$/i, '').trim()
       }
       
-      if (stateName && stateName.length >= 2) {
+      if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
         // Filter orders by state (check both shipping and billing state)
         const stateOrders = relevantOrders.filter(order => 
           order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
@@ -442,18 +442,18 @@ const CommandInterface = ({
       }
     }
     // Tax by state query
-    else if (lower.includes('tax') && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state') || lower.includes(' for ') || lower.includes(' in '))) {
+    else if (lower.includes('tax') && (lower.includes('by state') || lower.includes('for state') || lower.includes('in state'))) {
       // Try to extract state name or abbreviation
       let stateName = ''
-      const stateMatch = text.match(/tax\s+(?:by|for|in|from)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      const stateMatch = text.match(/tax\s+(?:by|for|in)\s+(?:state\s+)?([a-zA-Z\s]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       
       if (stateMatch && stateMatch[1]) {
         stateName = stateMatch[1].trim()
         // Remove common date-related words
-        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month)\s*$/i, '').trim()
+        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month|20\d{2})\s*$/i, '').trim()
       }
       
-      if (stateName && stateName.length >= 2) {
+      if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
         // Filter orders by state (check both shipping and billing state)
         const stateOrders = relevantOrders.filter(order => 
           order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
