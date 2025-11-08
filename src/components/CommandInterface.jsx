@@ -21,7 +21,7 @@ const CommandInterface = ({
   const defaultMessages = [
     {
       type: 'assistant',
-      content: 'Hi! I can help you analyze your orders. Try one of the suggestions below or ask me anything!'
+      content: 'Hi! I can help you analyze your orders by date, status, customer, and more. Try one of the suggestions below or ask me anything!'
     }
   ]
   
@@ -203,7 +203,79 @@ const CommandInterface = ({
         }, 100)
       }
     }
-    // Revenue query
+    // Revenue by customer query
+    else if (lower.includes('revenue') && (lower.includes(' for ') || lower.includes(' from '))) {
+      // Extract customer name - look for patterns like "revenue for CustomerName" or "revenue from CustomerName"
+      let customerName = ''
+      const forMatch = text.match(/(?:revenue|sales)\s+(?:for|from)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|$)/i)
+      
+      if (forMatch && forMatch[1]) {
+        customerName = forMatch[1].trim()
+        // Remove common date-related words that might have been captured
+        customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on)\s*$/i, '').trim()
+      }
+      
+      if (customerName) {
+        // Filter orders by customer name (case-insensitive partial match)
+        const customerOrders = relevantOrders.filter(order => 
+          order.customerName?.toLowerCase().includes(customerName.toLowerCase())
+        )
+        
+        const acceptedOrders = customerOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        
+        const totalRevenue = acceptedOrders.reduce((sum, order) => 
+          sum + (parseFloat(order.revenue) || 0), 0
+        )
+        
+        if (customerOrders.length === 0) {
+          response.content = `No orders found for customer "${customerName}"`
+          if (dateRange) {
+            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
+          }
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+          response.content = `Revenue for ${customerName}${dateInfo}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(customerOrders.length)} total orders)`
+        }
+        
+        response.data = acceptedOrders.length > 0 ? {
+          type: 'revenue',
+          revenue: totalRevenue,
+          orderCount: acceptedOrders.length,
+          averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0,
+          customerName: customerName
+        } : null
+      } else {
+        // Fall through to general revenue query
+        const acceptedOrders = relevantOrders.filter(order => 
+          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        )
+        const totalRevenue = acceptedOrders.reduce((sum, order) => 
+          sum + (parseFloat(order.revenue) || 0), 0
+        )
+        
+        if (relevantOrders.length === 0) {
+          response.content = dateRange
+            ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
+            : 'No orders currently loaded. Try specifying a date range.'
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          response.content = dateRange
+            ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+            : `Total revenue: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+        }
+        
+        response.data = acceptedOrders.length > 0 ? {
+          type: 'revenue',
+          revenue: totalRevenue,
+          orderCount: acceptedOrders.length,
+          averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
+        } : null
+      }
+    }
+    // General revenue query
     else if (lower.includes('revenue')) {
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
@@ -404,10 +476,11 @@ const CommandInterface = ({
     // Reset to initial welcome message
     const initialMessage = {
       type: 'assistant',
-      content: 'Hi! I can help you analyze your orders. Try one of the suggestions below or ask me anything!'
+      content: 'Hi! I can help you analyze your orders by date, status, customer, and more. Try one of the suggestions below or ask me anything!'
     }
     setMessages([initialMessage])
     setInput('')
+    setExpandedOrders({}) // Also reset expanded orders state
     console.log('🧹 Chat cleared - conversation reset')
   }
 
@@ -441,9 +514,17 @@ const CommandInterface = ({
                 <div className="mt-3 bg-green-50 rounded-lg p-3 border border-green-200">
                   <div className="flex items-center mb-2">
                     <DollarSign className="h-4 w-4 text-green-600 mr-1" />
-                    <span className="text-xs font-medium text-green-800">Revenue Breakdown</span>
+                    <span className="text-xs font-medium text-green-800">
+                      {message.data.customerName ? `Revenue for ${message.data.customerName}` : 'Revenue Breakdown'}
+                    </span>
                   </div>
                   <div className="space-y-1 text-sm">
+                    {message.data.customerName && (
+                      <div className="flex justify-between pb-1 border-b border-green-200">
+                        <span className="text-gray-600">Customer:</span>
+                        <span className="font-semibold text-gray-900">{message.data.customerName}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Total Revenue:</span>
                       <span className="font-bold text-green-900">{formatDollarAmount(message.data.revenue)}</span>
@@ -586,8 +667,15 @@ const CommandInterface = ({
             </button>
             <button
               type="button"
+              onClick={() => setInput('Show me the revenue for Sendoso for Oct 2025')}
+              className="text-left px-4 py-3 bg-indigo-50 hover:bg-indigo-100 rounded-lg text-sm text-indigo-700 hover:text-indigo-800 transition-all duration-200 border border-indigo-200 hover:border-indigo-300 shadow-sm"
+            >
+              Show me the revenue for Sendoso for Oct 2025
+            </button>
+            <button
+              type="button"
               onClick={() => setInput('What\'s the total revenue for November 2025?')}
-              className="md:col-span-2 text-left px-4 py-3 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300 shadow-sm"
+              className="text-left px-4 py-3 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300 shadow-sm"
             >
               What's the total revenue for November 2025?
             </button>

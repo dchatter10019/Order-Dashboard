@@ -24,7 +24,7 @@ const MainDashboard = ({ onLogout }) => {
     messages: [
       {
         type: 'assistant',
-        content: 'Hi! I can help you analyze your orders. Try one of the suggestions below or ask me anything!'
+        content: 'Hi! I can help you analyze your orders by date, status, customer, and more. Try one of the suggestions below or ask me anything!'
       }
     ]
   })
