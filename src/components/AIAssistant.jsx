@@ -91,11 +91,12 @@ const AIAssistant = () => {
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h3 className="text-sm font-medium text-blue-800 mb-2">💡 Tips:</h3>
           <ul className="text-sm text-blue-700 space-y-1">
-            <li>• Ask about specific months: "What's the revenue for October?"</li>
+            <li>• Ask about specific months: "What's the revenue for October?" or "What's the revenue for Nov 2025?"</li>
             <li>• Find specific order types: "Show me all delayed orders"</li>
             <li>• Query date ranges: "Find pending orders from Oct 1 to Oct 31"</li>
             <li>• Get statistics: "What's the average order value this month?"</li>
             <li>• Use natural language: "How many orders were delivered this week?"</li>
+            <li>• <strong>Smart MTD:</strong> Future months automatically use Month-to-Date (e.g., "Nov 2025" = Nov 1 - Today)</li>
           </ul>
         </div>
       </div>

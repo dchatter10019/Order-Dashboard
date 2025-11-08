@@ -58,13 +58,23 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
         const year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear()
         
         const startDate = new Date(year, monthNum, 1)
-        const endDate = new Date(year, monthNum + 1, 0)
+        let endDate = new Date(year, monthNum + 1, 0) // Last day of month
         
-        console.log(`📅 Parsed date: ${monthName} ${year} -> ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
+        // If end date is in the future, use today instead (MTD - Month To Date)
+        const today = new Date()
+        today.setHours(23, 59, 59, 999) // End of today
+        
+        if (endDate > today) {
+          endDate = today
+          console.log(`📅 Future date detected, using MTD: ${monthName} ${year} -> ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]} (Month-to-Date)`)
+        } else {
+          console.log(`📅 Parsed date: ${monthName} ${year} -> ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
+        }
         
         return {
           startDate: startDate.toISOString().split('T')[0],
-          endDate: endDate.toISOString().split('T')[0]
+          endDate: endDate.toISOString().split('T')[0],
+          isMTD: endDate.getTime() === today.getTime()
         }
       }
     }
@@ -152,8 +162,9 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
         order.deliveryStatus?.toLowerCase() === 'delayed'
       )
       
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
       response.content = dateRange 
-        ? `Found ${formatNumber(delayedOrders.length)} delayed orders from ${dateRange.startDate} to ${dateRange.endDate}`
+        ? `Found ${formatNumber(delayedOrders.length)} delayed orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
         : `Found ${formatNumber(delayedOrders.length)} delayed orders`
       
       response.data = {
@@ -187,8 +198,9 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
           ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
           : 'No orders currently loaded. Try specifying a date range.'
       } else {
+        const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
         response.content = dateRange
-          ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
           : `Total revenue: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
       }
       
@@ -218,8 +230,9 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
         order.status?.toLowerCase() === 'delivered'
       )
       
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
       response.content = dateRange
-        ? `${formatNumber(deliveredOrders.length)} orders were delivered from ${dateRange.startDate} to ${dateRange.endDate}`
+        ? `${formatNumber(deliveredOrders.length)} orders were delivered from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
         : `${formatNumber(deliveredOrders.length)} orders have been delivered`
       
       response.data = {
@@ -230,8 +243,9 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
     }
     // Total orders
     else if (lower.includes('how many orders') || lower.includes('total orders')) {
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
       response.content = dateRange
-        ? `There are ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}`
+        ? `There are ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
         : `There are ${formatNumber(relevantOrders.length)} total orders`
       
       response.data = {
@@ -249,7 +263,9 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
       )
       const avgOrderValue = acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
       
-      response.content = `Average order value: ${formatDollarAmount(avgOrderValue)} (from ${formatNumber(acceptedOrders.length)} orders)`
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      const periodText = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+      response.content = `Average order value${periodText}: ${formatDollarAmount(avgOrderValue)} (from ${formatNumber(acceptedOrders.length)} orders)`
       response.data = {
         type: 'aov',
         average: avgOrderValue,
@@ -326,7 +342,9 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
       // Show loading message
       const loadingMessage = {
         type: 'assistant',
-        content: `📊 Fetching orders for ${dateRange.startDate} to ${dateRange.endDate}...`,
+        content: dateRange.isMTD 
+          ? `📊 Fetching orders for ${dateRange.startDate} to ${dateRange.endDate} (Month-to-Date)...`
+          : `📊 Fetching orders for ${dateRange.startDate} to ${dateRange.endDate}...`,
         loading: true
       }
       setMessages(prev => [...prev, loadingMessage])
