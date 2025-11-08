@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package } from 'lucide-react'
+import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2 } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
 const CommandInterface = ({ 
@@ -399,6 +399,17 @@ const CommandInterface = ({
     setInput(suggestion)
   }
 
+  const handleClearChat = () => {
+    // Reset to initial welcome message
+    const initialMessage = {
+      type: 'assistant',
+      content: 'Hi! I can help you analyze your orders. Try one of the suggestions below or ask me anything!'
+    }
+    setMessages([initialMessage])
+    setInput('')
+    console.log('🧹 Chat cleared - conversation reset')
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-12rem)] bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-200">
       {/* Messages Area */}
@@ -492,6 +503,20 @@ const CommandInterface = ({
       {/* Input Area */}
       <form onSubmit={handleSubmit} className="p-6 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto">
+          {/* Clear Chat Button - Show when there are messages */}
+          {messages.length > 1 && (
+            <div className="flex justify-end mb-3">
+              <button
+                type="button"
+                onClick={handleClearChat}
+                className="flex items-center px-3 py-1.5 text-xs text-gray-600 hover:text-red-600 bg-gray-100 hover:bg-red-50 rounded-lg transition-all duration-200 border border-gray-300 hover:border-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                Clear Chat
+              </button>
+            </div>
+          )}
+          
           <div className="relative bg-white rounded-lg border border-gray-300 shadow-sm hover:border-gray-400 transition-all duration-200">
             <input
               type="text"
