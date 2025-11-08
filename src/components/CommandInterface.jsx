@@ -341,6 +341,61 @@ const CommandInterface = ({
         } : null
       }
     }
+    // Revenue by month breakdown
+    else if ((lower.includes('revenue') || lower.includes('sales')) && lower.includes('by month')) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      // Group revenue by month
+      const revenueByMonth = {}
+      acceptedOrders.forEach(order => {
+        const orderDate = new Date(order.orderDate)
+        const monthKey = `${orderDate.getFullYear()}-${String(orderDate.getMonth() + 1).padStart(2, '0')}`
+        const monthName = orderDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+        
+        if (!revenueByMonth[monthKey]) {
+          revenueByMonth[monthKey] = { 
+            revenue: 0, 
+            count: 0, 
+            monthName,
+            sortKey: orderDate.getTime()
+          }
+        }
+        revenueByMonth[monthKey].revenue += parseFloat(order.revenue) || 0
+        revenueByMonth[monthKey].count += 1
+      })
+      
+      // Sort by date (oldest to newest)
+      const sortedMonths = Object.entries(revenueByMonth)
+        .sort((a, b) => a[1].sortKey - b[1].sortKey)
+        .map(([key, data]) => ({
+          month: data.monthName,
+          revenue: data.revenue,
+          count: data.count
+        }))
+      
+      const totalRevenue = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+      
+      if (sortedMonths.length === 0) {
+        response.content = 'No revenue data available for the selected period'
+      } else {
+        const dateInfo = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}` : ''
+        const monthList = sortedMonths.map((data, idx) => 
+          `  ${idx + 1}. ${data.month}: ${formatDollarAmount(data.revenue)} (${formatNumber(data.count)} orders)`
+        ).join('\n')
+        
+        response.content = `Revenue breakdown by month${dateInfo}:\n\n${monthList}\n\nTotal: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} orders`
+      }
+      
+      response.data = sortedMonths.length > 0 ? {
+        type: 'monthBreakdown',
+        breakdownType: 'revenue',
+        months: sortedMonths,
+        total: totalRevenue,
+        orderCount: acceptedOrders.length
+      } : null
+    }
     // General revenue query
     else if (lower.includes('revenue')) {
       const acceptedOrders = relevantOrders.filter(order => 
@@ -771,6 +826,8 @@ const CommandInterface = ({
     
     const hasSpecificFilter = 
       hasSpecificState ||
+      lower.includes('by month') || // Month breakdown should use existing data
+      lower.includes('by state') || // State breakdown should use existing data  
       (lower.includes('for ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody'))) ||
       (lower.includes('from ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody')))
     
@@ -929,6 +986,33 @@ const CommandInterface = ({
                     <div className="flex justify-between">
                       <span className="text-gray-600">Average Tax Per Order:</span>
                       <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageTaxPerOrder)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {message.data && message.data.type === 'monthBreakdown' && (
+                <div className="mt-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex items-center mb-2">
+                    <Calendar className="h-4 w-4 text-blue-600 mr-1" />
+                    <span className="text-xs font-medium text-blue-800">
+                      {message.data.breakdownType === 'revenue' ? 'Revenue by Month' : 'Tax by Month'}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {message.data.months.map((monthData, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-blue-100">
+                        <div className="flex items-center">
+                          <span className="text-gray-700 font-medium mr-2">{idx + 1}.</span>
+                          <span className="text-gray-900 font-semibold">{monthData.month}</span>
+                          <span className="text-gray-500 text-xs ml-2">({formatNumber(monthData.count)} orders)</span>
+                        </div>
+                        <span className="font-bold text-blue-900">{formatDollarAmount(monthData.revenue)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-blue-200">
+                      <span className="text-gray-700 font-bold">Total ({formatNumber(message.data.orderCount)} orders):</span>
+                      <span className="font-bold text-blue-900 text-base">{formatDollarAmount(message.data.total)}</span>
                     </div>
                   </div>
                 </div>
@@ -1118,6 +1202,13 @@ const CommandInterface = ({
               className="text-left px-4 py-3 bg-orange-50 hover:bg-orange-100 rounded-lg text-sm text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm"
             >
               Tax by state for Oct 2025
+            </button>
+            <button
+              type="button"
+              onClick={() => setInput('Revenue by month for 2025')}
+              className="text-left px-4 py-3 bg-cyan-50 hover:bg-cyan-100 rounded-lg text-sm text-cyan-700 hover:text-cyan-800 transition-all duration-200 border border-cyan-200 hover:border-cyan-300 shadow-sm"
+            >
+              Revenue by month for 2025
             </button>
             <button
               type="button"
