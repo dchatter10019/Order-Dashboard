@@ -73,7 +73,7 @@ const CommandInterface = ({
     for (const [monthName, monthNum] of Object.entries(months)) {
       if (lower.includes(monthName)) {
         // Try to extract year (e.g., "Nov 2025", "October 2024")
-        const yearMatch = text.match(/\b(20\d{2})\b/)
+        const yearMatch = command.match(/\b(20\d{2})\b/)
         const year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear()
         
         const startDate = new Date(year, monthNum, 1)
@@ -184,7 +184,7 @@ const CommandInterface = ({
     if (lower.includes('delayed') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' by '))) {
       // Extract customer name
       let customerName = ''
-      const forMatch = text.match(/(?:delayed|delay)\s+(?:orders?\s+)?(?:for|from|by)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      const forMatch = command.match(/(?:delayed|delay)\s+(?:orders?\s+)?(?:for|from|by)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       
       if (forMatch && forMatch[1]) {
         customerName = forMatch[1].trim()
@@ -278,7 +278,7 @@ const CommandInterface = ({
     else if (lower.includes('revenue') && (lower.includes(' for ') || lower.includes(' from '))) {
       // Extract customer name - look for patterns like "revenue for CustomerName" or "revenue from CustomerName"
       let customerName = ''
-      const forMatch = text.match(/(?:revenue|sales)\s+(?:for|from)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|$)/i)
+      const forMatch = command.match(/(?:revenue|sales)\s+(?:for|from)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|$)/i)
       
       if (forMatch && forMatch[1]) {
         customerName = forMatch[1].trim()
@@ -436,7 +436,7 @@ const CommandInterface = ({
     // Sales/Revenue by state query
     else if ((lower.includes('sales') || lower.includes('revenue')) && lower.includes('by state')) {
       // Check if asking for breakdown by ALL states or a specific state
-      const specificStateMatch = text.match(/(?:sales|revenue)\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      const specificStateMatch = command.match(/(?:sales|revenue)\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       let stateName = ''
       
       if (specificStateMatch && specificStateMatch[1]) {
@@ -558,7 +558,7 @@ const CommandInterface = ({
     // Tax by state query
     else if (lower.includes('tax') && lower.includes('by state')) {
       // Check if asking for breakdown by ALL states or a specific state
-      const specificStateMatch = text.match(/tax\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      const specificStateMatch = command.match(/tax\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
       let stateName = ''
       
       if (specificStateMatch && specificStateMatch[1]) {
