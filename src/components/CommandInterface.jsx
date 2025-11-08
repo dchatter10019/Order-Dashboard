@@ -175,8 +175,75 @@ const CommandInterface = ({
       data: null
     }
     
-    // Delayed orders
-    if (lower.includes('delayed')) {
+    // Delayed orders by customer
+    if (lower.includes('delayed') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' by '))) {
+      // Extract customer name
+      let customerName = ''
+      const forMatch = text.match(/(?:delayed|delay)\s+(?:orders?\s+)?(?:for|from|by)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+      
+      if (forMatch && forMatch[1]) {
+        customerName = forMatch[1].trim()
+        // Remove common date-related words
+        customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|this|month)\s*$/i, '').trim()
+      }
+      
+      if (customerName) {
+        // Filter by customer first, then by delayed status
+        const customerOrders = relevantOrders.filter(order => 
+          order.customerName?.toLowerCase().includes(customerName.toLowerCase())
+        )
+        
+        const delayedOrders = customerOrders.filter(order => 
+          order.deliveryStatus?.toLowerCase() === 'delayed'
+        )
+        
+        if (delayedOrders.length === 0) {
+          response.content = `No delayed orders found for customer "${customerName}"`
+          if (dateRange) {
+            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
+          }
+        } else {
+          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+          const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+          response.content = `Found ${formatNumber(delayedOrders.length)} delayed orders for ${customerName}${dateInfo}`
+        }
+        
+        response.data = delayedOrders.length > 0 ? {
+          type: 'orders',
+          orders: delayedOrders,
+          total: delayedOrders.length,
+          customerName: customerName
+        } : null
+      } else {
+        // Fall through to general delayed orders
+        const delayedOrders = relevantOrders.filter(order => 
+          order.deliveryStatus?.toLowerCase() === 'delayed'
+        )
+        
+        const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+        response.content = dateRange 
+          ? `Found ${formatNumber(delayedOrders.length)} delayed orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
+          : `Found ${formatNumber(delayedOrders.length)} delayed orders`
+        
+        response.data = {
+          type: 'orders',
+          orders: delayedOrders,
+          total: delayedOrders.length
+        }
+        
+        if (delayedOrders.length > 0 && onFilterChange) {
+          const dateRangeObj = dateRange || { 
+            startDate: orders[0]?.orderDate || '', 
+            endDate: orders[orders.length - 1]?.orderDate || '' 
+          }
+          setTimeout(() => {
+            onDateRangeChange(dateRangeObj)
+          }, 100)
+        }
+      }
+    }
+    // General delayed orders
+    else if (lower.includes('delayed')) {
       const delayedOrders = relevantOrders.filter(order => 
         order.deliveryStatus?.toLowerCase() === 'delayed'
       )
@@ -188,12 +255,11 @@ const CommandInterface = ({
       
       response.data = {
         type: 'orders',
-        orders: delayedOrders, // Store all orders
+        orders: delayedOrders,
         total: delayedOrders.length
       }
       
       if (delayedOrders.length > 0 && onFilterChange) {
-        // Apply filters to show delayed orders
         const dateRangeObj = dateRange || { 
           startDate: orders[0]?.orderDate || '', 
           endDate: orders[orders.length - 1]?.orderDate || '' 
@@ -546,9 +612,13 @@ const CommandInterface = ({
                   <div className="flex items-center mb-2">
                     <Package className="h-4 w-4 text-blue-600 mr-1" />
                     <span className="text-xs font-medium text-blue-800">
-                      {expandedOrders[index] 
-                        ? `All Orders (${message.data.total})`
-                        : `Sample Orders (showing ${Math.min(10, message.data.total)} of ${message.data.total})`
+                      {message.data.customerName 
+                        ? (expandedOrders[index] 
+                            ? `All Orders for ${message.data.customerName} (${message.data.total})`
+                            : `Orders for ${message.data.customerName} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
+                        : (expandedOrders[index] 
+                            ? `All Orders (${message.data.total})`
+                            : `Sample Orders (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
                       }
                     </span>
                   </div>
@@ -639,10 +709,10 @@ const CommandInterface = ({
           <div className="mt-4 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => setInput('Find all delayed orders from Oct 1 to Oct 31')}
+              onClick={() => setInput('Show me delayed orders for Sendoso for Oct 2025')}
               className="text-left px-4 py-3 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-red-700 hover:text-red-800 transition-all duration-200 border border-red-200 hover:border-red-300 shadow-sm"
             >
-              Find all delayed orders from Oct 1 to Oct 31
+              Show me delayed orders for Sendoso for Oct 2025
             </button>
             <button
               type="button"
