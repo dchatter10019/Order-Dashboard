@@ -3,6 +3,7 @@ import CommandInterface from './CommandInterface'
 
 const AIAssistant = () => {
   const [orders, setOrders] = useState([])
+  const [isLoading, setIsLoading] = useState(false)
   const [dateRange, setDateRange] = useState(() => {
     const today = new Date()
     const todayString = today.getFullYear() + '-' + 
@@ -16,6 +17,9 @@ const AIAssistant = () => {
 
   const fetchOrders = async () => {
     try {
+      console.log(`🔍 AI Assistant fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
+      setIsLoading(true)
+      
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
       const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
@@ -26,6 +30,8 @@ const AIAssistant = () => {
       }
       
       const data = await response.json()
+      console.log(`✅ AI Assistant received ${data.data?.length || 0} orders`)
+      
       if (data.data && Array.isArray(data.data)) {
         setOrders(data.data)
       } else {
@@ -34,6 +40,8 @@ const AIAssistant = () => {
     } catch (error) {
       console.error('Error fetching orders:', error)
       setOrders([])
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -43,6 +51,7 @@ const AIAssistant = () => {
     }, 500)
     
     return () => clearTimeout(debounceTimer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange])
 
   return (
@@ -51,12 +60,31 @@ const AIAssistant = () => {
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900">AI Order Assistant</h1>
           <p className="text-gray-600 mt-2">Ask questions about your orders in natural language</p>
+          
+          {/* Current Data Context */}
+          <div className="mt-4 bg-white border border-gray-200 rounded-lg p-3 flex items-center justify-between">
+            <div className="text-sm">
+              <span className="text-gray-600">Currently loaded: </span>
+              <span className="font-semibold text-gray-900">{orders.length.toLocaleString()} orders</span>
+              <span className="text-gray-600 ml-2">from</span>
+              <span className="font-semibold text-blue-600 ml-1">{dateRange.startDate}</span>
+              <span className="text-gray-600 mx-1">to</span>
+              <span className="font-semibold text-blue-600">{dateRange.endDate}</span>
+            </div>
+            {isLoading && (
+              <div className="flex items-center text-blue-600 text-sm">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                Loading...
+              </div>
+            )}
+          </div>
         </div>
         
         <CommandInterface 
           orders={orders}
           onDateRangeChange={setDateRange}
           onFetchOrders={fetchOrders}
+          isLoadingData={isLoading}
         />
         
         {/* Info Section */}

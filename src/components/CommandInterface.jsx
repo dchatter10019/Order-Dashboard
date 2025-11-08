@@ -2,9 +2,8 @@ import React, { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
-const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOrders }) => {
+const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOrders, isLoadingData }) => {
   const [input, setInput] = useState('')
-  const [isProcessing, setIsProcessing] = useState(false)
   const [messages, setMessages] = useState([
     {
       type: 'assistant',
@@ -50,12 +49,17 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
       december: 11, dec: 11
     }
     
-    // Check for specific month
+    // Check for specific month with optional year
     for (const [monthName, monthNum] of Object.entries(months)) {
       if (lower.includes(monthName)) {
-        const year = now.getFullYear()
+        // Try to extract year (e.g., "Nov 2025", "October 2024")
+        const yearMatch = text.match(/\b(20\d{2})\b/)
+        const year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear()
+        
         const startDate = new Date(year, monthNum, 1)
         const endDate = new Date(year, monthNum + 1, 0)
+        
+        console.log(`📅 Parsed date: ${monthName} ${year} -> ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
         
         return {
           startDate: startDate.toISOString().split('T')[0],
@@ -254,17 +258,18 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
 
   // Watch for orders change after date range update
   useEffect(() => {
-    if (pendingCommandRef.current && !isProcessing && orders.length > 0) {
+    if (pendingCommandRef.current && !isLoadingData && orders.length > 0) {
+      console.log('🤖 Processing pending command with loaded data:', orders.length, 'orders')
       const response = processCommand(pendingCommandRef.current)
-      setMessages(prev => [...prev, response])
+      setMessages(prev => prev.filter(m => !m.loading).concat([response]))
       pendingCommandRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, isProcessing])
+  }, [orders, isLoadingData])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim() || isProcessing) return
+    if (!input.trim() || isLoadingData) return
     
     // Add user message
     const userMessage = {
@@ -277,6 +282,7 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
     const dateRange = parseDate(input)
     
     if (dateRange && onDateRangeChange && onFetchOrders) {
+      console.log('🔍 Date range detected, fetching data:', dateRange)
       // Show loading message
       const loadingMessage = {
         type: 'assistant',
@@ -285,20 +291,14 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
       }
       setMessages(prev => [...prev, loadingMessage])
       
-      setIsProcessing(true)
+      // Save the command to process after data loads
       pendingCommandRef.current = input
       
-      // Update date range and trigger fetch
+      // Update date range (this will trigger fetchOrders via useEffect)
       onDateRangeChange(dateRange)
-      
-      // Wait for the fetch to complete (increase timeout for large date ranges)
-      setTimeout(() => {
-        setIsProcessing(false)
-        // Remove loading message
-        setMessages(prev => prev.filter(m => !m.loading))
-      }, 5000) // 5 seconds to allow for chunked requests
     } else {
       // Process command immediately with current data
+      console.log('🤖 Processing command with current data:', orders.length, 'orders')
       const response = processCommand(input)
       setMessages(prev => [...prev, response])
     }
@@ -419,16 +419,26 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask me anything about your orders..."
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            placeholder={isLoadingData ? "Loading data..." : "Ask me anything about your orders..."}
+            disabled={isLoadingData}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
           />
           <button
             type="submit"
-            disabled={!input.trim()}
+            disabled={!input.trim() || isLoadingData}
             className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center"
           >
-            <Send className="h-4 w-4 mr-2" />
-            Send
+            {isLoadingData ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                Loading
+              </>
+            ) : (
+              <>
+                <Send className="h-4 w-4 mr-2" />
+                Send
+              </>
+            )}
           </button>
         </div>
         <div className="mt-2 flex flex-wrap gap-2">
