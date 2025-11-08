@@ -216,7 +216,12 @@ function createOrderFromCSV(headers, values, orderDate) {
       giftNoteCharge: 0,
       promoDiscAmt: 0,
       serviceChargeTax: 0,
-      stripePaymentId: ''
+      stripePaymentId: '',
+      // State fields
+      shippingState: '',
+      billingState: '',
+      shippingCity: '',
+      shippingZip: ''
     }
     
     // Map fields based on Bevvi CSV structure
@@ -403,6 +408,26 @@ function createOrderFromCSV(headers, values, orderDate) {
           break
         case 'doordashstatus':
           order.doorDashStatus = value || ''
+          break
+        case 'shippingstate':
+        case 'shipping_state':
+        case 'state':
+          order.shippingState = value || ''
+          break
+        case 'billingstate':
+        case 'billing_state':
+          order.billingState = value || ''
+          break
+        case 'shippingcity':
+        case 'shipping_city':
+        case 'city':
+          order.shippingCity = value || ''
+          break
+        case 'shippingzip':
+        case 'shipping_zip':
+        case 'zip':
+        case 'zipcode':
+          order.shippingZip = value || ''
           break
       }
     })
