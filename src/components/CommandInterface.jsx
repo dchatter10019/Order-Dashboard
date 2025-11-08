@@ -288,7 +288,16 @@ const CommandInterface = ({
       
       console.log('💼 Extracted customer name:', customerName)
       
-      if (customerName && customerName.length >= 3 && !/^\d/.test(customerName)) {
+      // Check if extracted name is a month name (should not be treated as customer)
+      const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 
+                         'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
+      const isMonthName = monthNames.includes(customerName.toLowerCase())
+      
+      if (isMonthName) {
+        console.log('📅 Rejected customer name - is a month name:', customerName)
+      }
+      
+      if (customerName && customerName.length >= 3 && !/^\d/.test(customerName) && !isMonthName) {
         // Filter orders by customer name (case-insensitive partial match)
         const customerOrders = relevantOrders.filter(order => 
           order.customerName?.toLowerCase().includes(customerName.toLowerCase())
