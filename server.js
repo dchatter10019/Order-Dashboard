@@ -174,6 +174,44 @@ function checkOrderDeliveryStatus(order, currentStatus) {
   return 'N/A'
 }
 
+// Extract state from text (establishment name, address, etc.)
+function extractStateFromText(text) {
+  if (!text) return null
+  
+  // Common US state abbreviations and names
+  const stateMap = {
+    'AL': 'Alabama', 'AK': 'Alaska', 'AZ': 'Arizona', 'AR': 'Arkansas',
+    'CA': 'California', 'CO': 'Colorado', 'CT': 'Connecticut', 'DE': 'Delaware',
+    'FL': 'Florida', 'GA': 'Georgia', 'HI': 'Hawaii', 'ID': 'Idaho',
+    'IL': 'Illinois', 'IN': 'Indiana', 'IA': 'Iowa', 'KS': 'Kansas',
+    'KY': 'Kentucky', 'LA': 'Louisiana', 'ME': 'Maine', 'MD': 'Maryland',
+    'MA': 'Massachusetts', 'MI': 'Michigan', 'MN': 'Minnesota', 'MS': 'Mississippi',
+    'MO': 'Missouri', 'MT': 'Montana', 'NE': 'Nebraska', 'NV': 'Nevada',
+    'NH': 'New Hampshire', 'NJ': 'New Jersey', 'NM': 'New Mexico', 'NY': 'New York',
+    'NC': 'North Carolina', 'ND': 'North Dakota', 'OH': 'Ohio', 'OK': 'Oklahoma',
+    'OR': 'Oregon', 'PA': 'Pennsylvania', 'RI': 'Rhode Island', 'SC': 'South Carolina',
+    'SD': 'South Dakota', 'TN': 'Tennessee', 'TX': 'Texas', 'UT': 'Utah',
+    'VT': 'Vermont', 'VA': 'Virginia', 'WA': 'Washington', 'WV': 'West Virginia',
+    'WI': 'Wisconsin', 'WY': 'Wyoming', 'DC': 'District of Columbia'
+  }
+  
+  // Try to find state abbreviation (2 capital letters)
+  const abbrMatch = text.match(/\b([A-Z]{2})\b/)
+  if (abbrMatch && stateMap[abbrMatch[1]]) {
+    return abbrMatch[1]
+  }
+  
+  // Try to find full state name
+  const lowerText = text.toLowerCase()
+  for (const [abbr, fullName] of Object.entries(stateMap)) {
+    if (lowerText.includes(fullName.toLowerCase())) {
+      return abbr
+    }
+  }
+  
+  return null
+}
+
 // Calculate business days between two dates (excluding weekends)
 function calculateBusinessDays(startDate, endDate) {
   let businessDays = 0
@@ -436,6 +474,15 @@ function createOrderFromCSV(headers, values, orderDate) {
     if (!order.id) order.id = `ORD${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
     if (!order.customerName) order.customerName = 'Unknown Customer'
     if (!order.establishment) order.establishment = 'Unknown Establishment'
+    
+    // Extract state from establishment name if shippingState is empty
+    if (!order.shippingState && order.establishment) {
+      const stateFromEstablishment = extractStateFromText(order.establishment)
+      if (stateFromEstablishment) {
+        order.shippingState = stateFromEstablishment
+        console.log(`📍 Extracted state from establishment: ${order.establishment} → ${stateFromEstablishment}`)
+      }
+    }
     
     // Use actual delivery date from API if available, otherwise set to N/A
     if (!order.deliveryDate) {
