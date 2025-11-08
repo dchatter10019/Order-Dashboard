@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
-import { LogOut, Package, FileText } from 'lucide-react'
+import { LogOut, Package, FileText, Sparkles } from 'lucide-react'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
+import AIAssistant from './AIAssistant'
 import Logo from './Logo'
 
 const MainDashboard = ({ onLogout }) => {
@@ -62,6 +63,20 @@ const MainDashboard = ({ onLogout }) => {
                 Product Management
               </div>
             </button>
+            
+            <button
+              onClick={() => setActiveTab('ai-assistant')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'ai-assistant'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Sparkles className="w-5 h-5 mr-2" />
+                AI Assistant
+              </div>
+            </button>
           </nav>
         </div>
       </div>
@@ -70,6 +85,7 @@ const MainDashboard = ({ onLogout }) => {
       <main className="max-w-7xl mx-auto">
         {activeTab === 'orders' && <Dashboard />}
         {activeTab === 'products' && <ProductManagement />}
+        {activeTab === 'ai-assistant' && <AIAssistant />}
       </main>
     </div>
   )

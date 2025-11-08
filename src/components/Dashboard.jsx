@@ -4,7 +4,6 @@ import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
-import CommandInterface from './CommandInterface'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
 const Dashboard = () => {
@@ -788,18 +787,6 @@ const Dashboard = () => {
               />
             )}
           </div>
-        </div>
-
-
-
-        {/* AI Command Interface */}
-        <div className="mb-6">
-          <CommandInterface 
-            orders={orders}
-            onFilterChange={setStatusFilter}
-            onDateRangeChange={setDateRange}
-            onFetchOrders={fetchOrders}
-          />
         </div>
 
         {/* Loading Overlay - Covers entire screen */}
