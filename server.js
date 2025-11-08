@@ -2,10 +2,16 @@ const express = require('express')
 const cors = require('cors')
 const axios = require('axios')
 const path = require('path')
+const OpenAI = require('openai')
 require('dotenv').config()
 
 const app = express()
 const PORT = process.env.PORT || 3001
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+})
 
 // Middleware
 app.use(cors({
@@ -519,16 +525,8 @@ function createOrderFromCSV(headers, values, orderDate) {
       }
     }
     
-    // Log first few orders to see what data we have
-    if (orders.length < 3) {
-      console.log(`📦 Sample order data:`, {
-        id: order.id,
-        establishment: order.establishment,
-        shippingState: order.shippingState,
-        billingState: order.billingState,
-        customerName: order.customerName
-      })
-    }
+    // Log sample order data (removed orders.length check as it's not in scope)
+    // Logging moved to parseCSVToOrders function instead
     
     // Use actual delivery date from API if available, otherwise set to N/A
     if (!order.deliveryDate) {
@@ -1305,6 +1303,115 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
   }
 })
 
+// AI Prompt Parsing endpoint using GPT-4o-mini
+app.post('/api/parse-prompt', async (req, res) => {
+  try {
+    const { prompt } = req.body
+    
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({
+        error: 'Prompt is required and must be a string'
+      })
+    }
+    
+    // Check if OpenAI API key is configured
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('⚠️ OPENAI_API_KEY not configured')
+      return res.status(500).json({
+        error: 'OpenAI API key not configured',
+        fallback: true
+      })
+    }
+    
+    console.log('🤖 Parsing prompt with GPT-4o-mini:', prompt)
+    
+    const systemPrompt = `You are an AI assistant that parses natural language queries about order data into structured JSON.
+
+Today's date is ${new Date().toISOString().split('T')[0]}.
+
+Extract the following information from the user's query:
+- intent: The type of query. Choose from:
+  * revenue: asking about revenue/sales amounts
+  * tax: asking about tax amounts
+  * service_charge: asking about service charge amounts
+  * delayed_orders: specifically asking for DELAYED orders
+  * pending_orders: specifically asking for PENDING STATUS orders (must mention "pending")
+  * delivered_orders: specifically asking for DELIVERED STATUS orders (must mention "delivered")
+  * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries)
+  * average_order_value: asking for AOV or average
+  * revenue_by_month: asking for revenue breakdown by month
+  * revenue_by_customer: asking for revenue for a specific customer
+  * delayed_orders_by_customer: asking for delayed orders for a specific customer
+  
+- customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire). Always extract full company name, not partial words.
+- startDate: Start date in YYYY-MM-DD format
+- endDate: End date in YYYY-MM-DD format
+- isMTD: Boolean, true if asking for "month to date" or "this month so far"
+
+Important: 
+- Customer names should be exact - "Sendoso" not "sendoso in", "Air Culinaire" not "air", etc.
+- "show me orders", "orders placed today", "how many orders" = total_orders intent (NOT pending_orders)
+- "show me pending orders", "pending status" = pending_orders intent
+
+Date parsing rules:
+- "this month", "this month so far", "MTD", "month to date" = first day of current month to today
+- "last month" = full previous month (1st to last day)
+- "YTD", "year to date", "this year" = January 1st of current year to today
+- "October 2025", "Oct 2025" = 2025-10-01 to 2025-10-31
+- If end date is in the future, set it to today (MTD logic)
+
+Return ONLY valid JSON, no explanation. Format:
+{
+  "intent": "revenue",
+  "customer": "Sendoso",
+  "startDate": "2025-10-01",
+  "endDate": "2025-10-31",
+  "isMTD": false
+}
+
+If customer is not mentioned, omit the "customer" field.`
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1, // Low temperature for consistent parsing
+      max_tokens: 150, // Keep output small to reduce costs
+      response_format: { type: 'json_object' }
+    })
+    
+    const parsedData = JSON.parse(completion.choices[0].message.content)
+    
+    console.log('✅ Parsed result:', parsedData)
+    console.log('📊 Tokens used:', {
+      prompt: completion.usage.prompt_tokens,
+      completion: completion.usage.completion_tokens,
+      total: completion.usage.total_tokens,
+      estimatedCost: `$${((completion.usage.prompt_tokens * 0.15 + completion.usage.completion_tokens * 0.60) / 1000000).toFixed(6)}`
+    })
+    
+    res.json({
+      success: true,
+      parsed: parsedData,
+      usage: {
+        promptTokens: completion.usage.prompt_tokens,
+        completionTokens: completion.usage.completion_tokens,
+        totalTokens: completion.usage.total_tokens
+      }
+    })
+    
+  } catch (error) {
+    console.error('❌ Error parsing prompt:', error)
+    res.status(500).json({
+      error: 'Failed to parse prompt',
+      message: error.message,
+      fallback: true
+    })
+  }
+})
+
 // Auto-refresh control endpoints
 app.post('/api/auto-refresh/start', (req, res) => {
   const { startDate, endDate } = req.body
@@ -1439,6 +1546,11 @@ app.listen(PORT, async () => {
   console.log(`   POST /api/products/refresh - Refresh products cache`)
   console.log(`   GET  /api/products/status - Get cache status`)
   console.log(``)
+  
+  // Clear orders cache on startup to ensure fresh data
+  ordersCache.clear()
+  console.log(`🧹 Orders cache cleared on startup`)
+  
   console.log(`📦 Loading all Bevvi products on startup...`)
   await loadAllProducts()
   console.log(`✅ Server ready with products cache loaded`)

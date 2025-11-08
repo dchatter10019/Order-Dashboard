@@ -93,18 +93,18 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
 
   return (
     <div className="bg-gray-50 min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
         {/* Gradient Header Banner */}
-        <div className="mb-6 bg-gradient-to-r from-blue-600 to-purple-600 rounded-t-xl p-6 shadow-lg">
+        <div className="mb-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-t-xl p-3 shadow-lg">
           <div className="flex items-center">
-            <div className="mr-4">
-              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div className="mr-3">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
               </svg>
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-white">AI Order Assistant</h1>
-              <p className="text-blue-100 text-sm mt-1">Ask me anything about your orders in natural language</p>
+              <h1 className="text-lg font-bold text-white">AI Order Assistant</h1>
+              <p className="text-blue-100 text-xs">Ask me anything about your orders in natural language</p>
             </div>
           </div>
         </div>

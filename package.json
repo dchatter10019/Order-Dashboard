@@ -1,6 +1,6 @@
 {
   "name": "bevvi-order-tracking-system",
-  "version": "1.0.4",
+  "version": "2.0.0",
   "description": "Bevvi Order Tracking System with authentication and filtering capabilities",
   "main": "index.js",
   "scripts": {
@@ -18,7 +18,8 @@
     "csv-parser": "^3.2.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "moment": "^2.29.4"
+    "moment": "^2.29.4",
+    "openai": "^6.8.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",

@@ -15,6 +15,7 @@ const CommandInterface = ({
   const [expandedOrders, setExpandedOrders] = useState({}) // Track which message's orders are expanded
   const messagesEndRef = useRef(null)
   const pendingCommandRef = useRef(null)
+  const pendingGPTDataRef = useRef(null) // Store GPT-parsed data for pending command
   const loadingTimeoutRef = useRef(null)
   
   // Default messages if none provided
@@ -154,12 +155,13 @@ const CommandInterface = ({
   }
 
   // Process user command
-  const processCommand = (command) => {
+  const processCommand = (command, gptParsedData = null) => {
     console.log('🔄 Processing command:', command, 'with', orders.length, 'orders')
+    console.log('🤖 GPT parsed data:', gptParsedData)
     const lower = command.toLowerCase()
     
-    // Parse date range if present
-    const dateRange = parseDate(command)
+    // Use GPT-parsed date range if available, otherwise fall back to rule-based
+    const dateRange = gptParsedData?.dateRange || parseDate(command)
     console.log('📅 Date range from command:', dateRange)
     
     // Filter orders by date range if specified
@@ -181,16 +183,23 @@ const CommandInterface = ({
     }
     
     // Delayed orders by customer
-    if (lower.includes('delayed') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' by '))) {
-      // Extract customer name
-      let customerName = ''
-      const forMatch = command.match(/(?:delayed|delay)\s+(?:orders?\s+)?(?:for|from|by)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+    if ((gptParsedData?.intent === 'delayed_orders' || gptParsedData?.intent === 'delayed_orders_by_customer') || 
+        (!gptParsedData && lower.includes('delayed') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' by ') || lower.includes(' of ')))) {
+      // Use GPT-parsed customer name if available, otherwise extract with regex
+      let customerName = gptParsedData?.customer || ''
       
-      if (forMatch && forMatch[1]) {
-        customerName = forMatch[1].trim()
-        // Remove common date-related words
-        customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|this|month)\s*$/i, '').trim()
+      if (!customerName) {
+        // Fallback to regex extraction (handles for/from/by/of)
+        const forMatch = command.match(/(?:delayed|delay)\s+(?:orders?\s+)?(?:for|from|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+        
+        if (forMatch && forMatch[1]) {
+          customerName = forMatch[1].trim()
+          // Remove common date-related words
+          customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|this|month)\s*$/i, '').trim()
+        }
       }
+      
+      console.log('💼 Customer name (GPT or regex):', customerName, '| Source:', gptParsedData?.customer ? 'GPT' : 'Regex')
       
       if (customerName) {
         // Filter by customer first, then by delayed status
@@ -217,7 +226,8 @@ const CommandInterface = ({
           type: 'orders',
           orders: delayedOrders,
           total: delayedOrders.length,
-          customerName: customerName
+          customerName: customerName,
+          orderType: 'Delayed'
         } : null
       } else {
         // Fall through to general delayed orders
@@ -233,7 +243,8 @@ const CommandInterface = ({
         response.data = {
           type: 'orders',
           orders: delayedOrders,
-          total: delayedOrders.length
+          total: delayedOrders.length,
+          orderType: 'Delayed'
         }
         
         if (delayedOrders.length > 0 && onFilterChange) {
@@ -248,7 +259,7 @@ const CommandInterface = ({
       }
     }
     // General delayed orders
-    else if (lower.includes('delayed')) {
+    else if ((gptParsedData?.intent === 'delayed_orders') || (!gptParsedData && lower.includes('delayed'))) {
       const delayedOrders = relevantOrders.filter(order => 
         order.deliveryStatus?.toLowerCase() === 'delayed'
       )
@@ -261,7 +272,8 @@ const CommandInterface = ({
       response.data = {
         type: 'orders',
         orders: delayedOrders,
-        total: delayedOrders.length
+        total: delayedOrders.length,
+        orderType: 'Delayed'
       }
       
       if (delayedOrders.length > 0 && onFilterChange) {
@@ -274,19 +286,28 @@ const CommandInterface = ({
         }, 100)
       }
     }
-    // Revenue by customer query
-    else if (lower.includes('revenue') && (lower.includes(' for ') || lower.includes(' from '))) {
-      // Extract customer name - look for patterns like "revenue for CustomerName" or "revenue from CustomerName"
-      let customerName = ''
-      const forMatch = command.match(/(?:revenue|sales)\s+(?:for|from)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|$)/i)
+    // Revenue by customer query - Check if GPT intent is revenue with customer OR if query text matches pattern
+    else if ((gptParsedData?.intent === 'revenue' && gptParsedData?.customer) || 
+             (gptParsedData?.intent === 'revenue_by_customer') ||
+             (!gptParsedData && lower.includes('revenue') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' of ')))) {
+      console.log('🔍 Entering revenue by customer block')
+      // Use GPT-parsed customer name if available, otherwise extract with regex
+      let customerName = gptParsedData?.customer || ''
       
-      if (forMatch && forMatch[1]) {
-        customerName = forMatch[1].trim()
-        // Remove common date-related words that might have been captured
-        customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|20\d{2})\s*$/i, '').trim()
+      if (!customerName) {
+        // Fallback to regex extraction (handles for/from/of)
+        const forMatch = command.match(/(?:revenue|sales)\s+(?:for|from|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+        
+        if (forMatch && forMatch[1]) {
+          customerName = forMatch[1].trim()
+          // Remove common date-related words that might have been captured
+          customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|20\d{2})\s*$/i, '').trim()
+        }
       }
       
-      console.log('💼 Extracted customer name:', customerName)
+      console.log('💼 Customer name (GPT or regex):', customerName, '| Source:', gptParsedData?.customer ? 'GPT' : 'Regex')
+      console.log('💼 Customer name length:', customerName?.length)
+      console.log('💼 GPT parsed data full:', gptParsedData)
       
       // Check if extracted name is a month name (should not be treated as customer)
       const monthNames = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec', 
@@ -297,7 +318,17 @@ const CommandInterface = ({
         console.log('📅 Rejected customer name - is a month name:', customerName)
       }
       
+      console.log('💼 Validation check:', {
+        hasCustomerName: !!customerName,
+        length: customerName?.length,
+        minLength: customerName && customerName.length >= 3,
+        notDigit: !/^\d/.test(customerName),
+        notMonth: !isMonthName,
+        willProcess: customerName && customerName.length >= 3 && !/^\d/.test(customerName) && !isMonthName
+      })
+      
       if (customerName && customerName.length >= 3 && !/^\d/.test(customerName) && !isMonthName) {
+        console.log('✅ Processing revenue by customer query for:', customerName)
         // Filter orders by customer name (case-insensitive partial match)
         const customerOrders = relevantOrders.filter(order => 
           order.customerName?.toLowerCase().includes(customerName.toLowerCase())
@@ -331,6 +362,8 @@ const CommandInterface = ({
         } : null
       } else {
         // Fall through to general revenue query
+        console.log('⚠️ Customer name validation failed, falling back to general revenue')
+        console.log('⚠️ Customer name was:', customerName)
         const acceptedOrders = relevantOrders.filter(order => 
           !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
         )
@@ -358,7 +391,7 @@ const CommandInterface = ({
       }
     }
     // Revenue by month breakdown
-    else if ((lower.includes('revenue') || lower.includes('sales')) && lower.includes('by month')) {
+    else if ((gptParsedData?.intent === 'revenue_by_month') || (!gptParsedData && (lower.includes('revenue') || lower.includes('sales')) && lower.includes('by month'))) {
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
       )
@@ -413,7 +446,7 @@ const CommandInterface = ({
       } : null
     }
     // General revenue query (but not if it's a tax query)
-    else if ((lower.includes('revenue') || lower.includes('sales')) && !lower.includes('tax')) {
+    else if ((gptParsedData?.intent === 'revenue') || (!gptParsedData && (lower.includes('revenue') || lower.includes('sales')) && !lower.includes('tax'))) {
       console.log('💰 General revenue query - relevant orders:', relevantOrders.length)
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
@@ -442,257 +475,13 @@ const CommandInterface = ({
         averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
       } : null
     }
-    // Sales/Revenue by state query
-    else if ((lower.includes('sales') || lower.includes('revenue')) && lower.includes('by state')) {
-      // Check if asking for breakdown by ALL states or a specific state
-      const specificStateMatch = command.match(/(?:sales|revenue)\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
-      let stateName = ''
-      
-      if (specificStateMatch && specificStateMatch[1]) {
-        stateName = specificStateMatch[1].trim()
-        // Remove common date-related words and years
-        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month|20\d{2})\s*$/i, '').trim()
-      }
-      
-      // If no specific state, show breakdown by ALL states
-      if (!stateName || stateName === 'for' || stateName === 'in' || stateName.length < 2) {
-        // Group revenue by state
-        const acceptedOrders = relevantOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
-        )
-        
-        const revenueByState = {}
-        acceptedOrders.forEach(order => {
-          const state = order.shippingState || order.billingState || 'Unknown'
-          if (!revenueByState[state]) {
-            revenueByState[state] = { revenue: 0, count: 0 }
-          }
-          revenueByState[state].revenue += parseFloat(order.revenue) || 0
-          revenueByState[state].count += 1
-        })
-        
-        // Sort by revenue amount descending
-        const sortedStates = Object.entries(revenueByState)
-          .sort((a, b) => b[1].revenue - a[1].revenue)
-          .slice(0, 10) // Top 10 states
-        
-        const totalRevenue = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
-        
-        if (sortedStates.length === 0) {
-          response.content = 'No sales data available for the selected period'
-        } else {
-          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-          const dateInfo = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
-          const stateList = sortedStates.map(([state, data]) => 
-            `  • ${state}: ${formatDollarAmount(data.revenue)} (${formatNumber(data.count)} orders)`
-          ).join('\n')
-          
-          response.content = `Sales breakdown by state${dateInfo}:\n\n${stateList}\n\nTotal: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} orders`
-        }
-        
-        response.data = sortedStates.length > 0 ? {
-          type: 'stateBreakdown',
-          breakdownType: 'revenue',
-          states: sortedStates.map(([state, data]) => ({
-            state,
-            amount: data.revenue,
-            count: data.count
-          })),
-          total: totalRevenue,
-          orderCount: acceptedOrders.length
-        } : null
-      }
-      // Specific state query
-      else if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
-        // Filter orders by state (check both shipping and billing state)
-        const stateOrders = relevantOrders.filter(order => 
-          order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
-          order.billingState?.toLowerCase().includes(stateName.toLowerCase())
-        )
-        
-        const acceptedOrders = stateOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
-        )
-        
-        const totalRevenue = acceptedOrders.reduce((sum, order) => 
-          sum + (parseFloat(order.revenue) || 0), 0
-        )
-        
-        if (stateOrders.length === 0) {
-          response.content = `No orders found for state "${stateName}"`
-          if (dateRange) {
-            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
-          }
-        } else {
-          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-          const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
-          response.content = `Revenue for ${stateName}${dateInfo}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(stateOrders.length)} total orders)`
-        }
-        
-        response.data = acceptedOrders.length > 0 ? {
-          type: 'revenue',
-          revenue: totalRevenue,
-          orderCount: acceptedOrders.length,
-          averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0,
-          stateName: stateName
-        } : null
-      } else {
-        // Fall through to general revenue if state can't be extracted
-        const acceptedOrders = relevantOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
-        )
-        const totalRevenue = acceptedOrders.reduce((sum, order) => 
-          sum + (parseFloat(order.revenue) || 0), 0
-        )
-        
-        if (relevantOrders.length === 0) {
-          response.content = dateRange
-            ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}.`
-            : 'No orders currently loaded. Try specifying a date range.'
-        } else {
-          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-          response.content = dateRange
-            ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
-            : `Total revenue: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
-        }
-        
-        response.data = acceptedOrders.length > 0 ? {
-          type: 'revenue',
-          revenue: totalRevenue,
-          orderCount: acceptedOrders.length,
-          averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
-        } : null
-      }
-    }
-    // Tax by state query
-    else if (lower.includes('tax') && lower.includes('by state')) {
-      // Check if asking for breakdown by ALL states or a specific state
-      const specificStateMatch = command.match(/tax\s+by\s+state\s+([a-zA-Z]{2,}?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
-      let stateName = ''
-      
-      if (specificStateMatch && specificStateMatch[1]) {
-        stateName = specificStateMatch[1].trim()
-        // Remove common date-related words
-        stateName = stateName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|this|month|20\d{2})\s*$/i, '').trim()
-      }
-      
-      // If no specific state, show breakdown by ALL states
-      if (!stateName || stateName === 'for' || stateName === 'in' || stateName.length < 2) {
-        // Group tax by state
-        const acceptedOrders = relevantOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
-        )
-        
-        const taxByState = {}
-        acceptedOrders.forEach(order => {
-          const state = order.shippingState || order.billingState || 'Unknown'
-          if (!taxByState[state]) {
-            taxByState[state] = { tax: 0, count: 0 }
-          }
-          taxByState[state].tax += parseFloat(order.tax) || 0
-          taxByState[state].count += 1
-        })
-        
-        // Sort by tax amount descending
-        const sortedStates = Object.entries(taxByState)
-          .sort((a, b) => b[1].tax - a[1].tax)
-          .slice(0, 10) // Top 10 states
-        
-        const totalTax = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.tax) || 0), 0)
-        
-        if (sortedStates.length === 0) {
-          response.content = 'No tax data available for the selected period'
-        } else {
-          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-          const dateInfo = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
-          const stateList = sortedStates.map(([state, data]) => 
-            `  • ${state}: ${formatDollarAmount(data.tax)} (${formatNumber(data.count)} orders)`
-          ).join('\n')
-          
-          response.content = `Tax breakdown by state${dateInfo}:\n\n${stateList}\n\nTotal: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} orders`
-        }
-        
-        response.data = sortedStates.length > 0 ? {
-          type: 'stateBreakdown',
-          breakdownType: 'tax',
-          states: sortedStates.map(([state, data]) => ({
-            state,
-            amount: data.tax,
-            count: data.count
-          })),
-          total: totalTax,
-          orderCount: acceptedOrders.length
-        } : null
-      }
-      // Specific state query
-      else if (stateName && stateName.length >= 2 && !stateName.match(/^\d/)) {
-        // Filter orders by state (check both shipping and billing state)
-        const stateOrders = relevantOrders.filter(order => 
-          order.shippingState?.toLowerCase().includes(stateName.toLowerCase()) ||
-          order.billingState?.toLowerCase().includes(stateName.toLowerCase())
-        )
-        
-        const acceptedOrders = stateOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
-        )
-        
-        const totalTax = acceptedOrders.reduce((sum, order) => 
-          sum + (parseFloat(order.tax) || 0), 0
-        )
-        
-        if (stateOrders.length === 0) {
-          response.content = `No orders found for state "${stateName}"`
-          if (dateRange) {
-            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
-          }
-        } else {
-          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-          const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
-          response.content = `Tax for ${stateName}${dateInfo}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(stateOrders.length)} total orders)`
-        }
-        
-        response.data = acceptedOrders.length > 0 ? {
-          type: 'tax',
-          totalTax: totalTax,
-          orderCount: acceptedOrders.length,
-          averageTaxPerOrder: acceptedOrders.length > 0 ? totalTax / acceptedOrders.length : 0,
-          stateName: stateName
-        } : null
-      } else {
-        // Fall through to general tax if state can't be extracted
-        const acceptedOrders = relevantOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
-        )
-        const totalTax = acceptedOrders.reduce((sum, order) => 
-          sum + (parseFloat(order.tax) || 0), 0
-        )
-        
-        if (relevantOrders.length === 0) {
-          response.content = dateRange
-            ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}.`
-            : 'No orders currently loaded. Try specifying a date range.'
-        } else {
-          const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-          response.content = dateRange
-            ? `Total tax for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
-            : `Total tax: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
-        }
-        
-        response.data = acceptedOrders.length > 0 ? {
-          type: 'tax',
-          totalTax: totalTax,
-          orderCount: acceptedOrders.length,
-          averageTaxPerOrder: acceptedOrders.length > 0 ? totalTax / acceptedOrders.length : 0
-        } : null
-      }
-    }
-    // General tax query
-    else if (lower.includes('tax')) {
+    // Service charge query
+    else if ((gptParsedData?.intent === 'service_charge') || (!gptParsedData && lower.includes('service charge'))) {
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
       )
-      const totalTax = acceptedOrders.reduce((sum, order) => 
-        sum + (parseFloat(order.tax) || 0), 0
+      const totalServiceCharge = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.serviceCharge) || 0), 0
       )
       
       if (relevantOrders.length === 0) {
@@ -702,8 +491,35 @@ const CommandInterface = ({
       } else {
         const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
         response.content = dateRange
-          ? `Total tax for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
-          : `Total tax: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+          ? `Total service charge for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalServiceCharge)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          : `Total service charge: ${formatDollarAmount(totalServiceCharge)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+      }
+      
+      response.data = acceptedOrders.length > 0 ? {
+        type: 'service_charge',
+        totalServiceCharge: totalServiceCharge,
+        orderCount: acceptedOrders.length,
+        averageServiceChargePerOrder: acceptedOrders.length > 0 ? totalServiceCharge / acceptedOrders.length : 0
+      } : null
+    }
+    // General tax query
+    else if ((gptParsedData?.intent === 'tax') || (!gptParsedData && lower.includes('tax'))) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      const totalTax = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.tax) || 0) + (parseFloat(order.serviceChargeTax) || 0), 0
+      )
+      
+      if (relevantOrders.length === 0) {
+        response.content = dateRange
+          ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
+          : 'No orders currently loaded. Try specifying a date range.'
+      } else {
+        const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+        response.content = dateRange
+          ? `Total tax (including service charge tax) for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}: ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          : `Total tax (including service charge tax): ${formatDollarAmount(totalTax)} from ${formatNumber(acceptedOrders.length)} accepted orders`
       }
       
       response.data = acceptedOrders.length > 0 ? {
@@ -714,7 +530,7 @@ const CommandInterface = ({
       } : null
     }
     // Pending orders
-    else if (lower.includes('pending')) {
+    else if ((gptParsedData?.intent === 'pending_orders') || (!gptParsedData && lower.includes('pending'))) {
       const pendingOrders = relevantOrders.filter(order => 
         order.status?.toLowerCase() === 'pending'
       )
@@ -723,11 +539,12 @@ const CommandInterface = ({
       response.data = {
         type: 'orders',
         orders: pendingOrders, // Store all orders
-        total: pendingOrders.length
+        total: pendingOrders.length,
+        orderType: 'Pending'
       }
     }
     // Delivered orders
-    else if (lower.includes('delivered')) {
+    else if ((gptParsedData?.intent === 'delivered_orders') || (!gptParsedData && lower.includes('delivered'))) {
       const deliveredOrders = relevantOrders.filter(order => 
         order.status?.toLowerCase() === 'delivered'
       )
@@ -740,23 +557,43 @@ const CommandInterface = ({
       response.data = {
         type: 'orders',
         orders: deliveredOrders, // Store all orders
-        total: deliveredOrders.length
+        total: deliveredOrders.length,
+        orderType: 'Delivered'
       }
     }
     // Total orders
-    else if (lower.includes('how many orders') || lower.includes('total orders')) {
+    else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders')))) {
       const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
-      response.content = dateRange
-        ? `There are ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
-        : `There are ${formatNumber(relevantOrders.length)} total orders`
       
-      response.data = {
-        type: 'count',
-        count: relevantOrders.length
+      // Check if user wants to SEE the orders (show, list, display) or just get a count
+      const wantsToSeeOrders = lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see')
+      
+      if (wantsToSeeOrders && relevantOrders.length > 0) {
+        // Show the actual orders
+        response.content = dateRange
+          ? `Found ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
+          : `Found ${formatNumber(relevantOrders.length)} orders`
+        
+        response.data = {
+          type: 'orders',
+          orders: relevantOrders,
+          total: relevantOrders.length,
+          orderType: 'All Orders'
+        }
+      } else {
+        // Just show count
+        response.content = dateRange
+          ? `There are ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
+          : `There are ${formatNumber(relevantOrders.length)} total orders`
+        
+        response.data = {
+          type: 'count',
+          count: relevantOrders.length
+        }
       }
     }
     // Average order value
-    else if (lower.includes('average') || lower.includes('aov')) {
+    else if ((gptParsedData?.intent === 'average_order_value') || (!gptParsedData && (lower.includes('average') || lower.includes('aov')))) {
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
       )
@@ -808,7 +645,7 @@ const CommandInterface = ({
       // Wait a bit to ensure orders state is fully updated
       setTimeout(() => {
         if (pendingCommandRef.current) {
-          const response = processCommand(pendingCommandRef.current)
+          const response = processCommand(pendingCommandRef.current, pendingGPTDataRef.current)
           console.log('📊 Generated response:', response)
           setMessages(prev => {
             // Remove any loading messages first
@@ -816,6 +653,7 @@ const CommandInterface = ({
             return [...filtered, response]
           })
           pendingCommandRef.current = null
+          pendingGPTDataRef.current = null
         }
       }, 500) // Increased to 500ms to ensure orders state is updated
     }
@@ -842,21 +680,57 @@ const CommandInterface = ({
     }
     setMessages(prev => [...prev, userMessage])
     
+    // Try to parse using GPT-4o-mini first, fallback to rule-based parsing
+    let dateRange = null
+    let parsedIntent = null
+    let parsedCustomer = null
+    
+    try {
+      console.log('🤖 Attempting GPT-4o-mini parsing...')
+      const parseResponse = await fetch('/api/parse-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: input })
+      })
+      
+      if (parseResponse.ok) {
+        const parseData = await parseResponse.json()
+        console.log('✅ GPT parsing successful:', parseData.parsed)
+        
+        if (parseData.parsed.startDate && parseData.parsed.endDate) {
+          dateRange = {
+            startDate: parseData.parsed.startDate,
+            endDate: parseData.parsed.endDate,
+            isMTD: parseData.parsed.isMTD || false
+          }
+        }
+        
+        parsedIntent = parseData.parsed.intent
+        parsedCustomer = parseData.parsed.customer
+        
+        console.log('📊 Token usage:', parseData.usage)
+        console.log(`💰 Estimated cost: $${((parseData.usage.promptTokens * 0.15 + parseData.usage.completionTokens * 0.60) / 1000000).toFixed(6)}`)
+      } else {
+        console.log('⚠️ GPT parsing failed, using fallback')
+      }
+    } catch (error) {
+      console.log('⚠️ GPT parsing error, using fallback:', error.message)
+    }
+    
+    // Fallback to rule-based parsing if GPT didn't work
+    if (!dateRange) {
+      console.log('📝 Using rule-based date parsing as fallback')
+      dateRange = parseDate(input)
+    }
+    
     // Check if this is a query with specific filters (customer, specific state) that should use existing data
     const lower = input.toLowerCase()
     
-    // Check for specific state name (not just "by state" which is a breakdown query)
-    const hasSpecificState = 
-      (/(?:by|for|in)\s+state\s+([a-z]{2,})/i.test(input) && !/(by state for |by state in |by state from )/i.test(input))
-    
     // Only skip fetch for customer-specific queries (NOT for breakdown queries)
     const hasSpecificFilter = 
-      hasSpecificState ||
+      parsedCustomer || // GPT found a customer
       (lower.includes('for ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody'))) ||
       (lower.includes('from ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody')))
-    
-    // Check if we need to fetch data for a different date range
-    const dateRange = parseDate(input)
     
     // Only fetch new data if:
     // 1. A date range is detected
@@ -873,8 +747,13 @@ const CommandInterface = ({
       }
       setMessages(prev => [...prev, loadingMessage])
       
-      // Save the command to process after data loads
+      // Save the command and GPT-parsed data to process after data loads
       pendingCommandRef.current = input
+      pendingGPTDataRef.current = {
+        customer: parsedCustomer,
+        intent: parsedIntent,
+        dateRange: dateRange
+      }
       
       // Update date range (this will trigger fetchOrders via useEffect)
       onDateRangeChange(dateRange)
@@ -883,18 +762,24 @@ const CommandInterface = ({
       loadingTimeoutRef.current = setTimeout(() => {
         if (pendingCommandRef.current) {
           console.log('⏰ Loading timeout reached, processing with available data')
-          const response = processCommand(pendingCommandRef.current)
+          const response = processCommand(pendingCommandRef.current, pendingGPTDataRef.current)
           setMessages(prev => {
             const filtered = prev.filter(m => !m.loading)
             return [...filtered, response]
           })
           pendingCommandRef.current = null
+          pendingGPTDataRef.current = null
         }
       }, 10000) // 10 second timeout
     } else {
       // Process command immediately with current data
       console.log('🤖 Processing command with current data:', orders.length, 'orders')
-      const response = processCommand(input)
+      const gptParsedData = {
+        customer: parsedCustomer,
+        intent: parsedIntent,
+        dateRange: dateRange
+      }
+      const response = processCommand(input, gptParsedData)
       setMessages(prev => [...prev, response])
     }
     
@@ -920,15 +805,15 @@ const CommandInterface = ({
   return (
     <div className="flex flex-col h-[calc(100vh-12rem)] bg-white rounded-xl shadow-2xl overflow-hidden border border-gray-200">
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50">
-        {/* Centered Greeting for Empty State */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-gray-50">
+        {/* Greeting for Empty State */}
         {messages.length <= 1 && (
-          <div className="flex items-center justify-center h-full">
+          <div className="pt-2">
             <div className="text-center">
-              <h2 className="text-3xl font-medium text-gray-900 mb-2">
+              <h2 className="text-xl font-medium text-gray-900 mb-1">
                 Hey there. Ready to dive in?
               </h2>
-              <p className="text-gray-600 text-lg">Ask me anything about your orders</p>
+              <p className="text-gray-600 text-sm">Ask me anything about your orders</p>
             </div>
           </div>
         )}
@@ -1000,7 +885,7 @@ const CommandInterface = ({
                       </div>
                     )}
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Total Tax:</span>
+                      <span className="text-gray-600">Total Tax (incl. service charge):</span>
                       <span className="font-bold text-orange-900">{formatDollarAmount(message.data.totalTax)}</span>
                     </div>
                     <div className="flex justify-between">
@@ -1008,8 +893,31 @@ const CommandInterface = ({
                       <span className="font-semibold text-gray-900">{formatNumber(message.data.orderCount)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Average Tax Per Order:</span>
+                      <span className="text-gray-600">Avg. Tax Per Order:</span>
                       <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageTaxPerOrder)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {message.data && message.data.type === 'service_charge' && (
+                <div className="mt-3 bg-indigo-50 rounded-lg p-3 border border-indigo-200">
+                  <div className="flex items-center mb-2">
+                    <DollarSign className="h-4 w-4 text-indigo-600 mr-1" />
+                    <span className="text-xs font-medium text-indigo-800">Service Charge Breakdown</span>
+                  </div>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Total Service Charge:</span>
+                      <span className="font-bold text-indigo-900">{formatDollarAmount(message.data.totalServiceCharge)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Orders:</span>
+                      <span className="font-semibold text-gray-900">{formatNumber(message.data.orderCount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Avg. Service Charge Per Order:</span>
+                      <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageServiceChargePerOrder)}</span>
                     </div>
                   </div>
                 </div>
@@ -1086,26 +994,37 @@ const CommandInterface = ({
               )}
               
               {message.data && message.data.type === 'orders' && message.data.orders.length > 0 && (
-                <div className="mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200">
+                <div className="mt-3 -mx-4 bg-blue-50 rounded-lg p-3 border border-blue-200">
                   <div className="flex items-center mb-2">
                     <Package className="h-4 w-4 text-blue-600 mr-1" />
                     <span className="text-xs font-medium text-blue-800">
                       {message.data.customerName 
                         ? (expandedOrders[index] 
-                            ? `All Orders for ${message.data.customerName} (${message.data.total})`
-                            : `Orders for ${message.data.customerName} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
+                            ? `All ${message.data.orderType || 'Orders'} for ${message.data.customerName} (${message.data.total})`
+                            : `${message.data.orderType || 'Orders'} for ${message.data.customerName} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
                         : (expandedOrders[index] 
-                            ? `All Orders (${message.data.total})`
-                            : `Sample Orders (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
+                            ? `All ${message.data.orderType || 'Orders'} (${message.data.total})`
+                            : `${message.data.orderType || 'Orders'} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
                       }
                     </span>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     {(expandedOrders[index] ? message.data.orders : message.data.orders.slice(0, 10)).map((order, idx) => (
-                      <div key={idx} className="text-xs bg-white rounded p-2 border border-blue-100">
-                        <div className="font-semibold text-gray-900">{order.ordernum || order.id}</div>
-                        <div className="text-gray-600">{order.customerName} - {formatDollarAmount(order.total)}</div>
-                        <div className="text-gray-500">{order.orderDate} - {order.status}</div>
+                      <div key={idx} className="text-xs bg-white rounded px-2 py-1.5 border border-blue-100 font-mono">
+                        <span className="font-semibold text-gray-900">{order.ordernum || order.id}</span>
+                        <span className="text-gray-400 mx-2">|</span>
+                        <span className="text-gray-700">{order.customerName}</span>
+                        <span className="text-gray-400 mx-2">|</span>
+                        <span className="text-blue-700 font-semibold">{formatDollarAmount(order.total)}</span>
+                        <span className="text-gray-400 mx-2">|</span>
+                        <span className="text-gray-600">{order.orderDate}</span>
+                        <span className="text-gray-400 mx-2">|</span>
+                        <span className={`font-medium ${
+                          order.status?.toLowerCase() === 'delivered' ? 'text-green-600' :
+                          order.status?.toLowerCase() === 'pending' ? 'text-amber-600' :
+                          order.status?.toLowerCase() === 'canceled' ? 'text-red-600' :
+                          'text-gray-600'
+                        }`}>{order.status}</span>
                       </div>
                     ))}
                     {message.data.total > 10 && (
@@ -1143,35 +1062,35 @@ const CommandInterface = ({
       </div>
 
       {/* Input Area */}
-      <form onSubmit={handleSubmit} className="p-6 bg-white border-t border-gray-200">
+      <form onSubmit={handleSubmit} className="p-2 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto">
           {/* Clear Chat Button - Show when there are messages */}
           {messages.length > 1 && (
-            <div className="flex justify-end mb-3">
+            <div className="flex justify-end mb-1.5">
               <button
                 type="button"
                 onClick={handleClearChat}
-                className="flex items-center px-3 py-1.5 text-xs text-gray-600 hover:text-red-600 bg-gray-100 hover:bg-red-50 rounded-lg transition-all duration-200 border border-gray-300 hover:border-red-300"
+                className="flex items-center px-2 py-0.5 text-xs text-gray-600 hover:text-red-600 bg-gray-100 hover:bg-red-50 rounded transition-all duration-200 border border-gray-300 hover:border-red-300"
               >
-                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                <Trash2 className="h-3 w-3 mr-1" />
                 Clear Chat
               </button>
             </div>
           )}
           
-          <div className="relative bg-white rounded-lg border border-gray-300 shadow-sm hover:border-gray-400 transition-all duration-200">
+          <div className="relative bg-white rounded-lg border-2 border-blue-400 shadow-md hover:border-blue-500 hover:shadow-lg transition-all duration-200">
             <input
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={isLoadingData ? "Loading data..." : "Ask me anything about your orders..."}
               disabled={isLoadingData}
-              className="w-full px-4 py-3 bg-white text-gray-900 placeholder-gray-500 focus:outline-none rounded-lg text-base disabled:cursor-not-allowed disabled:bg-gray-50"
+              className="w-full pl-3 pr-12 py-2.5 bg-white text-gray-900 placeholder-gray-600 focus:outline-none rounded-lg text-sm disabled:cursor-not-allowed disabled:bg-gray-50"
             />
             <button
               type="submit"
               disabled={!input.trim() || isLoadingData}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-md flex items-center justify-center"
             >
               {isLoadingData ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -1182,64 +1101,36 @@ const CommandInterface = ({
           </div>
         </div>
         
-        {/* Suggestion Prompts - Show when minimal messages */}
+        {/* Shortcut Buttons - Only show when no messages */}
         {messages.length <= 1 && (
-          <div className="mt-4 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="mt-2 max-w-4xl mx-auto grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => setInput('Show me delayed orders for Sendoso for Oct 2025')}
-              className="text-left px-4 py-3 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-red-700 hover:text-red-800 transition-all duration-200 border border-red-200 hover:border-red-300 shadow-sm"
+              onClick={() => setInput('What is the revenue for this month so far?')}
+              className="text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs text-blue-700 hover:text-blue-800 transition-all duration-200 border border-blue-200 hover:border-blue-300"
             >
-              Show me delayed orders for Sendoso for Oct 2025
+              Month To Date Revenue
             </button>
             <button
               type="button"
-              onClick={() => setInput('Sales by state for Oct 2025')}
-              className="text-left px-4 py-3 bg-green-50 hover:bg-green-100 rounded-lg text-sm text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300 shadow-sm"
+              onClick={() => setInput('What is the sales tax for this month so far?')}
+              className="text-left px-3 py-2 bg-green-50 hover:bg-green-100 rounded-lg text-xs text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300"
             >
-              Sales by state for Oct 2025
+              Month To Date Sales Tax
             </button>
             <button
               type="button"
-              onClick={() => setInput('Show me pending orders')}
-              className="text-left px-4 py-3 bg-amber-50 hover:bg-amber-100 rounded-lg text-sm text-amber-700 hover:text-amber-800 transition-all duration-200 border border-amber-200 hover:border-amber-300 shadow-sm"
+              onClick={() => setInput('What was the revenue for last month?')}
+              className="text-left px-3 py-2 bg-purple-50 hover:bg-purple-100 rounded-lg text-xs text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300"
             >
-              Show me pending orders
+              Revenue for Last Month
             </button>
             <button
               type="button"
-              onClick={() => setInput('How many orders were delivered this week?')}
-              className="text-left px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm text-blue-700 hover:text-blue-800 transition-all duration-200 border border-blue-200 hover:border-blue-300 shadow-sm"
+              onClick={() => setInput('What is the year to date revenue?')}
+              className="text-left px-3 py-2 bg-orange-50 hover:bg-orange-100 rounded-lg text-xs text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300"
             >
-              How many orders were delivered this week?
-            </button>
-            <button
-              type="button"
-              onClick={() => setInput('Show me the revenue for Sendoso for Oct 2025')}
-              className="text-left px-4 py-3 bg-indigo-50 hover:bg-indigo-100 rounded-lg text-sm text-indigo-700 hover:text-indigo-800 transition-all duration-200 border border-indigo-200 hover:border-indigo-300 shadow-sm"
-            >
-              Show me the revenue for Sendoso for Oct 2025
-            </button>
-            <button
-              type="button"
-              onClick={() => setInput('Tax by state for Oct 2025')}
-              className="text-left px-4 py-3 bg-orange-50 hover:bg-orange-100 rounded-lg text-sm text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300 shadow-sm"
-            >
-              Tax by state for Oct 2025
-            </button>
-            <button
-              type="button"
-              onClick={() => setInput('Revenue by month for 2025')}
-              className="text-left px-4 py-3 bg-cyan-50 hover:bg-cyan-100 rounded-lg text-sm text-cyan-700 hover:text-cyan-800 transition-all duration-200 border border-cyan-200 hover:border-cyan-300 shadow-sm"
-            >
-              Revenue by month for 2025
-            </button>
-            <button
-              type="button"
-              onClick={() => setInput('What\'s the total revenue for November 2025?')}
-              className="text-left px-4 py-3 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300 shadow-sm"
-            >
-              What's the total revenue for November 2025?
+              YTD Revenue
             </button>
           </div>
         )}
