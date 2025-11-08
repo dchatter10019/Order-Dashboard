@@ -849,10 +849,9 @@ const CommandInterface = ({
     const hasSpecificState = 
       (/(?:by|for|in)\s+state\s+([a-z]{2,})/i.test(input) && !/(by state for |by state in |by state from )/i.test(input))
     
+    // Only skip fetch for customer-specific queries (NOT for breakdown queries)
     const hasSpecificFilter = 
       hasSpecificState ||
-      lower.includes('by month') || // Month breakdown should use existing data
-      lower.includes('by state') || // State breakdown should use existing data  
       (lower.includes('for ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody'))) ||
       (lower.includes('from ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody')))
     
