@@ -13,12 +13,13 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
         'What\'s the revenue for October?',
         'Show me pending orders',
         'How many orders were delivered this week?',
-        'What\'s the total revenue for November?'
+        'What\'s the total revenue for November 2025?'
       ]
     }
   ])
   const messagesEndRef = useRef(null)
   const pendingCommandRef = useRef(null)
+  const loadingTimeoutRef = useRef(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -181,16 +182,22 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
         sum + (parseFloat(order.revenue) || 0), 0
       )
       
-      response.content = dateRange
-        ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
-        : `Total revenue: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+      if (relevantOrders.length === 0) {
+        response.content = dateRange
+          ? `No orders found for ${dateRange.startDate} to ${dateRange.endDate}. The date range might not have any orders, or they haven't been loaded yet.`
+          : 'No orders currently loaded. Try specifying a date range.'
+      } else {
+        response.content = dateRange
+          ? `Revenue for ${dateRange.startDate} to ${dateRange.endDate}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(relevantOrders.length)} total orders)`
+          : `Total revenue: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders`
+      }
       
-      response.data = {
+      response.data = acceptedOrders.length > 0 ? {
         type: 'revenue',
         revenue: totalRevenue,
         orderCount: acceptedOrders.length,
         averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
-      }
+      } : null
     }
     // Pending orders
     else if (lower.includes('pending')) {
@@ -258,14 +265,47 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
 
   // Watch for orders change after date range update
   useEffect(() => {
-    if (pendingCommandRef.current && !isLoadingData && orders.length > 0) {
+    console.log('🔍 Orders or loading status changed:', {
+      hasPendingCommand: !!pendingCommandRef.current,
+      isLoadingData,
+      ordersCount: orders.length,
+      pendingCommand: pendingCommandRef.current
+    })
+    
+    if (pendingCommandRef.current && !isLoadingData) {
       console.log('🤖 Processing pending command with loaded data:', orders.length, 'orders')
-      const response = processCommand(pendingCommandRef.current)
-      setMessages(prev => prev.filter(m => !m.loading).concat([response]))
-      pendingCommandRef.current = null
+      
+      // Clear any existing timeout
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+        loadingTimeoutRef.current = null
+      }
+      
+      // Wait a bit to ensure orders state is fully updated
+      setTimeout(() => {
+        if (pendingCommandRef.current) {
+          const response = processCommand(pendingCommandRef.current)
+          console.log('📊 Generated response:', response)
+          setMessages(prev => {
+            // Remove any loading messages first
+            const filtered = prev.filter(m => !m.loading)
+            return [...filtered, response]
+          })
+          pendingCommandRef.current = null
+        }
+      }, 500) // Increased to 500ms to ensure orders state is updated
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orders, isLoadingData])
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -296,6 +336,19 @@ const CommandInterface = ({ orders, onFilterChange, onDateRangeChange, onFetchOr
       
       // Update date range (this will trigger fetchOrders via useEffect)
       onDateRangeChange(dateRange)
+      
+      // Set a timeout in case data never loads
+      loadingTimeoutRef.current = setTimeout(() => {
+        if (pendingCommandRef.current) {
+          console.log('⏰ Loading timeout reached, processing with available data')
+          const response = processCommand(pendingCommandRef.current)
+          setMessages(prev => {
+            const filtered = prev.filter(m => !m.loading)
+            return [...filtered, response]
+          })
+          pendingCommandRef.current = null
+        }
+      }, 10000) // 10 second timeout
     } else {
       // Process command immediately with current data
       console.log('🤖 Processing command with current data:', orders.length, 'orders')
