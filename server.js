@@ -477,11 +477,25 @@ function createOrderFromCSV(headers, values, orderDate) {
     
     // Extract state from establishment name if shippingState is empty
     if (!order.shippingState && order.establishment) {
+      console.log(`🔍 Trying to extract state from establishment: "${order.establishment}"`)
       const stateFromEstablishment = extractStateFromText(order.establishment)
       if (stateFromEstablishment) {
         order.shippingState = stateFromEstablishment
-        console.log(`📍 Extracted state from establishment: ${order.establishment} → ${stateFromEstablishment}`)
+        console.log(`✅ Extracted state: ${stateFromEstablishment}`)
+      } else {
+        console.log(`❌ No state found in establishment name`)
       }
+    }
+    
+    // Log first few orders to see what data we have
+    if (orders.length < 3) {
+      console.log(`📦 Sample order data:`, {
+        id: order.id,
+        establishment: order.establishment,
+        shippingState: order.shippingState,
+        billingState: order.billingState,
+        customerName: order.customerName
+      })
     }
     
     // Use actual delivery date from API if available, otherwise set to N/A
@@ -619,8 +633,10 @@ async function fetchOrdersForDateRange(startDate, endDate) {
 app.get('/api/orders', async (req, res) => {
   try {
     const { startDate, endDate } = req.query
+    console.log('📥 /api/orders REQUEST received:', { startDate, endDate })
     
     if (!startDate || !endDate) {
+      console.log('❌ Missing dates in request')
       return res.status(400).json({ 
         error: 'Start date and end date are required' 
       })
@@ -666,8 +682,9 @@ app.get('/api/orders', async (req, res) => {
     // Check cache first
     const cacheKey = `${startDate}-${endDate}`
     const cached = ordersCache.get(cacheKey)
+    console.log(`🔍 Cache check for ${cacheKey}:`, cached ? 'HIT' : 'MISS')
     if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
-      console.log('✅ Returning cached data for:', cacheKey)
+      console.log('✅ Returning cached data for:', cacheKey, '- Orders:', cached.data.length)
       return res.json({
         success: true,
         data: cached.data,
@@ -678,6 +695,8 @@ app.get('/api/orders', async (req, res) => {
         cached: true
       })
     }
+    
+    console.log('🌐 Cache miss or expired - fetching from Bevvi API...')
     
     // Calculate date range in days
     const diffTime = Math.abs(new Date(endDate) - new Date(startDate))
@@ -814,6 +833,17 @@ app.get('/api/orders', async (req, res) => {
           
           console.log(`📊 Filtered orders: ${filteredOrders.length} out of ${allOrders.length} total orders`)
           console.log(`📅 Requested range: ${startDate} to ${endDate}`)
+          
+          if (filteredOrders.length === 0 && allOrders.length > 0) {
+            console.log('⚠️  WARNING: CSV returned orders but none match date range!')
+            console.log('First order date:', allOrders[0]?.orderDate)
+            console.log('Last order date:', allOrders[allOrders.length - 1]?.orderDate)
+          }
+          
+          if (allOrders.length === 0) {
+            console.log('⚠️  WARNING: CSV parsing returned 0 orders - API may have no data for this range')
+          }
+          
           console.log(`🔍 Orders with delivery dates in range: ${filteredOrders.filter(o => o.deliveryDate && o.deliveryDate !== 'N/A' && o.deliveryDate >= startDate && o.deliveryDate <= endDate).length}`)
           console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate >= startDate && o.orderDate <= endDate).length}`)
           
