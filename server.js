@@ -1722,6 +1722,7 @@ Important:
 - "show me pending orders", "pending status" = pending_orders intent
 
 Date parsing rules:
+- "today", "for today" = today's date for both start and end date
 - "this month", "this month so far", "MTD", "month to date" = first day of current month to today
 - "last month" = full previous month (1st to last day)
 - "YTD", "year to date", "this year" = January 1st of current year to today
