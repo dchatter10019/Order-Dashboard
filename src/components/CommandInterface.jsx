@@ -50,6 +50,21 @@ const CommandInterface = ({
     scrollToBottom()
   }, [messages])
 
+  // Calculate timeout duration based on date range size
+  const calculateTimeoutDuration = (startDate, endDate) => {
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24))
+    
+    // Base timeout: 10 seconds
+    // Add 2 seconds per 30 days (approximately 1 chunk)
+    const chunks = Math.ceil(diffDays / 30)
+    const timeout = 10000 + (chunks * 5000) // 5 seconds per chunk
+    
+    // Cap at 2 minutes
+    return Math.min(timeout, 120000)
+  }
+
   // Parse natural language date expressions
   const parseDate = (text) => {
     const lower = text.toLowerCase()
@@ -1331,7 +1346,10 @@ const CommandInterface = ({
       // For non-state queries, update date range (this will trigger regular fetchOrders via useEffect)
       onDateRangeChange(dateRange)
       
-      // Set a timeout in case data never loads
+      // Set a timeout in case data never loads (longer for large date ranges)
+      const timeoutDuration = dateRange ? calculateTimeoutDuration(dateRange.startDate, dateRange.endDate) : 10000
+      console.log(`⏰ Setting timeout: ${timeoutDuration}ms for date range`)
+      
       loadingTimeoutRef.current = setTimeout(() => {
         if (pendingCommandRef.current) {
           console.log('⏰ Loading timeout reached, processing with available data')
@@ -1343,7 +1361,7 @@ const CommandInterface = ({
           pendingCommandRef.current = null
           pendingGPTDataRef.current = null
         }
-      }, 10000) // 10 second timeout
+      }, timeoutDuration)
     } else {
       // Process command immediately with current data
       console.log('🤖 Processing command with current data:', orders.length, 'orders')
