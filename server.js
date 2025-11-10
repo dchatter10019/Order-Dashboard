@@ -786,7 +786,7 @@ async function fetchOrdersForDateRange(startDate, endDate) {
   while (retryCount < maxRetries) {
     try {
       response = await axios.get(apiUrl, {
-        timeout: 120000,
+        timeout: 180000, // Increased to 3 minutes for large datasets
         headers: {
           'Accept': 'application/json',
           'User-Agent': 'Bevvi-Order-Tracking-System/1.0'
@@ -929,16 +929,25 @@ app.get('/api/orders', async (req, res) => {
       
       console.log(`✅ All chunks processed: ${allOrders.length} total orders from ${successfulChunks}/${chunks.length} successful chunks`)
       
+      // Warn if some chunks failed
+      const incompleteData = successfulChunks < chunks.length
+      if (incompleteData) {
+        console.warn(`⚠️ WARNING: Only ${successfulChunks}/${chunks.length} chunks succeeded - data may be incomplete!`)
+      }
+      
       return res.json({
         success: true,
         data: allOrders,
         dateRange: { startDate, endDate },
         totalOrders: allOrders.length,
-        message: `Orders fetched for ${startDate} to ${endDate} (${chunks.length} chunks)`,
+        message: incompleteData 
+          ? `⚠️ Partial data: ${allOrders.length} orders from ${successfulChunks}/${chunks.length} successful chunks. Some data may be missing.`
+          : `Orders fetched for ${startDate} to ${endDate} (${chunks.length} chunks)`,
         source: 'Bevvi API (Chunked)',
         chunked: true,
         chunks: chunks.length,
-        successfulChunks: successfulChunks
+        successfulChunks: successfulChunks,
+        incompleteData: incompleteData
       })
     }
     
@@ -973,7 +982,7 @@ app.get('/api/orders', async (req, res) => {
       while (retryCount < maxRetries) {
         try {
           response = await axios.get(apiUrl, {
-            timeout: 120000, // Increased to 120s (2 minutes) for large date ranges
+            timeout: 180000, // Increased to 180s (3 minutes) for large date ranges
             headers: {
               'Accept': 'application/json',
               'User-Agent': 'Bevvi-Order-Tracking-System/1.0'
@@ -1632,6 +1641,28 @@ app.get('/api/health', (req, res) => {
       timeUntilNext: timeUntilNextFormatted
     }
   })
+})
+
+// Clear cache endpoint
+app.post('/api/cache/clear', (req, res) => {
+  try {
+    const cacheSize = ordersCache.size
+    ordersCache.clear()
+    console.log(`🧹 Cache cleared - ${cacheSize} entries removed`)
+    
+    res.json({
+      success: true,
+      message: `Cache cleared successfully. ${cacheSize} entries removed.`,
+      previousSize: cacheSize
+    })
+  } catch (error) {
+    console.error('❌ Error clearing cache:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to clear cache',
+      message: error.message
+    })
+  }
 })
 
 // Proxy endpoint for order details API
