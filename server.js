@@ -1697,6 +1697,7 @@ Extract the following information from the user's query:
   * delayed_orders: specifically asking for DELAYED orders
   * pending_orders: specifically asking for PENDING STATUS orders (must mention "pending")
   * delivered_orders: specifically asking for DELIVERED STATUS orders (must mention "delivered")
+  * accepted_orders: specifically asking for ACCEPTED STATUS orders (e.g., "show me all accepted orders", "list accepted orders", "see the accepted orders")
   * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries)
   * order_status_check: asking to validate/check order statuses (e.g., "are all orders accepted", "are any orders pending", "how many rejected", "check order statuses", "order status summary", "what's the status breakdown")
   * average_order_value: asking for AOV or average

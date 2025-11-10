@@ -839,6 +839,24 @@ const CommandInterface = ({
         other: otherCount
       }
     }
+    // Accepted orders (specific query for accepted status)
+    else if ((gptParsedData?.intent === 'accepted_orders') || (!gptParsedData && lower.includes('accepted') && (lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see') || lower.includes('all')))) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        order.status?.toLowerCase() === 'accepted'
+      )
+      
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      response.content = dateRange
+        ? `Found ${formatNumber(acceptedOrders.length)} accepted orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
+        : `Found ${formatNumber(acceptedOrders.length)} accepted orders`
+      
+      response.data = {
+        type: 'orders',
+        orders: acceptedOrders,
+        total: acceptedOrders.length,
+        orderType: 'Accepted'
+      }
+    }
     // Total orders
     else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders')))) {
       const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
