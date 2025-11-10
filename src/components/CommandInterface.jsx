@@ -182,10 +182,25 @@ const CommandInterface = ({
     // Filter orders by date range if specified
     let relevantOrders = ordersToUse
     if (dateRange) {
-      relevantOrders = ordersToUse.filter(order => {
-        return order.orderDate >= dateRange.startDate && order.orderDate <= dateRange.endDate
+      console.log('🔍 Filtering orders with date range:', {
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+        totalOrders: ordersToUse.length
       })
-      console.log('📊 Filtered to', relevantOrders.length, 'orders for date range')
+      
+      relevantOrders = ordersToUse.filter(order => {
+        const inRange = order.orderDate >= dateRange.startDate && order.orderDate <= dateRange.endDate
+        if (!inRange && ordersToUse.length < 100) { // Only log for small sets
+          console.log(`  ❌ Order ${order.id} excluded: date ${order.orderDate} not in range`)
+        }
+        return inRange
+      })
+      console.log('📊 Filtered to', relevantOrders.length, 'orders for date range', dateRange.startDate, 'to', dateRange.endDate)
+      
+      // Log sample of included orders
+      if (relevantOrders.length > 0 && relevantOrders.length < 20) {
+        console.log('✅ Included orders:', relevantOrders.map(o => o.orderDate).slice(0, 10))
+      }
     } else {
       console.log('📊 Using all', ordersToUse.length, 'orders (no date filter in command)')
     }
