@@ -17,6 +17,7 @@ const CommandInterface = ({
   const pendingCommandRef = useRef(null)
   const pendingGPTDataRef = useRef(null) // Store GPT-parsed data for pending command
   const loadingTimeoutRef = useRef(null)
+  const originalQueryRef = useRef(null) // Store original query when clarification is requested
   
   // Default messages if none provided
   const defaultMessages = [
@@ -1021,6 +1022,9 @@ const CommandInterface = ({
         if (parseData.parsed.needsClarification) {
           console.log('🤔 Clarification needed:', parseData.parsed.clarificationNeeded)
           
+          // Store the original query for later use
+          originalQueryRef.current = userInput
+          
           let clarificationMessage = ''
           let suggestions = []
           
@@ -1056,7 +1060,8 @@ const CommandInterface = ({
             data: {
               type: 'clarification',
               clarificationNeeded: parseData.parsed.clarificationNeeded,
-              suggestions: suggestions
+              suggestions: suggestions,
+              originalQuery: userInput // Store original query in the message data
             }
           }
           
@@ -1339,8 +1344,19 @@ const CommandInterface = ({
     // Input already cleared at the start
   }
 
-  const handleSuggestionClick = (suggestion) => {
-    setInput(suggestion)
+  const handleSuggestionClick = (suggestion, originalQuery) => {
+    if (originalQuery) {
+      // Combine original query with suggestion
+      const combinedQuery = `${originalQuery} for ${suggestion.toLowerCase()}`
+      console.log('🔗 Combined query:', combinedQuery)
+      setInput(combinedQuery)
+      // Auto-submit after a tiny delay to let the input update
+      setTimeout(() => {
+        document.getElementById('chat-form')?.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+      }, 100)
+    } else {
+      setInput(suggestion)
+    }
   }
 
   const handleClearChat = () => {
@@ -1596,7 +1612,7 @@ const CommandInterface = ({
                     {message.data.suggestions.map((suggestion, idx) => (
                       <button
                         key={idx}
-                        onClick={() => setInput(suggestion)}
+                        onClick={() => handleSuggestionClick(suggestion, message.data.originalQuery)}
                         className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-white hover:bg-blue-100 border border-blue-300 rounded-lg transition-colors duration-150 ease-in-out hover:border-blue-400 hover:shadow-sm"
                       >
                         {suggestion}
@@ -1829,7 +1845,7 @@ const CommandInterface = ({
       </div>
 
       {/* Input Area */}
-      <form onSubmit={handleSubmit} className="p-2 bg-white border-t border-gray-200">
+      <form id="chat-form" onSubmit={handleSubmit} className="p-2 bg-white border-t border-gray-200">
         <div className="max-w-4xl mx-auto">
           {/* Clear Chat Button - Show when there are messages */}
           {messages.length > 1 && (
