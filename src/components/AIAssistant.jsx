@@ -22,6 +22,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   
   // Update persisted state
   const setOrders = (newOrders) => {
+    console.log('📦 AIAssistant - setOrders called with', Array.isArray(newOrders) ? newOrders.length : 'N/A', 'orders')
     onStateChange(prev => ({ ...prev, orders: newOrders }))
   }
   

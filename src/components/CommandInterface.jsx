@@ -56,13 +56,15 @@ const CommandInterface = ({
     const end = new Date(endDate)
     const diffDays = Math.ceil((end - start) / (1000 * 60 * 60 * 24))
     
-    // Base timeout: 10 seconds
-    // Add 2 seconds per 30 days (approximately 1 chunk)
+    // Base timeout: 15 seconds
+    // Add 10 seconds per chunk (30 days) to account for retries and slow network
     const chunks = Math.ceil(diffDays / 30)
-    const timeout = 10000 + (chunks * 5000) // 5 seconds per chunk
+    const timeout = 15000 + (chunks * 10000) // 10 seconds per chunk
     
-    // Cap at 2 minutes
-    return Math.min(timeout, 120000)
+    console.log(`⏱️  Timeout calculation: ${diffDays} days = ${chunks} chunks → ${timeout}ms timeout`)
+    
+    // Cap at 3 minutes for very large ranges
+    return Math.min(timeout, 180000)
   }
 
   // Parse natural language date expressions
@@ -962,11 +964,13 @@ const CommandInterface = ({
       hasPendingCommand: !!pendingCommandRef.current,
       isLoadingData,
       ordersCount: orders.length,
-      pendingCommand: pendingCommandRef.current
+      pendingCommand: pendingCommandRef.current,
+      pendingGPTData: pendingGPTDataRef.current
     })
     
     if (pendingCommandRef.current && !isLoadingData) {
       console.log('🤖 Processing pending command with loaded data:', orders.length, 'orders')
+      console.log('🎯 Pending GPT data:', pendingGPTDataRef.current)
       
       // Clear any existing timeout
       if (loadingTimeoutRef.current) {
