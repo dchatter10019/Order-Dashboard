@@ -840,7 +840,10 @@ const CommandInterface = ({
       }
     }
     // Accepted orders (specific query for accepted status)
-    else if ((gptParsedData?.intent === 'accepted_orders') || (!gptParsedData && lower.includes('accepted') && (lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see') || lower.includes('all')))) {
+    else if (gptParsedData?.intent === 'accepted_orders' || 
+             (lower.includes('accepted') && (lower.includes('order') || lower.includes('orders')) && 
+              (lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see') || lower.includes('all') || lower.includes('get')))) {
+      console.log('✅ Matched accepted_orders handler')
       const acceptedOrders = relevantOrders.filter(order => 
         order.status?.toLowerCase() === 'accepted'
       )
