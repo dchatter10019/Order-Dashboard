@@ -996,6 +996,53 @@ const CommandInterface = ({
         parsedCustomer = parseData.parsed.customer
         parsedBrand = parseData.parsed.brand
         
+        // Check if clarification is needed
+        if (parseData.parsed.needsClarification) {
+          console.log('🤔 Clarification needed:', parseData.parsed.clarificationNeeded)
+          
+          let clarificationMessage = ''
+          let suggestions = []
+          
+          if (parseData.parsed.clarificationNeeded === 'date_range') {
+            clarificationMessage = "I'd be happy to help! Could you please specify a date range or time period?\n\nFor example, you can ask for:"
+            suggestions = [
+              'Today',
+              'This month',
+              'Last month',
+              'October 2025',
+              'This year (YTD)'
+            ]
+          } else if (parseData.parsed.clarificationNeeded === 'customer_name') {
+            clarificationMessage = "I'd be happy to help! Which customer would you like to see information for?\n\nAvailable customers:"
+            suggestions = [
+              'Sendoso',
+              'OnGoody',
+              'Air Culinaire'
+            ]
+          } else if (parseData.parsed.clarificationNeeded === 'brand_name') {
+            clarificationMessage = "I'd be happy to help! Which brand would you like to see information for?\n\nFor example:"
+            suggestions = [
+              'Schrader',
+              'Dom Perignon',
+              "Tito's",
+              'Grey Goose'
+            ]
+          }
+          
+          const clarificationResponse = {
+            type: 'assistant',
+            content: clarificationMessage,
+            data: {
+              type: 'clarification',
+              clarificationNeeded: parseData.parsed.clarificationNeeded,
+              suggestions: suggestions
+            }
+          }
+          
+          setMessages(prev => [...prev, clarificationResponse])
+          return // Exit early - don't process further
+        }
+        
         console.log('📊 Token usage:', parseData.usage)
         console.log(`💰 Estimated cost: $${((parseData.usage.promptTokens * 0.15 + parseData.usage.completionTokens * 0.60) / 1000000).toFixed(6)}`)
       } else {
@@ -1514,6 +1561,26 @@ const CommandInterface = ({
                         <span className="font-semibold text-gray-900">{formatNumber(message.data.other)}</span>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+              
+              {message.data && message.data.type === 'clarification' && (
+                <div className="mt-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                  <div className="flex items-center mb-3">
+                    <Sparkles className="h-5 w-5 text-blue-600 mr-2" />
+                    <span className="text-sm font-medium text-blue-800">Quick Suggestions</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {message.data.suggestions.map((suggestion, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => setInput(suggestion)}
+                        className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-white hover:bg-blue-100 border border-blue-300 rounded-lg transition-colors duration-150 ease-in-out hover:border-blue-400 hover:shadow-sm"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}

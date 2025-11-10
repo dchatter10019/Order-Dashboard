@@ -1715,11 +1715,15 @@ Extract the following information from the user's query:
 - startDate: Start date in YYYY-MM-DD format
 - endDate: End date in YYYY-MM-DD format
 - isMTD: Boolean, true if asking for "month to date" or "this month so far"
+- needsClarification: Boolean, true if the query is too open-ended and needs more information
+- clarificationNeeded: String indicating what's missing - "date_range" if no date/timeframe specified, "customer_name" if asking about a customer but not specifying which one, "brand_name" if asking about a brand but not specifying which one
 
 Important: 
 - Customer names should be exact - "Sendoso" not "sendoso in", "Air Culinaire" not "air", etc.
 - "show me orders", "orders placed today", "how many orders" = total_orders intent (NOT pending_orders)
 - "show me pending orders", "pending status" = pending_orders intent
+- If a query asks for orders, revenue, tax, etc. WITHOUT specifying any timeframe (no "today", "this month", specific month, etc.), set needsClarification to true and clarificationNeeded to "date_range"
+- Queries like "show me all orders", "what's the revenue", "how much tax" without dates = needsClarification: true
 
 Date parsing rules:
 - "today", "for today" = today's date for both start and end date
@@ -1736,11 +1740,14 @@ Return ONLY valid JSON, no explanation. Format:
   "brand": "Schrader",
   "startDate": "2025-10-01",
   "endDate": "2025-10-31",
-  "isMTD": false
+  "isMTD": false,
+  "needsClarification": false,
+  "clarificationNeeded": null
 }
 
 If customer is not mentioned, omit the "customer" field.
-If brand is not mentioned, omit the "brand" field.`
+If brand is not mentioned, omit the "brand" field.
+If no clarification needed, omit "clarificationNeeded" field or set to null.`
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
