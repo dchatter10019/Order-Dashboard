@@ -382,7 +382,7 @@ const CommandInterface = ({
         )
         
         const acceptedOrders = customerOrders.filter(order => 
-          !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+          !['cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
         )
         
         const totalRevenue = acceptedOrders.reduce((sum, order) => 
@@ -412,7 +412,7 @@ const CommandInterface = ({
         console.log('⚠️ Customer name validation failed, falling back to general revenue')
         console.log('⚠️ Customer name was:', customerName)
         const acceptedOrders = relevantOrders.filter(order => 
-          !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+          !['cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
         )
         const totalRevenue = acceptedOrders.reduce((sum, order) => 
           sum + (parseFloat(order.revenue) || 0), 0
