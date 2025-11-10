@@ -1725,6 +1725,8 @@ Important:
 - "show me pending orders", "pending status" = pending_orders intent
 - If a query asks for orders, revenue, tax, etc. WITHOUT specifying any timeframe (no "today", "this month", specific month, etc.), set needsClarification to true and clarificationNeeded to "date_range"
 - Queries like "show me all orders", "what's the revenue", "how much tax" without dates = needsClarification: true
+- EXCEPTION: Status-specific queries (accepted_orders, pending_orders, delivered_orders, delayed_orders) do NOT need clarification even without dates - they can use current loaded data
+- "show me all accepted orders", "list pending orders" = NO clarification needed, process immediately
 
 Date parsing rules:
 - "today", "for today" = today's date for both start and end date
