@@ -37,14 +37,17 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
     }
   }
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (useStateEnrichment = false) => {
     try {
-      console.log(`🔍 AI Assistant fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
+      console.log(`🔍 AI Assistant fetching orders${useStateEnrichment ? ' WITH STATE DATA' : ''}: ${dateRange.startDate} to ${dateRange.endDate}`)
       setIsLoading(true)
       
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
-      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
+      
+      // Use state-enriched endpoint only when explicitly requested
+      const endpoint = useStateEnrichment ? '/api/orders-with-state' : '/api/orders'
+      const apiUrl = `${endpoint}?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
       
       const response = await fetch(apiUrl)
       if (!response.ok) {
@@ -52,7 +55,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
       }
       
       const data = await response.json()
-      console.log(`✅ AI Assistant received ${data.data?.length || 0} orders`)
+      console.log(`✅ AI Assistant received ${data.data?.length || 0} orders${useStateEnrichment ? ' (state-enriched)' : ''}`)
       
       if (data.data && Array.isArray(data.data)) {
         setOrders(data.data)

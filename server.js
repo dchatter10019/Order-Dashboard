@@ -308,6 +308,7 @@ function createOrderFromCSV(headers, values, orderDate) {
       switch (lowerHeader) {
         case 'ordernum':
           order.id = value || `ORD${Date.now()}-${index}`
+          order.ordernum = value || order.id  // Also set ordernum for state lookup
           break
         case 'customername':
           order.customerName = value || 'Unknown Customer'
@@ -600,6 +601,170 @@ function getMockOrders(orderDate) {
   ]
 }
 
+// Helper function to fetch state data from Tableau API
+async function fetchStateData(startDate, endDate) {
+  try {
+    const tableauUrl = `https://api.getbevvi.com/api/bevviutils/exportTableauDataCsv?startDate=${startDate}&endDate=${endDate}`
+    
+    const response = await axios.get(tableauUrl, {
+      timeout: 30000, // Reduced timeout to 30 seconds to avoid hanging
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Bevvi-Order-Tracking-System/2.0'
+      }
+    })
+    
+    if (response.status === 200 && response.data && Array.isArray(response.data)) {
+      // Log ALL available fields and sample data for debugging
+      if (response.data.length > 0) {
+        const allFields = Object.keys(response.data[0])
+        console.log('=' .repeat(70))
+        console.log('📋 TABLEAU API - ALL AVAILABLE FIELDS')
+        console.log('=' .repeat(70))
+        console.log(`Total records: ${response.data.length}`)
+        console.log(`Total fields: ${allFields.length}`)
+        console.log('')
+        console.log('Complete Field List:')
+        allFields.forEach((field, index) => {
+          console.log(`  ${String(index + 1).padStart(2)}. ${field}`)
+        })
+        console.log('')
+        console.log('Sample Record (first record):')
+        console.log(JSON.stringify(response.data[0], null, 2))
+        console.log('=' .repeat(70))
+      }
+      
+      // Build state lookup map: { orderNumber: shipToState }
+      const stateLookup = {}
+      response.data.forEach(item => {
+        if (item.orderNumber && item.shipToState) {
+          stateLookup[item.orderNumber] = item.shipToState
+        }
+      })
+      
+      console.log(`✅ State data: ${Object.keys(stateLookup).length} orders`)
+      return stateLookup
+    }
+    
+    console.log('⚠️ Tableau API unexpected format')
+    return {}
+  } catch (error) {
+    console.error(`❌ Tableau API error: ${error.message}`)
+    return {} // Return empty map on error, don't block the main request
+  }
+}
+
+// Helper function to fetch brand/product data from Tableau API
+async function fetchBrandData(startDate, endDate) {
+  try {
+    const tableauUrl = `https://api.getbevvi.com/api/bevviutils/exportTableauDataCsv?startDate=${startDate}&endDate=${endDate}`
+    
+    const response = await axios.get(tableauUrl, {
+      timeout: 30000,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Bevvi-Order-Tracking-System/2.0'
+      }
+    })
+    
+    if (response.status === 200 && response.data && Array.isArray(response.data)) {
+      console.log(`✅ Brand data: ${response.data.length} line items from Tableau API`)
+      
+      // Debug: Show sample items
+      if (response.data.length > 0) {
+        console.log('📦 Sample line items:')
+        response.data.slice(0, 3).forEach((item, idx) => {
+          console.log(`  ${idx + 1}. Brand: "${item.brandInfo || 'EMPTY'}", Parent: "${item.parentBrand || 'EMPTY'}", Product: "${item.productName}", Price: ${item.price}, Qty: ${item.quantity}`)
+        })
+      }
+      
+      // Aggregate revenue by brand
+      const brandRevenue = {}
+      let unknownCount = 0
+      
+      response.data.forEach(item => {
+        const brand = item.brandInfo || item.parentBrand || 'Unknown'
+        if (brand === 'Unknown') unknownCount++
+        
+        const revenue = parseFloat(item.alcPrice) || parseFloat(item.price) || 0
+        const quantity = parseInt(item.quantity) || 1
+        const totalRevenue = revenue * quantity
+        
+        if (!brandRevenue[brand]) {
+          brandRevenue[brand] = { revenue: 0, itemCount: 0, orderNumbers: new Set() }
+        }
+        
+        brandRevenue[brand].revenue += totalRevenue
+        brandRevenue[brand].itemCount += quantity
+        if (item.orderNumber) {
+          brandRevenue[brand].orderNumbers.add(item.orderNumber)
+        }
+      })
+      
+      console.log(`📊 Brand extraction: ${unknownCount} items without brand info out of ${response.data.length} total`)
+      
+      // Convert Sets to counts
+      const brandData = {}
+      Object.entries(brandRevenue).forEach(([brand, data]) => {
+        brandData[brand] = {
+          revenue: data.revenue,
+          itemCount: data.itemCount,
+          orderCount: data.orderNumbers.size
+        }
+      })
+      
+      console.log(`✅ Aggregated ${Object.keys(brandData).length} unique brands`)
+      console.log(`💰 Top 3 brands by revenue:`)
+      Object.entries(brandData)
+        .sort((a, b) => b[1].revenue - a[1].revenue)
+        .slice(0, 3)
+        .forEach(([brand, data], idx) => {
+          console.log(`  ${idx + 1}. ${brand}: $${data.revenue.toFixed(2)}`)
+        })
+      
+      return brandData
+    }
+    
+    console.log('⚠️ Tableau API unexpected format')
+    return {}
+  } catch (error) {
+    console.error(`❌ Tableau API error: ${error.message}`)
+    return {}
+  }
+}
+
+// Helper function to enrich orders with state data (called on-demand)
+async function enrichOrdersWithState(orders, startDate, endDate) {
+  console.log(`🗺️  Enriching ${orders.length} orders with state data...`)
+  
+  // Fetch state data from Tableau API
+  const stateLookup = await fetchStateData(startDate, endDate)
+  
+  // Enrich orders with state information
+  const enrichedOrders = orders.map(order => {
+    const orderNum = order.ordernum || order.id
+    
+    // First try: Get state from Tableau API
+    if (stateLookup[orderNum]) {
+      order.shipToState = stateLookup[orderNum]
+    }
+    // Second try: Extract from establishment name (for Air Culinaire orders)
+    else if (!order.shipToState && order.establishment) {
+      const extractedState = extractStateFromText(order.establishment)
+      if (extractedState) {
+        order.shipToState = extractedState
+      }
+    }
+    
+    return order
+  })
+  
+  const enrichedCount = enrichedOrders.filter(o => o.shipToState).length
+  console.log(`✅ State enrichment complete: ${enrichedCount}/${enrichedOrders.length} orders`)
+  
+  return enrichedOrders
+}
+
 // Helper function to fetch orders for a specific date range
 async function fetchOrdersForDateRange(startDate, endDate) {
   // Convert local dates to UTC
@@ -639,6 +804,7 @@ async function fetchOrdersForDateRange(startDate, endDate) {
   
   if (response.status === 200 && response.data && response.data.results) {
     const csvData = response.data.results
+    
     const allOrders = parseCSVToOrders(csvData, startDate)
     
     // Filter orders by date range
@@ -846,7 +1012,6 @@ app.get('/api/orders', async (req, res) => {
           const allOrders = parseCSVToOrders(csvData, startDate)
           
           // Filter orders to show only those delivered within the requested local date range
-          // Since the API now returns UTC-based data, we need to compare properly
           const filteredOrders = allOrders.filter(order => {
             if (!order.deliveryDate || order.deliveryDate === 'N/A') {
               // If no delivery date, include based on order date
@@ -854,7 +1019,6 @@ app.get('/api/orders', async (req, res) => {
             }
             
             // Filter by delivery date (primary) and order date (fallback)
-            // Both dates are now in the same timezone (local) for comparison
             const deliveryInRange = order.deliveryDate >= startDate && order.deliveryDate <= endDate
             const orderInRange = order.orderDate >= startDate && order.orderDate <= endDate
             
@@ -877,7 +1041,7 @@ app.get('/api/orders', async (req, res) => {
           console.log(`🔍 Orders with delivery dates in range: ${filteredOrders.filter(o => o.deliveryDate && o.deliveryDate !== 'N/A' && o.deliveryDate >= startDate && o.deliveryDate <= endDate).length}`)
           console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate >= startDate && o.orderDate <= endDate).length}`)
           
-          // Cache the results
+          // Cache the results (WITHOUT state enrichment for faster performance)
           ordersCache.set(cacheKey, { data: filteredOrders, timestamp: Date.now() })
           
           // Check if we got real orders from API
@@ -984,6 +1148,200 @@ function splitDateRange(startDate, endDate, maxDays = 3) {
   
   return chunks
 }
+
+// New endpoint: Get orders WITH state enrichment (for state-based queries only)
+app.get('/api/orders-with-state', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query
+    
+    console.log('🗺️  /api/orders-with-state REQUEST:', { startDate, endDate })
+    
+    // First, get regular orders (fast, from cache if available)
+    const ordersResponse = await axios.get(`http://localhost:${PORT}/api/orders?startDate=${startDate}&endDate=${endDate}`)
+    
+    if (ordersResponse.data && ordersResponse.data.data) {
+      const orders = ordersResponse.data.data
+      
+      // Enrich with state data from Tableau API
+      const enrichedOrders = await enrichOrdersWithState(orders, startDate, endDate)
+      
+      return res.json({
+        success: true,
+        data: enrichedOrders,
+        dateRange: { startDate, endDate },
+        totalOrders: enrichedOrders.length,
+        stateEnriched: enrichedOrders.filter(o => o.shipToState).length,
+        message: `Orders fetched and enriched with state data for ${startDate} to ${endDate}`,
+        source: 'Bevvi API + Tableau API'
+      })
+    } else {
+      return res.json({
+        success: true,
+        data: [],
+        totalOrders: 0,
+        message: 'No orders found'
+      })
+    }
+  } catch (error) {
+    console.error('Error in /api/orders-with-state:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch orders with state data',
+      message: error.message
+    })
+  }
+})
+
+// New endpoint: Get customers who bought a specific brand
+app.get('/api/brands/customers', async (req, res) => {
+  try {
+    const { startDate, endDate, brand } = req.query
+    
+    if (!brand) {
+      return res.status(400).json({
+        success: false,
+        error: 'Brand name is required',
+        message: 'Please specify a brand name'
+      })
+    }
+    
+    console.log('🏷️  /api/brands/customers REQUEST:', { startDate, endDate, brand })
+    
+    // Fetch all Tableau data
+    const tableauUrl = `https://api.getbevvi.com/api/bevviutils/exportTableauDataCsv?startDate=${startDate}&endDate=${endDate}`
+    
+    const response = await axios.get(tableauUrl, {
+      timeout: 30000,
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Bevvi-Order-Tracking-System/2.0'
+      }
+    })
+    
+    if (response.status === 200 && response.data && Array.isArray(response.data)) {
+      // Filter items by brand (case-insensitive partial match)
+      const brandLower = brand.toLowerCase()
+      const matchingItems = response.data.filter(item => {
+        const itemBrand = (item.brandInfo || item.parentBrand || '').toLowerCase()
+        return itemBrand.includes(brandLower)
+      })
+      
+      console.log(`✅ Found ${matchingItems.length} line items for brand "${brand}"`)
+      
+      // Group by customer (companyName)
+      const customerData = {}
+      matchingItems.forEach(item => {
+        const customer = item.companyName || item.customerName || 'Unknown Customer'
+        const revenue = (parseFloat(item.alcPrice) || parseFloat(item.price) || 0) * (parseInt(item.quantity) || 1)
+        
+        if (!customerData[customer]) {
+          customerData[customer] = {
+            revenue: 0,
+            bottles: 0,
+            orders: new Set()
+          }
+        }
+        
+        customerData[customer].revenue += revenue
+        customerData[customer].bottles += parseInt(item.quantity) || 1
+        if (item.orderNumber) {
+          customerData[customer].orders.add(item.orderNumber)
+        }
+      })
+      
+      // Convert to array and sort by revenue
+      const customers = Object.entries(customerData).map(([name, data]) => ({
+        customerName: name,
+        revenue: data.revenue,
+        bottles: data.bottles,
+        orderCount: data.orders.size
+      })).sort((a, b) => b.revenue - a.revenue)
+      
+      const totalRevenue = customers.reduce((sum, c) => sum + c.revenue, 0)
+      const totalBottles = customers.reduce((sum, c) => sum + c.bottles, 0)
+      
+      return res.json({
+        success: true,
+        brand,
+        customers,
+        totalCustomers: customers.length,
+        totalRevenue,
+        totalBottles,
+        dateRange: { startDate, endDate },
+        message: `Customers who bought ${brand}`,
+        source: 'Tableau API'
+      })
+    }
+    
+    return res.json({
+      success: false,
+      error: 'No data available',
+      message: 'Tableau API returned unexpected format'
+    })
+  } catch (error) {
+    console.error('Error in /api/brands/customers:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch customer data for brand',
+      message: error.message
+    })
+  }
+})
+
+// New endpoint: Get brand revenue breakdown (for brand-based queries only)
+app.get('/api/brands/revenue', async (req, res) => {
+  try {
+    const { startDate, endDate, limit } = req.query
+    const requestedLimit = parseInt(limit) || 10 // Default to 10 if not specified
+    
+    console.log('🏷️  /api/brands/revenue REQUEST:', { startDate, endDate, limit: requestedLimit })
+    
+    // Fetch brand data from Tableau API
+    const brandData = await fetchBrandData(startDate, endDate)
+    
+    // Filter out "Unknown" and sort by revenue descending
+    const sortedBrands = Object.entries(brandData)
+      .filter(([brand]) => brand !== 'Unknown')  // Exclude Unknown
+      .sort((a, b) => b[1].revenue - a[1].revenue)
+      .slice(0, requestedLimit) // Use dynamic limit
+      .map(([brand, data]) => ({
+        brand,
+        revenue: data.revenue,
+        orderCount: data.orderCount,
+        itemCount: data.itemCount
+      }))
+    
+    const totalRevenue = Object.values(brandData).reduce((sum, data) => sum + data.revenue, 0)
+    const totalOrders = new Set(Object.values(brandData).flatMap(data => Array(data.orderCount).fill(null))).size
+    
+    // Calculate known vs unknown brands
+    const knownBrandsRevenue = Object.entries(brandData)
+      .filter(([brand]) => brand !== 'Unknown')
+      .reduce((sum, [, data]) => sum + data.revenue, 0)
+    const unknownRevenue = brandData['Unknown']?.revenue || 0
+    
+    console.log(`💡 Revenue breakdown: Known brands: $${knownBrandsRevenue.toFixed(2)}, Unknown: $${unknownRevenue.toFixed(2)}`)
+    
+    return res.json({
+      success: true,
+      brands: sortedBrands,
+      totalBrands: Object.keys(brandData).length - 1, // Exclude "Unknown" from count
+      knownBrandsCount: Object.keys(brandData).filter(b => b !== 'Unknown').length,
+      totalRevenue: knownBrandsRevenue, // Only show revenue from known brands
+      unknownRevenue,
+      dateRange: { startDate, endDate },
+      message: `Brand revenue data for ${startDate} to ${endDate}`,
+      source: 'Tableau API'
+    })
+  } catch (error) {
+    console.error('Error in /api/brands/revenue:', error)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch brand revenue data',
+      message: error.message
+    })
+  }
+})
 
 // Auto-refresh configuration
 const AUTO_REFRESH_INTERVAL = 20 * 60 * 1000 // 20 minutes in milliseconds
@@ -1343,10 +1701,16 @@ Extract the following information from the user's query:
   * average_order_value: asking for AOV or average
   * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
   * revenue_by_customer: asking for revenue for a specific customer
+  * revenue_by_brand: asking for revenue breakdown by PRODUCT BRAND (e.g., "revenue by brand", "top brands", "which brands sell the most", "brand performance") - actual liquor brands like Tito's, Grey Goose, etc.
+  * revenue_by_store: asking for revenue breakdown by store/retailer/establishment (e.g., "revenue by store", "top stores", "which retailers make the most", "revenue by retailer")
+  * customers_by_brand: asking which customers bought/ordered/purchased a specific brand (e.g., "which customers bought Schrader", "who ordered Dom Perignon", "which customers purchased Tito's", "who bought Macallan")
   * delayed_orders_by_customer: asking for delayed orders for a specific customer
+  * tax_by_state: asking for tax breakdown by state (e.g., "tax by state for Oct")
+  * sales_by_state: asking for sales/revenue breakdown by state (e.g., "sales by state for Nov")
   * unknown: if the query is NOT about orders, revenue, tax, tips, delivery, or customer data (e.g., weather, personal questions, unrelated topics)
   
 - customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire). Always extract full company name, not partial words.
+- brand: Brand name if mentioned (Schrader, Dom Perignon, Tito's, Grey Goose, etc.). Extract the full brand name.
 - startDate: Start date in YYYY-MM-DD format
 - endDate: End date in YYYY-MM-DD format
 - isMTD: Boolean, true if asking for "month to date" or "this month so far"
@@ -1367,12 +1731,14 @@ Return ONLY valid JSON, no explanation. Format:
 {
   "intent": "revenue",
   "customer": "Sendoso",
+  "brand": "Schrader",
   "startDate": "2025-10-01",
   "endDate": "2025-10-31",
   "isMTD": false
 }
 
-If customer is not mentioned, omit the "customer" field.`
+If customer is not mentioned, omit the "customer" field.
+If brand is not mentioned, omit the "brand" field.`
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',

@@ -155,9 +155,13 @@ const CommandInterface = ({
   }
 
   // Process user command
-  const processCommand = (command, gptParsedData = null) => {
-    console.log('🔄 Processing command:', command, 'with', orders.length, 'orders')
+  const processCommand = (command, gptParsedData = null, enrichedOrdersOverride = null) => {
+    // Use enriched orders if provided, otherwise use state orders
+    const ordersToUse = enrichedOrdersOverride || orders
+    
+    console.log('🔄 Processing command:', command, 'with', ordersToUse.length, 'orders')
     console.log('🤖 GPT parsed data:', gptParsedData)
+    console.log('🗺️  Using enriched orders:', !!enrichedOrdersOverride)
     const lower = command.toLowerCase()
     
     // Check if GPT identified this as an unknown/unrelated query
@@ -175,14 +179,14 @@ const CommandInterface = ({
     console.log('📅 Date range from command:', dateRange)
     
     // Filter orders by date range if specified
-    let relevantOrders = orders
+    let relevantOrders = ordersToUse
     if (dateRange) {
-      relevantOrders = orders.filter(order => {
+      relevantOrders = ordersToUse.filter(order => {
         return order.orderDate >= dateRange.startDate && order.orderDate <= dateRange.endDate
       })
       console.log('📊 Filtered to', relevantOrders.length, 'orders for date range')
     } else {
-      console.log('📊 Using all', orders.length, 'orders (no date filter in command)')
+      console.log('📊 Using all', ordersToUse.length, 'orders (no date filter in command)')
     }
     
     // Determine what the user is asking for
@@ -345,7 +349,7 @@ const CommandInterface = ({
         )
         
         const acceptedOrders = customerOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+          !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
         )
         
         const totalRevenue = acceptedOrders.reduce((sum, order) => 
@@ -375,7 +379,7 @@ const CommandInterface = ({
         console.log('⚠️ Customer name validation failed, falling back to general revenue')
         console.log('⚠️ Customer name was:', customerName)
         const acceptedOrders = relevantOrders.filter(order => 
-          !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+          !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
         )
         const totalRevenue = acceptedOrders.reduce((sum, order) => 
           sum + (parseFloat(order.revenue) || 0), 0
@@ -399,6 +403,54 @@ const CommandInterface = ({
           averageOrderValue: acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
         } : null
       }
+    }
+    // Revenue by store/retailer breakdown
+    else if ((gptParsedData?.intent === 'revenue_by_store') || (!gptParsedData && (lower.includes('revenue') || lower.includes('sales')) && (lower.includes('by store') || lower.includes('by retailer') || lower.includes('by establishment') || lower.includes('top store') || lower.includes('top retailer')))) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      // Extract limit from query (e.g., "top 50 stores" -> 50)
+      const limitMatch = lower.match(/top\s+(\d+)/i)
+      const limit = limitMatch ? parseInt(limitMatch[1]) : 10
+      
+      // Group revenue by store/establishment
+      const revenueByStore = {}
+      acceptedOrders.forEach(order => {
+        const store = order.establishment || 'Unknown'
+        if (!revenueByStore[store]) {
+          revenueByStore[store] = { revenue: 0, count: 0 }
+        }
+        revenueByStore[store].revenue += parseFloat(order.revenue) || 0
+        revenueByStore[store].count += 1
+      })
+      
+      // Sort by revenue amount descending
+      const sortedStores = Object.entries(revenueByStore)
+        .sort((a, b) => b[1].revenue - a[1].revenue)
+        .slice(0, limit) // Use dynamic limit
+      
+      const totalRevenue = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+      
+      if (sortedStores.length === 0) {
+        response.content = 'No store revenue data available for the selected period'
+      } else {
+        response.content = '' // Only show the visual card
+      }
+      
+      response.data = sortedStores.length > 0 ? {
+        type: 'brandBreakdown',
+        brands: sortedStores.map(([store, data]) => ({
+          brand: store,
+          revenue: data.revenue,
+          count: data.count,
+          orderCount: data.count // For stores, orderCount = count
+        })),
+        total: totalRevenue,
+        orderCount: acceptedOrders.length,
+        totalBrands: null, // Not a brand query, so null
+        totalStores: Object.keys(revenueByStore).length // Total number of stores
+      } : null
     }
     // Revenue by month breakdown
     else if ((gptParsedData?.intent === 'revenue_by_month') || (!gptParsedData && (lower.includes('revenue') || lower.includes('sales')) && lower.includes('by month'))) {
@@ -564,6 +616,94 @@ const CommandInterface = ({
         totalDeliveryCharge: totalDeliveryCharge,
         orderCount: acceptedOrders.length,
         averageDeliveryChargePerOrder: acceptedOrders.length > 0 ? totalDeliveryCharge / acceptedOrders.length : 0
+      } : null
+    }
+    // Tax by state query
+    else if ((gptParsedData?.intent === 'tax_by_state') || (!gptParsedData && lower.includes('tax') && lower.includes('by state'))) {
+      // Check if orders have state data
+      const hasStateData = relevantOrders.some(o => o.shipToState)
+      console.log(`🗺️  Tax by state query - orders have state data: ${hasStateData}`)
+      
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      // Group tax by state
+      const taxByState = {}
+      acceptedOrders.forEach(order => {
+        const state = order.shipToState || 'Unknown'
+        if (!taxByState[state]) {
+          taxByState[state] = { tax: 0, count: 0 }
+        }
+        taxByState[state].tax += parseFloat(order.tax) || 0
+        taxByState[state].count += 1
+      })
+      
+      // Sort by tax amount descending
+      const sortedStates = Object.entries(taxByState)
+        .sort((a, b) => b[1].tax - a[1].tax)
+        .slice(0, 10) // Top 10 states
+      
+      const totalTax = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.tax) || 0), 0)
+      
+      if (sortedStates.length === 0) {
+        response.content = 'No tax data available for the selected period'
+      } else {
+        response.content = '' // Only show the visual card, no text
+      }
+      
+      response.data = sortedStates.length > 0 ? {
+        type: 'stateBreakdown',
+        breakdownType: 'tax',
+        states: sortedStates.map(([state, data]) => ({
+          state,
+          amount: data.tax,
+          count: data.count
+        })),
+        total: totalTax,
+        orderCount: acceptedOrders.length
+      } : null
+    }
+    // Sales/Revenue by state query
+    else if ((gptParsedData?.intent === 'sales_by_state') || (!gptParsedData && (lower.includes('sales') || lower.includes('revenue')) && lower.includes('by state'))) {
+      const acceptedOrders = relevantOrders.filter(order => 
+        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      // Group revenue by state
+      const revenueByState = {}
+      acceptedOrders.forEach(order => {
+        const state = order.shipToState || 'Unknown'
+        if (!revenueByState[state]) {
+          revenueByState[state] = { revenue: 0, count: 0 }
+        }
+        revenueByState[state].revenue += parseFloat(order.revenue) || 0
+        revenueByState[state].count += 1
+      })
+      
+      // Sort by revenue amount descending
+      const sortedStates = Object.entries(revenueByState)
+        .sort((a, b) => b[1].revenue - a[1].revenue)
+        .slice(0, 10) // Top 10 states
+      
+      const totalRevenue = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+      
+      if (sortedStates.length === 0) {
+        response.content = 'No sales data available for the selected period'
+      } else {
+        response.content = '' // Only show the visual card, no text
+      }
+      
+      response.data = sortedStates.length > 0 ? {
+        type: 'stateBreakdown',
+        breakdownType: 'revenue',
+        states: sortedStates.map(([state, data]) => ({
+          state,
+          amount: data.revenue,
+          count: data.count
+        })),
+        total: totalRevenue,
+        orderCount: acceptedOrders.length
       } : null
     }
     // General tax query
@@ -739,10 +879,16 @@ const CommandInterface = ({
     e.preventDefault()
     if (!input.trim() || isLoadingData) return
     
+    // Save input before clearing
+    const userInput = input
+    
+    // Clear input immediately (like GPT)
+    setInput('')
+    
     // Add user message
     const userMessage = {
       type: 'user',
-      content: input
+      content: userInput
     }
     setMessages(prev => [...prev, userMessage])
     
@@ -750,13 +896,14 @@ const CommandInterface = ({
     let dateRange = null
     let parsedIntent = null
     let parsedCustomer = null
+    let parsedBrand = null
     
     try {
       console.log('🤖 Attempting GPT-4o-mini parsing...')
       const parseResponse = await fetch('/api/parse-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: input })
+        body: JSON.stringify({ prompt: userInput })
       })
       
       if (parseResponse.ok) {
@@ -773,6 +920,7 @@ const CommandInterface = ({
         
         parsedIntent = parseData.parsed.intent
         parsedCustomer = parseData.parsed.customer
+        parsedBrand = parseData.parsed.brand
         
         console.log('📊 Token usage:', parseData.usage)
         console.log(`💰 Estimated cost: $${((parseData.usage.promptTokens * 0.15 + parseData.usage.completionTokens * 0.60) / 1000000).toFixed(6)}`)
@@ -786,23 +934,132 @@ const CommandInterface = ({
     // Fallback to rule-based parsing if GPT didn't work
     if (!dateRange) {
       console.log('📝 Using rule-based date parsing as fallback')
-      dateRange = parseDate(input)
+      dateRange = parseDate(userInput)
     }
     
     // Check if this is a query with specific filters (customer, specific state) that should use existing data
-    const lower = input.toLowerCase()
+    const lower = userInput.toLowerCase()
     
-    // Only skip fetch for customer-specific queries (NOT for breakdown queries)
+    // Check if this query needs state data or brand data
+    const needsStateData = parsedIntent === 'tax_by_state' || parsedIntent === 'sales_by_state'
+    const needsBrandData = parsedIntent === 'revenue_by_brand' || 
+                           (lower.includes('brand') && (lower.includes('revenue') || lower.includes('sales') || lower.includes('top')))
+    const needsCustomersByBrand = parsedIntent === 'customers_by_brand' || 
+                                  (lower.includes('customer') && (lower.includes('bought') || lower.includes('ordered') || lower.includes('purchased'))) ||
+                                  (lower.includes('who') && (lower.includes('bought') || lower.includes('ordered') || lower.includes('purchased') || lower.includes('buy')))
+    
+    // Only skip fetch for customer-specific queries or brand-customer queries (NOT for breakdown queries)
     const hasSpecificFilter = 
       parsedCustomer || // GPT found a customer
+      needsCustomersByBrand || // Customers by brand query
       (lower.includes('for ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody'))) ||
       (lower.includes('from ') && (lower.includes('sendoso') || lower.includes('airculinaire') || lower.includes('ongoody')))
+    
+    // Handle customers-by-brand queries (they make their own API call)
+    if (needsCustomersByBrand) {
+      console.log('👥 Processing customers-by-brand query...')
+      
+      // Extract brand name from query
+      let brandName = parsedBrand || ''
+      if (!brandName) {
+        // Try to extract brand name from query - multiple patterns
+        const patterns = [
+          /(?:bought|purchased|buy|ordering|ordered)\s+([A-Z][a-zA-Z\s]+?)(?:\s+for|\s+in|\s+during|$)/i,
+          /(?:which|who)\s+(?:customers?|clients?)\s+(?:bought|purchased|ordered)\s+([A-Z][a-zA-Z\s]+?)(?:\s+for|\s+in|\s+during|$)/i,
+          /customers?\s+(?:for|of)\s+([A-Z][a-zA-Z\s]+?)(?:\s+for|\s+in|\s+during|$)/i
+        ]
+        
+        for (const pattern of patterns) {
+          const match = userInput.match(pattern)
+          if (match && match[1]) {
+            brandName = match[1].trim()
+            // Clean up - remove trailing date/month words
+            brandName = brandName.replace(/\s+(in|for|during|on)\s*$/i, '').trim()
+            break
+          }
+        }
+      }
+      
+      console.log(`👥 Extracted brand name: "${brandName}"`)
+      
+      if (brandName) {
+        // Use provided date range or default to current month
+        const effectiveDateRange = dateRange || {
+          startDate: new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-01',
+          endDate: new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(new Date().getDate()).padStart(2, '0')
+        }
+        
+        // Show loading message
+        const loadingMessage = {
+          type: 'assistant',
+          content: `🔍 Finding customers who ordered ${brandName}...`,
+          loading: true
+        }
+        setMessages(prev => [...prev, loadingMessage])
+        
+        const timestamp = Date.now()
+        fetch(`/api/brands/customers?startDate=${effectiveDateRange.startDate}&endDate=${effectiveDateRange.endDate}&brand=${encodeURIComponent(brandName)}&t=${timestamp}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.customers) {
+              console.log(`✅ Received ${data.customers.length} customers for brand "${data.brand}"`)
+              // Create response with customer data
+              const customerResponse = {
+                type: 'assistant',
+                content: '',
+                data: {
+                  type: 'customersByBrand',
+                  brand: data.brand,
+                  customers: data.customers,
+                  totalCustomers: data.totalCustomers,
+                  totalRevenue: data.totalRevenue,
+                  totalBottles: data.totalBottles
+                }
+              }
+              setMessages(prev => {
+                const filtered = prev.filter(m => !m.loading)
+                return [...filtered, customerResponse]
+              })
+            } else {
+              setMessages(prev => {
+                const filtered = prev.filter(m => !m.loading)
+                return [...filtered, {
+                  type: 'assistant',
+                  content: `No customers found who purchased "${brandName}". The brand might not exist in the database or has no sales in this period.`
+                }]
+              })
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching customers by brand:', err)
+            setMessages(prev => {
+              const filtered = prev.filter(m => !m.loading)
+              return [...filtered, {
+                type: 'assistant',
+                content: 'Error fetching customer data. Please try again.'
+              }]
+            })
+          })
+        return // Exit early for customers-by-brand queries
+      } else {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: 'Please specify a brand name (e.g., "which customers bought Schrader?")'
+        }])
+        return
+      }
+    }
     
     // Only fetch new data if:
     // 1. A date range is detected
     // 2. AND it's NOT a query with specific filters (those use existing data)
     if (dateRange && onDateRangeChange && onFetchOrders && !hasSpecificFilter) {
       console.log('🔍 Date range detected, fetching data:', dateRange)
+      
+      // Check if we need state-enriched data
+      if (needsStateData) {
+        console.log('🗺️  Query needs state data, will fetch from /api/orders-with-state')
+      }
       // Show loading message
       const loadingMessage = {
         type: 'assistant',
@@ -814,14 +1071,102 @@ const CommandInterface = ({
       setMessages(prev => [...prev, loadingMessage])
       
       // Save the command and GPT-parsed data to process after data loads
-      pendingCommandRef.current = input
+      pendingCommandRef.current = userInput
       pendingGPTDataRef.current = {
         customer: parsedCustomer,
         intent: parsedIntent,
         dateRange: dateRange
       }
       
-      // Update date range (this will trigger fetchOrders via useEffect)
+      // If this is a brand-based query, fetch brand data directly (ONE API CALL ONLY)
+      if (needsBrandData) {
+        console.log('🏷️  Fetching brand revenue data (single API call)...')
+        
+        // Extract limit from query (e.g., "top 50 brands" -> 50)
+        const limitMatch = lower.match(/top\s+(\d+)/i)
+        const limit = limitMatch ? parseInt(limitMatch[1]) : 10
+        console.log(`📊 Requesting top ${limit} brands`)
+        
+        const timestamp = Date.now()
+        fetch(`/api/brands/revenue?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&limit=${limit}&t=${timestamp}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.success && data.brands) {
+              console.log(`✅ Received ${data.brands.length} brands (${data.totalBrands} total)`)
+              // Create response with brand data
+              const brandResponse = {
+                type: 'assistant',
+                content: '',
+                data: {
+                  type: 'brandBreakdown',
+                  brands: data.brands,
+                  total: data.totalRevenue,
+                  totalBrands: data.totalBrands,
+                  unknownRevenue: data.unknownRevenue
+                }
+              }
+              setMessages(prev => {
+                const filtered = prev.filter(m => !m.loading)
+                return [...filtered, brandResponse]
+              })
+              pendingCommandRef.current = null
+              pendingGPTDataRef.current = null
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching brand data:', err)
+            setMessages(prev => {
+              const filtered = prev.filter(m => !m.loading)
+              return [...filtered, {
+                type: 'assistant',
+                content: 'Error fetching brand data. Please try again.'
+              }]
+            })
+          })
+        return // Exit early for brand-based queries
+      }
+      
+      // If this is a state-based query, fetch state-enriched data directly (ONE API CALL ONLY)
+      if (needsStateData) {
+        console.log('🗺️  Fetching state-enriched data for state-based query (single API call)...')
+        // Fetch directly from state-enriched endpoint
+        const timestamp = Date.now()
+        fetch(`/api/orders-with-state?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.data && Array.isArray(data.data)) {
+              console.log(`✅ Received ${data.stateEnriched}/${data.totalOrders} state-enriched orders`)
+              // Process with enriched data (use saved pending command)
+              const savedCommand = pendingCommandRef.current
+              const gptData = {
+                customer: parsedCustomer,
+                intent: parsedIntent,
+                dateRange: dateRange
+              }
+              // Create a custom response using enriched data
+              const enrichedResponse = processCommand(savedCommand, gptData, data.data)
+              setMessages(prev => {
+                const filtered = prev.filter(m => !m.loading)
+                return [...filtered, enrichedResponse]
+              })
+              pendingCommandRef.current = null
+              pendingGPTDataRef.current = null
+            }
+          })
+          .catch(err => {
+            console.error('Error fetching state-enriched data:', err)
+            setMessages(prev => {
+              const filtered = prev.filter(m => !m.loading)
+              return [...filtered, {
+                type: 'assistant',
+                content: 'Error fetching state data. Please try again.'
+              }]
+            })
+          })
+        return // Exit early for state-based queries - don't make regular API call
+      }
+      
+      // For non-state queries, update date range (this will trigger regular fetchOrders via useEffect)
       onDateRangeChange(dateRange)
       
       // Set a timeout in case data never loads
@@ -845,11 +1190,11 @@ const CommandInterface = ({
         intent: parsedIntent,
         dateRange: dateRange
       }
-      const response = processCommand(input, gptParsedData)
+      const response = processCommand(userInput, gptParsedData)
       setMessages(prev => [...prev, response])
     }
     
-    setInput('')
+    // Input already cleared at the start
   }
 
   const handleSuggestionClick = (suggestion) => {
@@ -866,6 +1211,14 @@ const CommandInterface = ({
     setInput('')
     setExpandedOrders({}) // Also reset expanded orders state
     console.log('🧹 Chat cleared - conversation reset')
+    
+    // Trigger a data refresh to get fresh orders with latest state enrichment
+    if (onFetchOrders) {
+      console.log('🔄 Triggering data refresh after clear chat...')
+      setTimeout(() => {
+        onFetchOrders()
+      }, 500)
+    }
   }
 
   return (
@@ -884,14 +1237,25 @@ const CommandInterface = ({
           </div>
         )}
         
-        {messages.length > 1 && messages.map((message, index) => (
-          <div key={index} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-lg p-4 ${
-              message.type === 'user' 
-                ? 'bg-blue-600 text-white shadow-sm' 
-                : 'bg-white border border-gray-300 shadow-sm text-gray-900'
-            }`}>
-              <p className="text-sm whitespace-pre-line leading-relaxed">{message.content}</p>
+            {messages.length > 1 && messages.map((message, index) => (
+              <div key={index} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] rounded-lg p-4 ${
+                  message.type === 'user' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-white border border-gray-300 shadow-sm text-gray-900'
+                }`}>
+                  {message.loading ? (
+                    <div className="flex items-center space-x-2">
+                      <p className="text-sm leading-relaxed">{message.content}</p>
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm whitespace-pre-line leading-relaxed">{message.content}</p>
+                  )}
               
               {/* Data Display */}
               {message.data && message.data.type === 'revenue' && (
@@ -1101,6 +1465,90 @@ const CommandInterface = ({
                         message.data.breakdownType === 'tax' ? 'text-orange-900' : 'text-green-900'
                       }`}>{formatDollarAmount(message.data.total)}</span>
                     </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Data Display - Customers by Brand */}
+              {message.data && message.data.type === 'customersByBrand' && (
+                <div className="mt-3 rounded-lg p-3 border bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center">
+                      <Package className="h-4 w-4 mr-1 text-purple-600" />
+                      <span className="text-xs font-medium text-purple-800">
+                        Customers Who Bought "{message.data.brand}"
+                      </span>
+                    </div>
+                    <span className="text-xs text-gray-600">
+                      {message.data.totalCustomers} {message.data.totalCustomers === 1 ? 'customer' : 'customers'}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {message.data.customers.map((customer, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-purple-100">
+                        <div className="flex items-center">
+                          <span className="text-gray-700 font-medium mr-2">{idx + 1}.</span>
+                          <span className="text-gray-900 font-semibold">{customer.customerName}</span>
+                          <span className="text-gray-500 text-xs ml-2">
+                            ({formatNumber(customer.orderCount)} {customer.orderCount === 1 ? 'order' : 'orders'}, {formatNumber(customer.bottles)} bottles)
+                          </span>
+                        </div>
+                        <span className="font-bold text-purple-900">{formatDollarAmount(customer.revenue)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-purple-200">
+                      <span className="text-gray-700 font-bold">
+                        Total ({formatNumber(message.data.totalBottles)} bottles):
+                      </span>
+                      <span className="font-bold text-base text-purple-900">{formatDollarAmount(message.data.totalRevenue)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Data Display - Brand/Store Breakdown */}
+              {message.data && message.data.type === 'brandBreakdown' && (
+                <div className="mt-3 rounded-lg p-3 border bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center">
+                      <TrendingUp className="h-4 w-4 mr-1 text-blue-600" />
+                      <span className="text-xs font-medium text-blue-800">
+                        {message.data.totalBrands ? 'Revenue by Brand' : 'Revenue by Store/Retailer'}
+                      </span>
+                    </div>
+                    {(message.data.totalBrands || message.data.totalStores) && (
+                      <span className="text-xs text-gray-600">
+                        Showing {message.data.brands.length} of {formatNumber(message.data.totalBrands || message.data.totalStores)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {message.data.brands.map((brandData, idx) => (
+                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-blue-100">
+                        <div className="flex items-center">
+                          <span className="text-gray-700 font-medium mr-2">{idx + 1}.</span>
+                          <span className="text-gray-900 font-semibold">{brandData.brand}</span>
+                          <span className="text-gray-500 text-xs ml-2">
+                            ({formatNumber(brandData.orderCount || brandData.count)} {message.data.totalBrands ? 'customers' : 'orders'}
+                            {brandData.itemCount && `, ${formatNumber(brandData.itemCount)} bottles`})
+                          </span>
+                        </div>
+                        <span className="font-bold text-blue-900">{formatDollarAmount(brandData.revenue)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-blue-200">
+                      <span className="text-gray-700 font-bold">
+                        Total:
+                      </span>
+                      <span className="font-bold text-base text-blue-900">{formatDollarAmount(message.data.total)}</span>
+                    </div>
+                    {message.data.unknownRevenue > 0 && (
+                      <div className="text-xs text-gray-600 mt-2 pt-2 border-t border-blue-100">
+                        <span className="italic">
+                          Note: {formatDollarAmount(message.data.unknownRevenue)} from products without brand information (excluded from breakdown)
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
