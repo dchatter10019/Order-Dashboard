@@ -765,6 +765,80 @@ const CommandInterface = ({
         orderType: 'Delivered'
       }
     }
+    // Order status check/validation
+    else if ((gptParsedData?.intent === 'order_status_check') || 
+             (!gptParsedData && (
+               lower.includes('are all orders') || 
+               lower.includes('are any orders') ||
+               lower.includes('how many orders are') ||
+               lower.includes('check order status') ||
+               lower.includes('order status summary') ||
+               lower.includes('status breakdown')
+             ))) {
+      
+      // Count orders by status
+      const statusCounts = {}
+      relevantOrders.forEach(order => {
+        const status = order.status?.toLowerCase() || 'unknown'
+        statusCounts[status] = (statusCounts[status] || 0) + 1
+      })
+      
+      const acceptedCount = statusCounts['accepted'] || 0
+      const pendingCount = statusCounts['pending'] || 0
+      const rejectedCount = (statusCounts['rejected'] || 0) + (statusCounts['cancelled'] || 0) + (statusCounts['canceled'] || 0)
+      const deliveredCount = statusCounts['delivered'] || 0
+      const otherCount = relevantOrders.length - acceptedCount - pendingCount - rejectedCount - deliveredCount
+      
+      // Build response based on what was asked
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+      
+      // Check if asking about "all orders accepted"
+      if (lower.includes('are all orders accepted')) {
+        if (relevantOrders.length === 0) {
+          response.content = `No orders found${dateInfo}`
+        } else if (acceptedCount === relevantOrders.length) {
+          response.content = `✅ Yes, all ${formatNumber(relevantOrders.length)} orders are accepted${dateInfo}`
+        } else {
+          const issues = []
+          if (pendingCount > 0) issues.push(`${formatNumber(pendingCount)} pending`)
+          if (rejectedCount > 0) issues.push(`${formatNumber(rejectedCount)} rejected/cancelled`)
+          if (deliveredCount > 0) issues.push(`${formatNumber(deliveredCount)} delivered`)
+          if (otherCount > 0) issues.push(`${formatNumber(otherCount)} other`)
+          
+          response.content = `❌ No, ${formatNumber(acceptedCount)} of ${formatNumber(relevantOrders.length)} orders are accepted${dateInfo}\n\nOther statuses:\n${issues.map(i => `  • ${i}`).join('\n')}`
+        }
+      }
+      // Check if asking about pending orders
+      else if (lower.includes('are any orders pending') || lower.includes('any pending')) {
+        if (pendingCount > 0) {
+          response.content = `⚠️ Yes, ${formatNumber(pendingCount)} orders are pending${dateInfo}`
+        } else {
+          response.content = `✅ No, there are no pending orders${dateInfo}`
+        }
+      }
+      // General status breakdown
+      else {
+        const breakdown = []
+        if (acceptedCount > 0) breakdown.push(`  ✅ Accepted: ${formatNumber(acceptedCount)}`)
+        if (pendingCount > 0) breakdown.push(`  ⏳ Pending: ${formatNumber(pendingCount)}`)
+        if (rejectedCount > 0) breakdown.push(`  ❌ Rejected/Cancelled: ${formatNumber(rejectedCount)}`)
+        if (deliveredCount > 0) breakdown.push(`  📦 Delivered: ${formatNumber(deliveredCount)}`)
+        if (otherCount > 0) breakdown.push(`  ❓ Other: ${formatNumber(otherCount)}`)
+        
+        response.content = `Order Status Summary${dateInfo}:\n\nTotal Orders: ${formatNumber(relevantOrders.length)}\n\n${breakdown.join('\n')}`
+      }
+      
+      response.data = {
+        type: 'statusBreakdown',
+        total: relevantOrders.length,
+        accepted: acceptedCount,
+        pending: pendingCount,
+        rejected: rejectedCount,
+        delivered: deliveredCount,
+        other: otherCount
+      }
+    }
     // Total orders
     else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders')))) {
       const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
@@ -1395,6 +1469,51 @@ const CommandInterface = ({
                       <span className="text-gray-600">Avg. Delivery Charge Per Order:</span>
                       <span className="font-semibold text-gray-900">{formatDollarAmount(message.data.averageDeliveryChargePerOrder)}</span>
                     </div>
+                  </div>
+                </div>
+              )}
+              
+              {message.data && message.data.type === 'statusBreakdown' && (
+                <div className="mt-3 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-3 border border-purple-200">
+                  <div className="flex items-center mb-2">
+                    <Package className="h-4 w-4 text-purple-600 mr-1" />
+                    <span className="text-xs font-medium text-purple-800">Order Status Breakdown</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-sm py-1 px-2 bg-white rounded border border-purple-100">
+                      <span className="text-gray-700 font-semibold">Total Orders:</span>
+                      <span className="font-bold text-purple-900">{formatNumber(message.data.total)}</span>
+                    </div>
+                    {message.data.accepted > 0 && (
+                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-green-50 rounded border border-green-200">
+                        <span className="text-gray-700">✅ Accepted:</span>
+                        <span className="font-semibold text-green-900">{formatNumber(message.data.accepted)}</span>
+                      </div>
+                    )}
+                    {message.data.pending > 0 && (
+                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-yellow-50 rounded border border-yellow-200">
+                        <span className="text-gray-700">⏳ Pending:</span>
+                        <span className="font-semibold text-yellow-900">{formatNumber(message.data.pending)}</span>
+                      </div>
+                    )}
+                    {message.data.rejected > 0 && (
+                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-red-50 rounded border border-red-200">
+                        <span className="text-gray-700">❌ Rejected/Cancelled:</span>
+                        <span className="font-semibold text-red-900">{formatNumber(message.data.rejected)}</span>
+                      </div>
+                    )}
+                    {message.data.delivered > 0 && (
+                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-blue-50 rounded border border-blue-200">
+                        <span className="text-gray-700">📦 Delivered:</span>
+                        <span className="font-semibold text-blue-900">{formatNumber(message.data.delivered)}</span>
+                      </div>
+                    )}
+                    {message.data.other > 0 && (
+                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-gray-50 rounded border border-gray-200">
+                        <span className="text-gray-700">❓ Other:</span>
+                        <span className="font-semibold text-gray-900">{formatNumber(message.data.other)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

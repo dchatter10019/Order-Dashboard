@@ -1698,6 +1698,7 @@ Extract the following information from the user's query:
   * pending_orders: specifically asking for PENDING STATUS orders (must mention "pending")
   * delivered_orders: specifically asking for DELIVERED STATUS orders (must mention "delivered")
   * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries)
+  * order_status_check: asking to validate/check order statuses (e.g., "are all orders accepted", "are any orders pending", "how many rejected", "check order statuses", "order status summary", "what's the status breakdown")
   * average_order_value: asking for AOV or average
   * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
   * revenue_by_customer: asking for revenue for a specific customer
