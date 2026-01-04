@@ -51,11 +51,31 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
       const apiUrl = `${endpoint}?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
       
       const response = await fetch(apiUrl)
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+      const data = await response.json()
+      
+      // Check for API error responses (even if status is 200)
+      if (!response.ok || (data.error && !data.success)) {
+        const errorMessage = data.message || data.error || `HTTP error! status: ${response.status}`
+        console.error('❌ API Error:', errorMessage)
+        
+        // Set empty orders and show error message
+        setOrders([])
+        
+        // Add error message to chat if there are messages
+        if (setMessages) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => !m.loading)
+            return [...filtered, {
+              type: 'assistant',
+              content: `❌ ${errorMessage}${data.dateRange ? `\n\nRequested date range: ${data.dateRange.startDate} to ${data.dateRange.endDate}` : ''}${data.today ? `\n\nToday's date: ${data.today}` : ''}${data.maxFuture ? `\n\nMaximum allowed future date: ${data.maxFuture}` : ''}`
+            }]
+          })
+        }
+        
+        setIsLoading(false)
+        return
       }
       
-      const data = await response.json()
       console.log(`✅ AI Assistant received ${data.data?.length || 0} orders${useStateEnrichment ? ' (state-enriched)' : ''}`)
       
       if (data.data && Array.isArray(data.data)) {
@@ -66,6 +86,17 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
     } catch (error) {
       console.error('Error fetching orders:', error)
       setOrders([])
+      
+      // Show error message in chat
+      if (setMessages) {
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.loading)
+          return [...filtered, {
+            type: 'assistant',
+            content: `❌ Error fetching orders: ${error.message}. Please try again or check if the date range is valid.`
+          }]
+        })
+      }
     } finally {
       setIsLoading(false)
     }
