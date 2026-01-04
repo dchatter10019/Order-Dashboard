@@ -93,7 +93,25 @@ const CommandInterface = ({
       if (lower.includes(monthName)) {
         // Try to extract year (e.g., "Nov 2025", "October 2024")
         const yearMatch = text.match(/\b(20\d{2})\b/)
-        const year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear()
+        let year = yearMatch ? parseInt(yearMatch[1]) : null
+        
+        // If no year specified, use smart default:
+        // - If month is in the past relative to current month, use current year
+        // - If month is current or future month, use current year
+        // - But if that would make it far in the future (more than 2 months ahead), use previous year
+        if (!year) {
+          const currentMonth = now.getMonth()
+          const currentYear = now.getFullYear()
+          
+          // If the requested month is more than 2 months in the future, use previous year
+          // (e.g., if it's January and they say "Oct", they mean last October)
+          if (monthNum > currentMonth + 2) {
+            year = currentYear - 1
+            console.log(`📅 Month "${monthName}" is far in future, using previous year: ${year}`)
+          } else {
+            year = currentYear
+          }
+        }
         
         const startDate = new Date(year, monthNum, 1)
         let endDate = new Date(year, monthNum + 1, 0) // Last day of month
@@ -114,6 +132,28 @@ const CommandInterface = ({
           endDate: endDate.toISOString().split('T')[0],
           isMTD: endDate.getTime() === today.getTime()
         }
+      }
+    }
+    
+    // Last week (Sunday through Saturday)
+    if (lower.includes('last week')) {
+      // Calculate last week's Sunday (7 days ago, then go back to Sunday)
+      const today = new Date(now)
+      const currentDayOfWeek = today.getDay() // 0 = Sunday, 6 = Saturday
+      
+      // Go back to last Sunday: subtract current day + 7 days
+      const lastSunday = new Date(today)
+      lastSunday.setDate(today.getDate() - currentDayOfWeek - 7)
+      lastSunday.setHours(0, 0, 0, 0)
+      
+      // Last Saturday is 6 days after last Sunday
+      const lastSaturday = new Date(lastSunday)
+      lastSaturday.setDate(lastSunday.getDate() + 6)
+      lastSaturday.setHours(23, 59, 59, 999)
+      
+      return {
+        startDate: lastSunday.toISOString().split('T')[0],
+        endDate: lastSaturday.toISOString().split('T')[0]
       }
     }
     
@@ -343,12 +383,32 @@ const CommandInterface = ({
       
       if (!customerName) {
         // Fallback to regex extraction (handles for/from/of)
-        const forMatch = command.match(/(?:revenue|sales)\s+(?:for|from|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i)
+        // Try multiple patterns to handle different phrasings
+        // Pattern 1: "revenue for Oct for Air Culinaire" - extract after the last "for"
+        // Pattern 2: "revenue for Air Culinaire for Oct" - extract before the date
+        // Pattern 3: "revenue for Air Culinaire" - simple case
         
-        if (forMatch && forMatch[1]) {
-          customerName = forMatch[1].trim()
-          // Remove common date-related words that might have been captured
-          customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|20\d{2})\s*$/i, '').trim()
+        const patterns = [
+          // Handle "revenue for [month] for [customer]" - take the last "for" part
+          /(?:revenue|sales)\s+(?:for|from|of)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+(?:for|from|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i,
+          // Handle "revenue for [customer] for [month]" - take before the date
+          /(?:revenue|sales)\s+(?:for|from|of)\s+([a-zA-Z0-9\s]+?)\s+(?:for|from|of)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)/i,
+          // Standard pattern: "revenue for [customer]"
+          /(?:revenue|sales)\s+(?:for|from|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+|\s+from\s+|\s+in\s+|$)/i
+        ]
+        
+        for (const pattern of patterns) {
+          const forMatch = command.match(pattern)
+          if (forMatch && forMatch[1]) {
+            customerName = forMatch[1].trim()
+            // Remove common date-related words that might have been captured
+            customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|20\d{2})\s*$/i, '').trim()
+            // Also remove date patterns like "Oct 2025" if they appear at the end
+            customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+20\d{2}\s*$/i, '').trim()
+            if (customerName.length >= 3 && !/^(oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(customerName)) {
+              break
+            }
+          }
         }
       }
       
@@ -376,10 +436,83 @@ const CommandInterface = ({
       
       if (customerName && customerName.length >= 3 && !/^\d/.test(customerName) && !isMonthName) {
         console.log('✅ Processing revenue by customer query for:', customerName)
-        // Filter orders by customer name (case-insensitive partial match)
-        const customerOrders = relevantOrders.filter(order => 
-          order.customerName?.toLowerCase().includes(customerName.toLowerCase())
-        )
+        
+        // Normalize customer name: trim, normalize spaces, handle common variations
+        const normalizedSearchName = customerName.toLowerCase().trim().replace(/\s+/g, ' ')
+        
+        // Helper function to match customer names with multiple strategies
+        const matchesCustomer = (orderCustomerName) => {
+          if (!orderCustomerName) return false
+          
+          const normalizedOrderName = orderCustomerName.toLowerCase().trim().replace(/\s+/g, ' ')
+          
+          // Strategy 1: Exact match (normalized)
+          if (normalizedOrderName === normalizedSearchName) return true
+          
+          // Strategy 2: Order name contains search name
+          if (normalizedOrderName.includes(normalizedSearchName)) return true
+          
+          // Strategy 3: Search name contains order name (for partial searches)
+          if (normalizedSearchName.includes(normalizedOrderName)) return true
+          
+          // Strategy 4: Word-based matching (handle "Air Culinaire" vs "Air Culinaire Worldwide")
+          const searchWords = normalizedSearchName.split(/\s+/).filter(w => w.length > 2)
+          const orderWords = normalizedOrderName.split(/\s+/).filter(w => w.length > 2)
+          
+          if (searchWords.length > 0) {
+            // Check if all significant words from search are in order name
+            const allWordsMatch = searchWords.every(word => 
+              orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+            )
+            if (allWordsMatch) return true
+          }
+          
+          // Strategy 5: Handle variations like "AirCulinaire" vs "Air Culinaire"
+          const searchNoSpaces = normalizedSearchName.replace(/\s+/g, '')
+          const orderNoSpaces = normalizedOrderName.replace(/\s+/g, '')
+          if (searchNoSpaces === orderNoSpaces) return true
+          if (orderNoSpaces.includes(searchNoSpaces)) return true
+          
+          return false
+        }
+        
+        // Filter orders by customer name using improved matching
+        const customerOrders = relevantOrders.filter(order => matchesCustomer(order.customerName))
+        
+        // Log matching details for debugging
+        console.log('🔍 Customer matching debug:', {
+          searchName: customerName,
+          normalizedSearchName: normalizedSearchName,
+          totalOrdersInRange: relevantOrders.length,
+          matchedOrders: customerOrders.length,
+          sampleOrderDates: relevantOrders.slice(0, 5).map(o => ({ date: o.orderDate, customer: o.customerName }))
+        })
+        
+        if (customerOrders.length === 0 && relevantOrders.length > 0) {
+          const allCustomerNames = [...new Set(relevantOrders.map(o => o.customerName).filter(Boolean))]
+          const sampleCustomerNames = allCustomerNames.slice(0, 10)
+          console.log('🔍 No matches found. All customer names in data:', allCustomerNames)
+          console.log('🔍 Sample customer names:', sampleCustomerNames)
+          console.log('🔍 Searching for:', normalizedSearchName)
+          
+          // Try fuzzy matching to suggest similar names
+          const fuzzyMatches = allCustomerNames.filter(name => {
+            const normalized = name.toLowerCase().trim()
+            return normalized.includes(normalizedSearchName) || 
+                   normalizedSearchName.includes(normalized) ||
+                   normalized.replace(/\s+/g, '').includes(normalizedSearchName.replace(/\s+/g, ''))
+          })
+          
+          if (fuzzyMatches.length > 0) {
+            console.log('🔍 Fuzzy matches found:', fuzzyMatches)
+          }
+        } else {
+          console.log(`✅ Found ${customerOrders.length} orders matching "${customerName}"`)
+          if (customerOrders.length > 0) {
+            const matchedNames = [...new Set(customerOrders.map(o => o.customerName))].slice(0, 5)
+            console.log('🔍 Matched customer names:', matchedNames)
+          }
+        }
         
         const acceptedOrders = customerOrders.filter(order => 
           !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
@@ -390,9 +523,42 @@ const CommandInterface = ({
         )
         
         if (customerOrders.length === 0) {
-          response.content = `No orders found for customer "${customerName}"`
-          if (dateRange) {
-            response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
+          // Provide more helpful error message
+          if (relevantOrders.length === 0) {
+            // No orders at all for this date range
+            response.content = `No orders found for customer "${customerName}"`
+            if (dateRange) {
+              response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}.\n\nThis could mean:\n• No orders exist for this date range\n• The date range may be invalid (too far in the future)\n• Orders haven't been loaded yet`
+            }
+          } else {
+            // Orders exist but customer name doesn't match
+            const allCustomerNames = [...new Set(relevantOrders.map(o => o.customerName).filter(Boolean))]
+            const sampleCustomers = allCustomerNames.slice(0, 10)
+            
+            // Try fuzzy matching to suggest similar names
+            const fuzzyMatches = allCustomerNames.filter(name => {
+              const normalized = name.toLowerCase().trim()
+              const searchNormalized = normalizedSearchName
+              return normalized.includes(searchNormalized) || 
+                     searchNormalized.includes(normalized) ||
+                     normalized.replace(/\s+/g, '').includes(searchNormalized.replace(/\s+/g, '')) ||
+                     searchNormalized.replace(/\s+/g, '').includes(normalized.replace(/\s+/g, ''))
+            })
+            
+            response.content = `No orders found for customer "${customerName}"`
+            if (dateRange) {
+              response.content += ` from ${dateRange.startDate} to ${dateRange.endDate}`
+            }
+            response.content += `.\n\nFound ${relevantOrders.length} orders in this date range, but none match "${customerName}".`
+            
+            if (fuzzyMatches.length > 0) {
+              response.content += `\n\nDid you mean one of these?\n${fuzzyMatches.map((name, idx) => `  ${idx + 1}. ${name}`).join('\n')}`
+            } else if (sampleCustomers.length > 0) {
+              response.content += `\n\nCustomer names found in this period:\n${sampleCustomers.map((name, idx) => `  ${idx + 1}. ${name}`).join('\n')}`
+              if (allCustomerNames.length > 10) {
+                response.content += `\n\n... and ${allCustomerNames.length - 10} more`
+              }
+            }
           }
         } else {
           const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
@@ -661,14 +827,15 @@ const CommandInterface = ({
         !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       
-      // Group tax by state
+      // Group tax by state (including service charge tax)
       const taxByState = {}
       acceptedOrders.forEach(order => {
         const state = order.shipToState || 'Unknown'
         if (!taxByState[state]) {
           taxByState[state] = { tax: 0, count: 0 }
         }
-        taxByState[state].tax += parseFloat(order.tax) || 0
+        const orderTax = (parseFloat(order.tax) || 0) + (parseFloat(order.serviceChargeTax) || 0)
+        taxByState[state].tax += orderTax
         taxByState[state].count += 1
       })
       
@@ -677,7 +844,8 @@ const CommandInterface = ({
         .sort((a, b) => b[1].tax - a[1].tax)
         .slice(0, 10) // Top 10 states
       
-      const totalTax = acceptedOrders.reduce((sum, order) => sum + (parseFloat(order.tax) || 0), 0)
+      const totalTax = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.tax) || 0) + (parseFloat(order.serviceChargeTax) || 0), 0)
       
       if (sortedStates.length === 0) {
         response.content = 'No tax data available for the selected period'
@@ -780,8 +948,34 @@ const CommandInterface = ({
         orderType: 'Pending'
       }
     }
+    // Not delivered orders (accepted or pending status)
+    else if ((gptParsedData?.intent === 'not_delivered_orders') || 
+             (!gptParsedData && (
+               (lower.includes('not') && lower.includes('delivered')) ||
+               (lower.includes('haven\'t') && lower.includes('delivered')) ||
+               (lower.includes('have not') && lower.includes('delivered')) ||
+               lower.includes('undelivered')
+             ))) {
+      // Filter for orders with status "accepted" or "pending" (not delivered)
+      const notDeliveredOrders = relevantOrders.filter(order => {
+        const status = order.status?.toLowerCase()
+        return status === 'accepted' || status === 'pending'
+      })
+      
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      response.content = dateRange
+        ? `Found ${formatNumber(notDeliveredOrders.length)} orders that have not been delivered (Accepted or Pending status) from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
+        : `Found ${formatNumber(notDeliveredOrders.length)} orders that have not been delivered (Accepted or Pending status)`
+      
+      response.data = {
+        type: 'orders',
+        orders: notDeliveredOrders,
+        total: notDeliveredOrders.length,
+        orderType: 'Not Delivered'
+      }
+    }
     // Delivered orders
-    else if ((gptParsedData?.intent === 'delivered_orders') || (!gptParsedData && lower.includes('delivered'))) {
+    else if ((gptParsedData?.intent === 'delivered_orders') || (!gptParsedData && lower.includes('delivered') && !lower.includes('not') && !lower.includes('haven\'t') && !lower.includes('have not'))) {
       const deliveredOrders = relevantOrders.filter(order => 
         order.status?.toLowerCase() === 'delivered'
       )
@@ -894,33 +1088,80 @@ const CommandInterface = ({
       }
     }
     // Total orders
-    else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders')))) {
+    else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders') || (lower.includes('show') && lower.includes('orders'))))) {
       const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      
+      // Extract customer name if present (from GPT or regex fallback)
+      let customerName = gptParsedData?.customer || ''
+      
+      if (!customerName) {
+        // Fallback regex extraction for "orders from [customer]" or "orders for [customer]"
+        // Try multiple patterns to catch different phrasings
+        // Pattern 1: "show me all the orders from Vistajet for Oct 2025"
+        // Pattern 2: "orders from Vistajet for Oct 2025"
+        // Pattern 3: "orders for Vistajet"
+        const patterns = [
+          /(?:show\s+me\s+all\s+)?(?:the\s+)?orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+from\s+|\s+in\s+|\s+during\s+|$)/i,
+          /orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+from\s+|\s+in\s+|\s+during\s+|$)/i
+        ]
+        
+        for (const pattern of patterns) {
+          const match = command.match(pattern)
+          if (match && match[1]) {
+            customerName = match[1].trim()
+            // Remove common date-related words and phrases that might have been captured
+            customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|in|during|on|this|month|2025|2024|2023|2026)\s*$/i, '').trim()
+            // Also remove date patterns like "Oct 2025" if they appear at the end
+            customerName = customerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+20\d{2}\s*$/i, '').trim()
+            if (customerName.length >= 3) {
+              break
+            }
+          }
+        }
+      }
+      
+      console.log('💼 Customer name for orders query:', customerName, '| Source:', gptParsedData?.customer ? 'GPT' : 'Regex')
+      
+      // Filter by customer if specified
+      let ordersToShow = relevantOrders
+      if (customerName && customerName.length >= 3) {
+        ordersToShow = relevantOrders.filter(order => 
+          order.customerName?.toLowerCase().includes(customerName.toLowerCase())
+        )
+        console.log(`🔍 Filtered to ${ordersToShow.length} orders for customer "${customerName}"`)
+      }
       
       // Check if user wants to SEE the orders (show, list, display) or just get a count
       const wantsToSeeOrders = lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see')
       
-      if (wantsToSeeOrders && relevantOrders.length > 0) {
+      if (wantsToSeeOrders && ordersToShow.length > 0) {
         // Show the actual orders
-        response.content = dateRange
-          ? `Found ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
-          : `Found ${formatNumber(relevantOrders.length)} orders`
+        const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+        const customerInfo = customerName ? ` for ${customerName}` : ''
+        response.content = `Found ${formatNumber(ordersToShow.length)} orders${customerInfo}${dateInfo}`
         
         response.data = {
           type: 'orders',
-          orders: relevantOrders,
-          total: relevantOrders.length,
-          orderType: 'All Orders'
+          orders: ordersToShow,
+          total: ordersToShow.length,
+          orderType: customerName ? `Orders for ${customerName}` : 'All Orders',
+          customerName: customerName || undefined
         }
+      } else if (ordersToShow.length === 0) {
+        // No orders found
+        const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}` : ''
+        const customerInfo = customerName ? ` for customer "${customerName}"` : ''
+        response.content = `No orders found${customerInfo}${dateInfo}`
+        response.data = null
       } else {
         // Just show count
-        response.content = dateRange
-          ? `There are ${formatNumber(relevantOrders.length)} orders from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}`
-          : `There are ${formatNumber(relevantOrders.length)} total orders`
+        const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+        const customerInfo = customerName ? ` for ${customerName}` : ''
+        response.content = `There are ${formatNumber(ordersToShow.length)} orders${customerInfo}${dateInfo}`
         
         response.data = {
           type: 'count',
-          count: relevantOrders.length
+          count: ordersToShow.length
         }
       }
     }
@@ -1041,9 +1282,46 @@ const CommandInterface = ({
         console.log('✅ GPT parsing successful:', parseData.parsed)
         
         if (parseData.parsed.startDate && parseData.parsed.endDate) {
+          // Validate and correct date range if needed
+          let correctedStartDate = parseData.parsed.startDate
+          let correctedEndDate = parseData.parsed.endDate
+          
+          const today = new Date()
+          today.setHours(23, 59, 59, 999)
+          const maxFutureDate = new Date()
+          maxFutureDate.setDate(maxFutureDate.getDate() + 7) // Allow up to 7 days in the future
+          
+          const start = new Date(correctedStartDate)
+          const end = new Date(correctedEndDate)
+          
+          // If dates are too far in the future and no explicit year was mentioned in the query,
+          // try to correct to previous year (smart default for months without year)
+          const hasExplicitYear = /\b(20\d{2})\b/.test(userInput)
+          if (!hasExplicitYear && (start > maxFutureDate || end > maxFutureDate)) {
+            // Extract month from the date
+            const startMonth = start.getMonth()
+            const startYear = start.getFullYear()
+            const currentMonth = today.getMonth()
+            const currentYear = today.getFullYear()
+            
+            // If the month is more than 2 months in the future, use previous year
+            if (startMonth > currentMonth + 2) {
+              const correctedYear = startYear - 1
+              const correctedStart = new Date(correctedYear, startMonth, 1)
+              const correctedEnd = new Date(correctedYear, startMonth + 1, 0) // Last day of month
+              
+              // Only apply correction if the corrected date is not in the future
+              if (correctedEnd <= today) {
+                correctedStartDate = correctedStart.toISOString().split('T')[0]
+                correctedEndDate = correctedEnd.toISOString().split('T')[0]
+                console.log(`📅 Corrected future date from ${parseData.parsed.startDate} to ${correctedStartDate} (using previous year)`)
+              }
+            }
+          }
+          
           dateRange = {
-            startDate: parseData.parsed.startDate,
-            endDate: parseData.parsed.endDate,
+            startDate: correctedStartDate,
+            endDate: correctedEndDate,
             isMTD: parseData.parsed.isMTD || false
           }
         }
@@ -1236,6 +1514,29 @@ const CommandInterface = ({
     // 2. AND it's NOT a query with specific filters (those use existing data)
     if (dateRange && onDateRangeChange && onFetchOrders && !hasSpecificFilter) {
       console.log('🔍 Date range detected, fetching data:', dateRange)
+      
+      // Validate date range - check if dates are too far in the future
+      // IMPORTANT: Allow ALL past dates - only restrict future dates
+      const today = new Date()
+      today.setHours(23, 59, 59, 999)
+      const maxFutureDate = new Date()
+      maxFutureDate.setDate(maxFutureDate.getDate() + 7) // Allow up to 7 days in the future
+      
+      const start = new Date(dateRange.startDate + 'T00:00:00') // Parse as local midnight
+      const end = new Date(dateRange.endDate + 'T23:59:59') // Parse as end of day
+      
+      // Only block if dates are in the FUTURE and more than 7 days ahead
+      // Past dates should always be allowed
+      if ((start > today && start > maxFutureDate) || (end > today && end > maxFutureDate)) {
+        const todayStr = today.toISOString().split('T')[0]
+        const maxFutureStr = maxFutureDate.toISOString().split('T')[0]
+        const errorMessage = {
+          type: 'assistant',
+          content: `❌ Invalid date range: Cannot fetch orders for dates more than 7 days in the future.\n\nRequested: ${dateRange.startDate} to ${dateRange.endDate}\nToday: ${todayStr}\nMaximum allowed future date: ${maxFutureStr}\n\nPlease select dates within the next week.`
+        }
+        setMessages(prev => [...prev, errorMessage])
+        return // Exit early - don't fetch
+      }
       
       // Check if we need state-enriched data
       if (needsStateData) {

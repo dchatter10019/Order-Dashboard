@@ -686,45 +686,46 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   return (
-    <div className="bg-gray-50">
+    <div className="bg-gray-50 pb-20 sm:pb-16">
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Auto-Refresh Control */}
-        <div className="mb-6 flex justify-end">
+        <div className="mb-4 sm:mb-6 flex justify-end">
           <button
             onClick={toggleAutoRefresh}
-            className={`flex items-center px-4 py-2 rounded-lg transition-colors ${
+            className={`flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition-colors text-xs sm:text-sm ${
               autoRefresh 
                 ? 'bg-green-600 text-white hover:bg-green-700' 
                 : 'bg-gray-600 text-white hover:bg-gray-700'
             }`}
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
-            {autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}
+            <RefreshCw className={`h-3 w-3 sm:h-4 sm:w-4 sm:mr-2 ${autoRefresh ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{autoRefresh ? 'Auto-Refresh ON' : 'Auto-Refresh OFF'}</span>
+            <span className="sm:hidden">{autoRefresh ? 'ON' : 'OFF'}</span>
           </button>
         </div>
 
         {/* AI Assistant Promotion Banner */}
         {onSwitchToAI && (
-          <div className="mb-6 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+          <div className="mb-4 sm:mb-6 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
             <button
               onClick={onSwitchToAI}
-              className="w-full px-6 py-4 flex items-center justify-between text-left group"
+              className="w-full px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between text-left group"
             >
-              <div className="flex items-center">
-                <div className="bg-white bg-opacity-20 rounded-full p-3 mr-4 group-hover:bg-opacity-30 transition-all">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-center min-w-0 flex-1">
+                <div className="bg-white bg-opacity-20 rounded-full p-2 sm:p-3 mr-2 sm:mr-4 group-hover:bg-opacity-30 transition-all flex-shrink-0">
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
-                <div>
-                  <h3 className="text-white font-bold text-lg">✨ Try Our AI Assistant!</h3>
-                  <p className="text-purple-100 text-sm mt-1">Ask questions like "What's the revenue for October?" or "Find all delayed orders"</p>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-white font-bold text-sm sm:text-lg">✨ Try Our AI Assistant!</h3>
+                  <p className="text-purple-100 text-xs sm:text-sm mt-1 hidden sm:block">Ask questions like "What's the revenue for October?" or "Find all delayed orders"</p>
                 </div>
               </div>
-              <div className="flex items-center">
-                <span className="text-white font-semibold mr-2">Try It Now</span>
-                <svg className="w-5 h-5 text-white group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-center flex-shrink-0 ml-2">
+                <span className="text-white font-semibold text-xs sm:text-sm mr-1 sm:mr-2 hidden sm:inline">Try It Now</span>
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-white group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
@@ -733,13 +734,13 @@ const Dashboard = ({ onSwitchToAI }) => {
         )}
         
         {/* Date Range and Filters */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
           {/* Date Range Filter */}
-          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.dateRange ? 'p-4' : 'p-6'}`}>
-            <div className="flex items-center justify-between mb-4">
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.dateRange ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
               <div className="flex items-center">
-                <Calendar className="h-5 w-5 text-blue-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Date Range</h3>
+                <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-1.5 sm:mr-2" />
+                <h3 className="text-sm sm:text-lg font-medium text-gray-900">Date Range</h3>
               </div>
               <button
                 onClick={() => toggleFilter('dateRange')}
@@ -763,11 +764,11 @@ const Dashboard = ({ onSwitchToAI }) => {
           </div>
 
           {/* Status Filter */}
-          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.statusFilter ? 'p-4' : 'p-6'}`}>
-            <div className="flex items-center justify-between mb-4">
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.statusFilter ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
               <div className="flex items-center">
-                <Filter className="h-5 w-5 text-green-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Status Filter</h3>
+                <Filter className="h-4 w-4 sm:h-5 sm:w-5 text-green-600 mr-1.5 sm:mr-2" />
+                <h3 className="text-sm sm:text-lg font-medium text-gray-900">Status Filter</h3>
               </div>
               <button
                 onClick={() => toggleFilter('statusFilter')}
@@ -790,11 +791,11 @@ const Dashboard = ({ onSwitchToAI }) => {
           </div>
 
           {/* Delivery Filter */}
-          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.deliveryFilter ? 'p-4' : 'p-6'}`}>
-            <div className="flex items-center justify-between mb-4">
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.deliveryFilter ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
               <div className="flex items-center">
-                <Clock className="h-5 w-5 text-purple-600 mr-2" />
-                <h3 className="text-lg font-medium text-gray-900">Delivery Filter</h3>
+                <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600 mr-1.5 sm:mr-2" />
+                <h3 className="text-sm sm:text-lg font-medium text-gray-900">Delivery Filter</h3>
               </div>
               <button
                 onClick={() => toggleFilter('deliveryFilter')}
@@ -877,17 +878,17 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* Summary Tiles - Hidden during loading */}
         {!isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
           {/* Total Orders Tile */}
-          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-4' : 'p-6'}`}>
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
             <div className="flex items-center justify-between">
-            <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <Calendar className="h-6 w-6 text-blue-600" />
+            <div className="flex items-center min-w-0 flex-1">
+                <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg flex-shrink-0">
+                  <Calendar className="h-4 w-4 sm:h-6 sm:w-6 text-blue-600" />
               </div>
-              <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatNumber(filteredTotalOrders)}</p>
+              <div className="ml-2 sm:ml-4 min-w-0 flex-1">
+                  <p className="text-xs sm:text-sm font-medium text-gray-600">Total Orders</p>
+                  <p className="text-xl sm:text-2xl font-bold text-gray-900">{formatNumber(filteredTotalOrders)}</p>
                 </div>
               </div>
               <button
@@ -924,19 +925,19 @@ const Dashboard = ({ onSwitchToAI }) => {
         </div>
 
           {/* Total Revenue Tile */}
-          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalRevenue ? 'p-4' : 'p-6'}`}>
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalRevenue ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center">
+              <div className="flex items-center min-w-0 flex-1">
               <div className="flex-shrink-0">
-                  <div className="w-8 h-8 bg-green-100 rounded-md flex items-center justify-center">
-                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-6 h-6 sm:w-8 sm:h-8 bg-green-100 rounded-md flex items-center justify-center">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
                   </svg>
                 </div>
               </div>
-              <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
-                  <dd className="text-lg font-medium text-gray-900">{formatDollarAmount(filteredTotalRevenue)}</dd>
+              <div className="ml-2 sm:ml-4 min-w-0 flex-1">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
+                  <dd className="text-lg sm:text-xl font-medium text-gray-900">{formatDollarAmount(filteredTotalRevenue)}</dd>
                 </div>
               </div>
                   <button
@@ -977,19 +978,19 @@ const Dashboard = ({ onSwitchToAI }) => {
           </div>
 
           {/* Average Order Value Tile */}
-          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.averageOrderValue ? 'p-4' : 'p-6'}`}>
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.averageOrderValue ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
             <div className="flex items-center justify-between">
-            <div className="flex items-center">
+            <div className="flex items-center min-w-0 flex-1">
                 <div className="flex-shrink-0">
-                  <div className="w-8 h-8 bg-purple-100 rounded-md flex items-center justify-center">
-                    <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="w-6 h-6 sm:w-8 sm:h-8 bg-purple-100 rounded-md flex items-center justify-center">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                     </svg>
                   </div>
                 </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-500">Average Order Value (Excluding Pending/Cancelled/Rejected)</p>
-                  <dd className="text-lg font-medium text-gray-900">{formatDollarAmount(filteredAverageOrderValue)}</dd>
+                <div className="ml-2 sm:ml-4 min-w-0 flex-1">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Average Order Value (Excluding Pending/Cancelled/Rejected)</p>
+                  <dd className="text-lg sm:text-xl font-medium text-gray-900">{formatDollarAmount(filteredAverageOrderValue)}</dd>
                 </div>
               </div>
               <button
@@ -1032,19 +1033,19 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* Search Bar - Hidden during loading */}
         {!isLoading && (
-        <div className="mb-6">
+        <div className="mb-4 sm:mb-6">
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
             </div>
             <input
               type="text"
-                              placeholder="Search by Order ID, Customer Name, Order Number, or 'Delayed'..."
+              placeholder="Search orders..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-bevvi-500 focus:border-bevvi-500 sm:text-sm"
+              className="block w-full pl-9 sm:pl-10 pr-3 py-2 text-sm border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-bevvi-500 focus:border-bevvi-500"
             />
             {searchTerm && (
               <button
@@ -1066,10 +1067,10 @@ const Dashboard = ({ onSwitchToAI }) => {
         )}
 
         {!isLoading && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Orders Dashboard</h2>
-            <div className="text-sm text-gray-600">
+        <div className="bg-white rounded-lg shadow p-3 sm:p-4 lg:p-6">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 sm:mb-4 gap-2">
+            <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Orders Dashboard</h2>
+            <div className="text-xs sm:text-sm text-gray-600">
               Showing {formatNumber(filteredOrdersByStatusAndDelivery.length)} of {formatNumber(totalOrders)} orders
             </div>
           </div>
@@ -1087,8 +1088,10 @@ const Dashboard = ({ onSwitchToAI }) => {
           {!isLoading && !apiError && (
             <div>
               {filteredOrdersByStatusAndDelivery.length > 0 ? (
-            <div className="overflow-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg max-w-full max-h-96">
-              <table className="w-full table-auto divide-y divide-gray-200 min-w-0">
+                <>
+                  {/* Desktop Table View - Hidden on mobile */}
+                  <div className="hidden md:block overflow-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg max-w-full max-h-96">
+                    <table className="w-full table-auto divide-y divide-gray-200 min-w-0">
                     <thead className="bg-gray-50">
                   <tr>
                     <th 
@@ -1219,12 +1222,26 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={order.orderDate}>
-                              {order.orderDate}
+                            <div className="truncate" title={`Raw: orderDate="${order.orderDate}", orderDateTime="${order.orderDateTime || 'null'}"`}>
+                              {order.orderDate ? (() => {
+                                // If we have orderDateTime, use it to get local date
+                                if (order.orderDateTime) {
+                                  try {
+                                    const date = new Date(order.orderDateTime)
+                                    // Convert to local date string
+                                    return date.getFullYear() + '-' + 
+                                           String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                                           String(date.getDate()).padStart(2, '0')
+                                  } catch (e) {
+                                    return order.orderDate
+                                  }
+                                }
+                                return order.orderDate
+                              })() : 'N/A'}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={order.deliveryDate}>
+                            <div className="truncate" title={`Raw: deliveryDate="${order.deliveryDate}", deliveryDateTime="${order.deliveryDateTime || 'null'}"`}>
                               {(() => {
                                 // Convert UTC delivery date to local date for display
                                 if (order.deliveryDate === 'N/A') return 'N/A'
@@ -1240,7 +1257,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={order.deliveryDateTime ? new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : 'N/A'}>
+                            <div className="truncate" title={`Raw deliveryDateTime: "${order.deliveryDateTime || 'null'}"`}>
                               {order.deliveryDateTime ? 
                                 new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
                                   hour: 'numeric', 
@@ -1289,7 +1306,134 @@ const Dashboard = ({ onSwitchToAI }) => {
                   ))}
                 </tbody>
               </table>
-                </div>
+                    </div>
+
+                  {/* Mobile Card View - Hidden on desktop */}
+                  <div className="md:hidden space-y-3">
+                    {sortedOrders.map((order) => {
+                      const deliveryDateDisplay = (() => {
+                        if (order.deliveryDate === 'N/A') return 'N/A'
+                        if (order.deliveryDateTime) {
+                          const utcDate = new Date(order.deliveryDateTime)
+                          return utcDate.getFullYear() + '-' + 
+                                 String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                 String(utcDate.getDate()).padStart(2, '0')
+                        }
+                        return order.deliveryDate
+                      })()
+                      
+                      const deliveryTimeDisplay = order.deliveryDateTime ? 
+                        new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
+                          hour: 'numeric', 
+                          minute: '2-digit',
+                          hour12: true 
+                        }) : 'N/A'
+
+                      return (
+                        <div 
+                          key={order.id} 
+                          className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
+                          onClick={() => {
+                            setSelectedOrder(order)
+                            setIsModalOpen(true)
+                            const orderNumber = order.ordernum || order.id
+                            if (orderNumber) {
+                              fetchOrderDetails(orderNumber)
+                            }
+                          }}
+                        >
+                          {/* Header Row */}
+                          <div className="flex items-start justify-between mb-3 pb-3 border-b border-gray-100">
+                            <div className="flex-1 min-w-0">
+                              <button
+                                className="text-blue-600 hover:text-blue-800 font-semibold text-base mb-1 block truncate w-full text-left"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedOrder(order)
+                                  setIsModalOpen(true)
+                                  const orderNumber = order.ordernum || order.id
+                                  if (orderNumber) {
+                                    fetchOrderDetails(orderNumber)
+                                  }
+                                }}
+                              >
+                                {order.ordernum || order.id}
+                              </button>
+                              <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
+                            </div>
+                            <div className="ml-2 flex-shrink-0">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                order.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                                order.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
+                                order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
+                                order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
+                                order.status === 'canceled' ? 'bg-red-100 text-red-800' :
+                                order.status === 'rejected' ? 'bg-red-100 text-red-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Info Grid */}
+                          <div className="grid grid-cols-2 gap-3 mb-3">
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Order Date</p>
+                              <p className="text-sm font-medium text-gray-900">
+                                {order.orderDate ? (() => {
+                                  // If we have orderDateTime, use it to get local date
+                                  if (order.orderDateTime) {
+                                    try {
+                                      const date = new Date(order.orderDateTime)
+                                      // Convert to local date string
+                                      return date.getFullYear() + '-' + 
+                                             String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+                                             String(date.getDate()).padStart(2, '0')
+                                    } catch (e) {
+                                      return order.orderDate
+                                    }
+                                  }
+                                  return order.orderDate
+                                })() : 'N/A'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Delivery Date</p>
+                              <p className="text-sm font-medium text-gray-900">{deliveryDateDisplay}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Delivery Time</p>
+                              <p className="text-sm font-medium text-gray-900">{deliveryTimeDisplay}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Total</p>
+                              <p className="text-sm font-semibold text-gray-900">{formatDollarAmount(order.revenue)}</p>
+                            </div>
+                          </div>
+
+                          {/* Badges Row */}
+                          <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
+                            </span>
+                            {order.deliveryStatus && (
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                                order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
+                                order.deliveryStatus === 'On Time' ? 'bg-green-100 text-green-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {order.deliveryStatus}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
               ) : (
                 <p className="text-gray-500 text-center py-8">
                   {totalOrders > 0 ? 'No orders match the current filters.' : 'No orders found for the selected date range.'}
@@ -1299,11 +1443,11 @@ const Dashboard = ({ onSwitchToAI }) => {
           )}
 
           {/* Refresh Button */}
-          <div className="mt-6">
+          <div className="mt-4 sm:mt-6">
             <button
               onClick={fetchOrders}
               disabled={isLoading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Refreshing...' : 'Refresh Orders'}
             </button>
@@ -1313,43 +1457,72 @@ const Dashboard = ({ onSwitchToAI }) => {
       </div>
 
       {/* Status Band */}
-      <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-3 px-4 border-t border-gray-700">
-        <div className="max-w-7xl mx-auto flex justify-between items-center text-sm">
-          <div className="flex items-center space-x-6">
-            <div className="flex items-center space-x-2">
-              <div className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
-              <span className="text-gray-300">
-                Auto-refresh: {autoRefresh ? 'Active (20 min)' : 'Inactive'}
-              </span>
+      <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-gray-700 z-40">
+        <div className="max-w-7xl mx-auto">
+          {/* Mobile Layout */}
+          <div className="md:hidden space-y-1.5 text-xs">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
+                <span className="text-gray-300">
+                  {autoRefresh ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
+                </span>
+              </div>
+              <div className="text-gray-300">
+                {formatNumber(orders.length)} orders
+              </div>
             </div>
             {lastRefreshTime && !isLoading && (
-              <div className="text-gray-300">
-                Last refresh: {lastRefreshTime.toLocaleTimeString()}
+              <div className="text-gray-400 text-xs">
+                Last: {lastRefreshTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
               </div>
             )}
             {isLoading && (
-              <div className="flex items-center text-yellow-300">
-                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-yellow-300 mr-2"></div>
+              <div className="flex items-center text-yellow-300 text-xs">
+                <div className="animate-spin rounded-full h-2 w-2 border-b-2 border-yellow-300 mr-1.5"></div>
                 Fetching data...
               </div>
             )}
           </div>
-          <div className="flex items-center space-x-6">
-            {nextRefreshTime && autoRefresh && !isLoading && (
-              <div className="text-gray-300">
-                Next refresh: {nextRefreshTime.toLocaleTimeString()}
+          
+          {/* Desktop Layout */}
+          <div className="hidden md:flex justify-between items-center text-sm">
+            <div className="flex items-center space-x-6">
+              <div className="flex items-center space-x-2">
+                <div className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
+                <span className="text-gray-300">
+                  Auto-refresh: {autoRefresh ? 'Active (20 min)' : 'Inactive'}
+                </span>
               </div>
-            )}
-            <div className="text-gray-300">
-              {isLoading ? (
-                'Loading...'
-              ) : (
-                <>
-                  Orders: {formatNumber(orders.length)} | 
-                  Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                  v2.0.1
-                </>
+              {lastRefreshTime && !isLoading && (
+                <div className="text-gray-300">
+                  Last refresh: {lastRefreshTime.toLocaleTimeString()}
+                </div>
               )}
+              {isLoading && (
+                <div className="flex items-center text-yellow-300">
+                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-yellow-300 mr-2"></div>
+                  Fetching data...
+                </div>
+              )}
+            </div>
+            <div className="flex items-center space-x-6">
+              {nextRefreshTime && autoRefresh && !isLoading && (
+                <div className="text-gray-300">
+                  Next refresh: {nextRefreshTime.toLocaleTimeString()}
+                </div>
+              )}
+              <div className="text-gray-300">
+                {isLoading ? (
+                  'Loading...'
+                ) : (
+                  <>
+                    Orders: {formatNumber(orders.length)} | 
+                    Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
+                    v2.0.1
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -64,6 +64,19 @@ function parseCSVToOrders(csvData, orderDate) {
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''))
     console.log('CSV Headers:', headers)
     console.log('Number of headers:', headers.length)
+    // Log first data row to see actual values
+    if (lines.length > 1) {
+      const firstDataRow = parseCSVLine(lines[1])
+      console.log('First data row sample:', firstDataRow.slice(0, 10))
+      // Create a map of header to value for easier debugging
+      const headerValueMap = {}
+      headers.forEach((header, index) => {
+        if (index < firstDataRow.length) {
+          headerValueMap[header] = firstDataRow[index]
+        }
+      })
+      console.log('Header to value map (first order):', JSON.stringify(headerValueMap, null, 2))
+    }
     
     // Parse data rows
     const orders = []
@@ -300,6 +313,56 @@ function createOrderFromCSV(headers, values, orderDate) {
       shippingZip: ''
     }
     
+    // First pass: Look for ORDER datetime fields in ALL headers (before switch statement)
+    // IMPORTANT: Skip delivery-related fields - they'll be handled separately
+    headers.forEach((header, index) => {
+      const value = values[index] || ''
+      const lowerHeader = header.toLowerCase().trim()
+      
+      // Skip delivery-related fields - they should not be used for orderDateTime
+      const isDeliveryField = lowerHeader.includes('delivery') && !lowerHeader.includes('order')
+      
+      // Check if this field contains datetime information (even if not in our switch cases)
+      // Only process if it's NOT a delivery field and we don't already have orderDateTime
+      if (value && value.trim() && value !== 'null' && value !== 'undefined' && !order.orderDateTime && !isDeliveryField) {
+        // Check if value looks like a datetime
+        const looksLikeDateTime = value.includes('T') || 
+                                 (value.includes(' ') && value.match(/\d{1,2}:\d{2}/)) ||
+                                 value.match(/\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{2}/) ||
+                                 value.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/) ||
+                                 value.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)
+        
+        if (looksLikeDateTime) {
+          try {
+            const parsedDateTime = new Date(value)
+            if (!isNaN(parsedDateTime.getTime())) {
+              // Check if it has actual time (not just midnight)
+              const hasTime = parsedDateTime.getHours() !== 0 || parsedDateTime.getMinutes() !== 0 || parsedDateTime.getSeconds() !== 0
+              if (hasTime) {
+                // Ensure datetime is stored with UTC timezone indicator
+                let datetimeValue = value
+                if (!datetimeValue.includes('Z') && !datetimeValue.match(/[+-]\d{2}:\d{2}$/)) {
+                  if (datetimeValue.includes('T')) {
+                    datetimeValue = datetimeValue.replace(/\.\d{3}$/, '') + 'Z'
+                  } else if (datetimeValue.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                    datetimeValue = datetimeValue.replace(' ', 'T') + 'Z'
+                  }
+                }
+                
+                order.orderDateTime = datetimeValue
+                order.orderDate = parsedDateTime.getFullYear() + '-' + 
+                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                 String(parsedDateTime.getDate()).padStart(2, '0')
+                console.log(`✅ Found ORDER datetime in field "${header}"="${value}" -> "${datetimeValue}" for order ${order.id}`)
+              }
+            }
+          } catch (e) {
+            // Ignore parsing errors, continue to switch statement
+          }
+        }
+      }
+    })
+    
     // Map fields based on Bevvi CSV structure
     headers.forEach((header, index) => {
       const value = values[index] || ''
@@ -376,37 +439,163 @@ function createOrderFromCSV(headers, values, orderDate) {
           order.establishment = value || 'Unknown Establishment'
           break
         case 'date':
+        case 'orderdate':
+        case 'order_date':
           // Use the date from CSV if available - this is the ORDER date, not delivery date
           if (value) {
             try {
-              // Handle date format like "8/23/2025" by parsing it manually
-              const dateParts = value.split('/')
-              if (dateParts.length === 3) {
-                const month = parseInt(dateParts[0]) - 1 // Month is 0-indexed
-                const day = parseInt(dateParts[1])
-                const year = parseInt(dateParts[2])
-                const parsedDate = new Date(year, month, day)
-                if (!isNaN(parsedDate.getTime())) {
-                  // Use local date instead of UTC to avoid timezone issues
-                  order.orderDate = parsedDate.getFullYear() + '-' + 
-                                   String(parsedDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                   String(parsedDate.getDate()).padStart(2, '0')
-                  console.log(`Parsed date "${value}" to "${order.orderDate}" for order ${order.id}`)
+              // Check if value contains time information (datetime format)
+              const hasTime = value.includes('T') || value.includes(' ') || value.match(/\d{1,2}:\d{2}/)
+              
+              if (hasTime) {
+                // Parse as datetime and store both date and datetime
+                const parsedDateTime = new Date(value)
+                if (!isNaN(parsedDateTime.getTime())) {
+                  // Ensure datetime is stored with UTC timezone indicator
+                  let datetimeValue = value
+                  // If value doesn't have timezone, assume it's UTC and add Z
+                  if (!datetimeValue.includes('Z') && !datetimeValue.match(/[+-]\d{2}:\d{2}$/)) {
+                    if (datetimeValue.includes('T')) {
+                      datetimeValue = datetimeValue.replace(/\.\d{3}$/, '') + 'Z'
+                    } else if (datetimeValue.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                      datetimeValue = datetimeValue.replace(' ', 'T') + 'Z'
+                    }
+                  }
+                  
+                  // Store full datetime with UTC indicator
+                  order.orderDateTime = datetimeValue
+                  // Extract local date part (using UTC date)
+                  order.orderDate = parsedDateTime.getFullYear() + '-' + 
+                                   String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(parsedDateTime.getDate()).padStart(2, '0')
+                  console.log(`✅ Parsed datetime "${value}" -> "${datetimeValue}" to date "${order.orderDate}" for order ${order.id}`)
                 }
               } else {
-                // Fallback to original parsing for other formats
-                const parsedDate = new Date(value)
-                if (!isNaN(parsedDate.getTime())) {
-                  // Use local date instead of UTC to avoid timezone issues
-                  order.orderDate = parsedDate.getFullYear() + '-' + 
-                                   String(parsedDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                   String(parsedDate.getDate()).padStart(2, '0')
-                  console.log(`Fallback parsed date "${value}" to "${order.orderDate}" for order ${order.id}`)
+                  // Handle date format like "8/23/2025" by parsing it manually
+                  const dateParts = value.split('/')
+                  if (dateParts.length === 3) {
+                    const month = parseInt(dateParts[0]) - 1 // Month is 0-indexed
+                    const day = parseInt(dateParts[1])
+                    const year = parseInt(dateParts[2])
+                    const parsedDate = new Date(year, month, day)
+                    if (!isNaN(parsedDate.getTime())) {
+                      // Use local date instead of UTC to avoid timezone issues
+                      order.orderDate = parsedDate.getFullYear() + '-' + 
+                                       String(parsedDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                       String(parsedDate.getDate()).padStart(2, '0')
+                      // Don't set orderDateTime here - wait to see if there's a time field
+                      console.log(`Parsed date-only "${value}" to "${order.orderDate}" for order ${order.id} (will check for time field)`)
+                    }
+                  } else {
+                    // Fallback to original parsing for other formats
+                    const parsedDate = new Date(value)
+                    if (!isNaN(parsedDate.getTime())) {
+                      // Check if the parsed date actually has time component (not just midnight)
+                      const hasTimeComponent = parsedDate.getHours() !== 0 || parsedDate.getMinutes() !== 0 || parsedDate.getSeconds() !== 0
+                      
+                      // Use local date instead of UTC to avoid timezone issues
+                      order.orderDate = parsedDate.getFullYear() + '-' + 
+                                       String(parsedDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                       String(parsedDate.getDate()).padStart(2, '0')
+                      
+                      if (hasTimeComponent) {
+                        // Has time, store as datetime
+                        order.orderDateTime = value
+                        console.log(`Parsed datetime "${value}" to date "${order.orderDate}" and datetime "${order.orderDateTime}" for order ${order.id}`)
+                      } else {
+                        // No time component, don't set orderDateTime yet
+                        console.log(`Parsed date-only "${value}" to "${order.orderDate}" for order ${order.id} (will check for time field)`)
+                      }
+                    }
+                  }
                 }
-              }
             } catch (e) {
               console.log(`Date parsing error for value "${value}":`, e.message)
             }
+          }
+          break
+        case 'time':
+        case 'ordertime':
+        case 'order_time':
+        case 'createdtime':
+        case 'created_time':
+          // Handle time field - combine with orderDate to create orderDateTime
+          if (value && order.orderDate) {
+            try {
+              // Parse time value (could be HH:MM, HH:MM:SS, etc.)
+              let timeStr = value.trim()
+              // Remove any timezone indicators
+              timeStr = timeStr.replace(/[+-]\d{2}:\d{2}$/, '').replace(/Z$/, '')
+              
+              // Parse time components
+              const timeMatch = timeStr.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/)
+              if (timeMatch) {
+                const hours = parseInt(timeMatch[1])
+                const minutes = parseInt(timeMatch[2])
+                const seconds = timeMatch[3] ? parseInt(timeMatch[3]) : 0
+                
+                // Combine with orderDate to create full datetime
+                const dateStr = order.orderDate // Format: YYYY-MM-DD
+                const [year, month, day] = dateStr.split('-').map(Number)
+                const combinedDateTime = new Date(year, month - 1, day, hours, minutes, seconds)
+                
+                if (!isNaN(combinedDateTime.getTime())) {
+                  order.orderDateTime = combinedDateTime.toISOString()
+                  console.log(`Combined date "${order.orderDate}" and time "${value}" to datetime "${order.orderDateTime}" for order ${order.id}`)
+                }
+              }
+            } catch (e) {
+              console.log(`Time parsing error for value "${value}":`, e.message)
+            }
+          }
+          break
+        case 'datetime':
+        case 'orderdatetime':
+        case 'order_datetime':
+        case 'timestamp':
+        case 'created_at':
+        case 'createdat':
+        case 'createddate':
+        case 'created_date':
+        case 'transactiondatetime':
+        case 'transaction_datetime':
+        case 'ordercreated':
+        case 'order_created':
+        case 'ordercreatedat':
+        case 'order_created_at':
+          // Handle datetime fields - store both date and datetime
+          if (value && value.trim() && value !== 'null' && value !== 'undefined') {
+            try {
+              const parsedDateTime = new Date(value)
+              if (!isNaN(parsedDateTime.getTime())) {
+                // Ensure datetime is stored with UTC timezone indicator
+                let datetimeValue = value
+                // If value doesn't have timezone, assume it's UTC and add Z
+                if (!datetimeValue.includes('Z') && !datetimeValue.match(/[+-]\d{2}:\d{2}$/)) {
+                  if (datetimeValue.includes('T')) {
+                    datetimeValue = datetimeValue.replace(/\.\d{3}$/, '') + 'Z'
+                  } else if (datetimeValue.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                    datetimeValue = datetimeValue.replace(' ', 'T') + 'Z'
+                  }
+                }
+                
+                // Store full datetime with UTC indicator
+                order.orderDateTime = datetimeValue
+                // Extract local date part (using UTC date)
+                order.orderDate = parsedDateTime.getFullYear() + '-' + 
+                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                 String(parsedDateTime.getDate()).padStart(2, '0')
+                console.log(`✅ Parsed datetime field "${lowerHeader}"="${value}" -> "${datetimeValue}" to date "${order.orderDate}" for order ${order.id}`)
+              } else {
+                order.orderDateTime = null
+                console.log(`⚠️ Failed to parse datetime field "${lowerHeader}"="${value}" for order ${order.id}`)
+              }
+            } catch (e) {
+              console.log(`Datetime parsing error for field "${lowerHeader}" value "${value}":`, e.message)
+              order.orderDateTime = null
+            }
+          } else {
+            order.orderDateTime = null
           }
           break
         case 'monthyear':
@@ -436,8 +625,22 @@ function createOrderFromCSV(headers, values, orderDate) {
                                    String(parsedDeliveryDate.getUTCMonth() + 1).padStart(2, '0') + '-' + 
                                    String(parsedDeliveryDate.getUTCDate()).padStart(2, '0')
                 // Also preserve the full deliveryDateTime for frontend display
-                order.deliveryDateTime = value
-                console.log(`Set deliveryDate to: ${order.deliveryDate} and deliveryDateTime to: ${order.deliveryDateTime}`)
+                // Ensure UTC timezone indicator
+                let deliveryDateTimeValue = value
+                if (!deliveryDateTimeValue.includes('Z') && !deliveryDateTimeValue.match(/[+-]\d{2}:\d{2}$/)) {
+                  if (deliveryDateTimeValue.includes('T')) {
+                    deliveryDateTimeValue = deliveryDateTimeValue.replace(/\.\d{3}$/, '') + 'Z'
+                  } else if (deliveryDateTimeValue.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                    deliveryDateTimeValue = deliveryDateTimeValue.replace(' ', 'T') + 'Z'
+                  }
+                }
+                order.deliveryDateTime = deliveryDateTimeValue
+                console.log(`✅ Set deliveryDate to: ${order.deliveryDate} and deliveryDateTime to: ${order.deliveryDateTime} for order ${order.id}`)
+                
+                // IMPORTANT: Don't set orderDateTime from deliveryDateTime - they should be separate
+                if (!order.orderDateTime) {
+                  console.log(`ℹ️  Order ${order.id}: deliveryDateTime set but orderDateTime not yet set - will look for order-specific datetime field`)
+                }
               } else {
                 order.deliveryDate = 'N/A'
                 order.deliveryDateTime = null
@@ -513,6 +716,70 @@ function createOrderFromCSV(headers, values, orderDate) {
     if (!order.id) order.id = `ORD${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
     if (!order.customerName) order.customerName = 'Unknown Customer'
     if (!order.establishment) order.establishment = 'Unknown Establishment'
+    
+    // Final pass: If we still don't have orderDateTime, check ALL fields for datetime patterns
+    // IMPORTANT: Exclude deliveryDateTime to avoid using delivery time as order time
+    if (order.orderDate && !order.orderDateTime) {
+      console.log(`⚠️ Order ${order.id} has orderDate "${order.orderDate}" but no orderDateTime. Checking all fields (excluding delivery fields)...`)
+      
+      // Check all order properties for datetime patterns
+      for (const [key, value] of Object.entries(order)) {
+        // Skip delivery-related fields
+        if (key.includes('delivery') && !key.includes('order')) {
+          continue
+        }
+        
+        if (value && typeof value === 'string' && value.trim() && value !== 'null' && value !== 'undefined') {
+          // Check if this value looks like a datetime
+          const looksLikeDateTime = value.includes('T') || 
+                                   (value.includes(' ') && value.match(/\d{1,2}:\d{2}/)) ||
+                                   value.match(/\d{1,2}\/\d{1,2}\/\d{4} \d{1,2}:\d{2}/) ||
+                                   value.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/) ||
+                                   value.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)
+          
+          if (looksLikeDateTime) {
+            try {
+              const parsedDateTime = new Date(value)
+              if (!isNaN(parsedDateTime.getTime())) {
+                // Check if it has actual time (not just midnight)
+                const hasTime = parsedDateTime.getHours() !== 0 || parsedDateTime.getMinutes() !== 0 || parsedDateTime.getSeconds() !== 0
+                if (hasTime) {
+                  // Verify the date matches our orderDate
+                  const parsedDate = parsedDateTime.getFullYear() + '-' + 
+                                   String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(parsedDateTime.getDate()).padStart(2, '0')
+                  
+                  if (parsedDate === order.orderDate) {
+                    // Ensure UTC timezone indicator
+                    let datetimeValue = value
+                    if (!datetimeValue.includes('Z') && !datetimeValue.match(/[+-]\d{2}:\d{2}$/)) {
+                      if (datetimeValue.includes('T')) {
+                        datetimeValue = datetimeValue.replace(/\.\d{3}$/, '') + 'Z'
+                      } else if (datetimeValue.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)) {
+                        datetimeValue = datetimeValue.replace(' ', 'T') + 'Z'
+                      }
+                    }
+                    order.orderDateTime = datetimeValue
+                    console.log(`✅ Found orderDateTime in field "${key}"="${value}" -> "${datetimeValue}" for order ${order.id}`)
+                    break
+                  }
+                }
+              }
+            } catch (e) {
+              // Continue checking other fields
+            }
+          }
+        }
+      }
+      
+      if (!order.orderDateTime) {
+        console.log(`❌ Could not find orderDateTime for order ${order.id}. Available date/time fields:`, 
+          Object.keys(order).filter(k => {
+            const val = order[k]
+            return val && typeof val === 'string' && (k.includes('time') || k.includes('date') || k.includes('created')) && !k.includes('delivery')
+          }).map(k => `${k}="${order[k]}"`))
+      }
+    }
     
     // Extract state from establishment name if shippingState is empty
     if (!order.shippingState && order.establishment) {
@@ -765,6 +1032,48 @@ async function enrichOrdersWithState(orders, startDate, endDate) {
   return enrichedOrders
 }
 
+// Helper function to get local date from an order (converts UTC to local time)
+function getOrderLocalDate(order) {
+  // If we have orderDateTime, use it to get the local date
+  if (order.orderDateTime) {
+    try {
+      const date = new Date(order.orderDateTime)
+      // Convert to local date string (YYYY-MM-DD)
+      return date.getFullYear() + '-' + 
+             String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+             String(date.getDate()).padStart(2, '0')
+    } catch (e) {
+      // Fallback to orderDate if parsing fails
+      return order.orderDate
+    }
+  }
+  // If no orderDateTime, use orderDate as-is (assumed to already be in correct format)
+  return order.orderDate
+}
+
+// Helper function to get delivery local date from an order
+function getDeliveryLocalDate(order) {
+  if (!order.deliveryDate || order.deliveryDate === 'N/A') {
+    return null
+  }
+  
+  // If we have deliveryDateTime, use it to get the local date
+  if (order.deliveryDateTime) {
+    try {
+      const date = new Date(order.deliveryDateTime)
+      // Convert to local date string (YYYY-MM-DD)
+      return date.getFullYear() + '-' + 
+             String(date.getMonth() + 1).padStart(2, '0') + '-' + 
+             String(date.getDate()).padStart(2, '0')
+    } catch (e) {
+      // Fallback to deliveryDate if parsing fails
+      return order.deliveryDate
+    }
+  }
+  // If no deliveryDateTime, use deliveryDate as-is
+  return order.deliveryDate
+}
+
 // Helper function to fetch orders for a specific date range
 async function fetchOrdersForDateRange(startDate, endDate) {
   // Convert local dates to UTC
@@ -807,14 +1116,19 @@ async function fetchOrdersForDateRange(startDate, endDate) {
     
     const allOrders = parseCSVToOrders(csvData, startDate)
     
-    // Filter orders by date range
+    // Filter orders by date range - convert to local time before comparing
     const filteredOrders = allOrders.filter(order => {
-      if (!order.deliveryDate || order.deliveryDate === 'N/A') {
-        return order.orderDate >= startDate && order.orderDate <= endDate
+      const orderLocalDate = getOrderLocalDate(order)
+      const deliveryLocalDate = getDeliveryLocalDate(order)
+      
+      if (!deliveryLocalDate) {
+        // If no delivery date, include based on order date (in local time)
+        return orderLocalDate >= startDate && orderLocalDate <= endDate
       }
       
-      const deliveryInRange = order.deliveryDate >= startDate && order.deliveryDate <= endDate
-      const orderInRange = order.orderDate >= startDate && order.orderDate <= endDate
+      // Filter by delivery date (primary) and order date (fallback) - both in local time
+      const deliveryInRange = deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
+      const orderInRange = orderLocalDate >= startDate && orderLocalDate <= endDate
       
       return deliveryInRange || orderInRange
     })
@@ -839,16 +1153,19 @@ app.get('/api/orders', async (req, res) => {
     }
     
     // Validate that dates are not too far in the future (allow up to 7 days ahead for delivery scheduling)
+    // IMPORTANT: Allow ALL past dates - only restrict future dates
     const today = new Date()
     today.setHours(23, 59, 59, 999) // End of today
     
     const maxFutureDate = new Date()
     maxFutureDate.setDate(maxFutureDate.getDate() + 7) // Allow up to 7 days in the future
     
-    const start = new Date(startDate)
-    const end = new Date(endDate)
+    const start = new Date(startDate + 'T00:00:00') // Parse as local midnight to avoid timezone issues
+    const end = new Date(endDate + 'T23:59:59') // Parse as end of day
     
-    if (start > maxFutureDate || end > maxFutureDate) {
+    // Only block if dates are in the FUTURE and more than 7 days ahead
+    // Past dates should always be allowed
+    if ((start > today && start > maxFutureDate) || (end > today && end > maxFutureDate)) {
       return res.status(400).json({
         success: false,
         error: 'Invalid date range',
@@ -1021,15 +1338,19 @@ app.get('/api/orders', async (req, res) => {
           const allOrders = parseCSVToOrders(csvData, startDate)
           
           // Filter orders to show only those delivered within the requested local date range
+          // Convert order dates to local time before comparing
           const filteredOrders = allOrders.filter(order => {
-            if (!order.deliveryDate || order.deliveryDate === 'N/A') {
-              // If no delivery date, include based on order date
-              return order.orderDate >= startDate && order.orderDate <= endDate
+            const orderLocalDate = getOrderLocalDate(order)
+            const deliveryLocalDate = getDeliveryLocalDate(order)
+            
+            if (!deliveryLocalDate) {
+              // If no delivery date, include based on order date (in local time)
+              return orderLocalDate >= startDate && orderLocalDate <= endDate
             }
             
-            // Filter by delivery date (primary) and order date (fallback)
-            const deliveryInRange = order.deliveryDate >= startDate && order.deliveryDate <= endDate
-            const orderInRange = order.orderDate >= startDate && order.orderDate <= endDate
+            // Filter by delivery date (primary) and order date (fallback) - both in local time
+            const deliveryInRange = deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
+            const orderInRange = orderLocalDate >= startDate && orderLocalDate <= endDate
             
             return deliveryInRange || orderInRange
           })
@@ -1692,6 +2013,537 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
   }
 })
 
+// Asana API helper functions
+// Helper to generate Asana task URL from task GID
+function getAsanaTaskUrl(taskGid) {
+  return `https://app.asana.com/0/0/${taskGid}`
+}
+
+// Helper to determine project GID based on customer name
+function getProjectGidForCustomer(customerName) {
+  if (!customerName) {
+    // Default to Bevvi project if no customer name
+    return process.env.ASANA_PROJECT_GID || null
+  }
+  
+  const customerLower = customerName.toLowerCase().trim()
+  
+  // Map customer names to project GIDs
+  // Reachdesk orders → Reachdesk - Issue Tracking
+  if (customerLower.includes('reachdesk')) {
+    return '1203929818315927' // Reachdesk - Issue Tracking
+  }
+  
+  // OnGoody orders → Goody - Issue Tracking
+  if (customerLower.includes('ongoody') || customerLower.includes('goody')) {
+    return '1203911426248815' // Goody - Issue Tracking
+  }
+  
+  // Sendoso orders → Corp Orders - Issue Tracking
+  if (customerLower.includes('sendoso')) {
+    return '1203948231536518' // Corp Orders - Issue Tracking
+  }
+  
+  // Default to Bevvi project for all other customers
+  return process.env.ASANA_PROJECT_GID || null
+}
+
+// Helper to build comprehensive order notes
+function buildOrderNotes(orderNumber, orderData) {
+  let notes = `Order: ${orderNumber}\n`
+  notes += `Customer: ${orderData.customerName || 'N/A'}\n`
+  notes += `Status: ${orderData.status || 'N/A'}\n`
+  notes += `Total: $${orderData.total || 0}\n`
+  
+  if (orderData.orderDate) {
+    notes += `Order Date: ${orderData.orderDate}\n`
+  }
+  if (orderData.deliveryDate && orderData.deliveryDate !== 'N/A') {
+    notes += `Delivery Date: ${orderData.deliveryDate}\n`
+  }
+  if (orderData.establishment) {
+    notes += `Establishment: ${orderData.establishment}\n`
+  }
+  if (orderData.address) {
+    notes += `Address: ${orderData.address}\n`
+  }
+  
+  notes += `\n---\n\n`
+  return notes
+}
+
+// Improved task search with pagination support
+async function searchAsanaTask(orderNumber, projectGid, workspaceGid, headers, asanaApiUrl) {
+  // Search for tasks with just the order number (no "Order " prefix)
+  // Also check for old format "Order <number>" for backward compatibility
+  const taskName = orderNumber
+  const oldTaskName = `Order ${orderNumber}`
+  let allTasks = []
+  let offset = null
+  
+  try {
+    if (projectGid) {
+      // Search in project with pagination
+      do {
+        let url = `${asanaApiUrl}/projects/${projectGid}/tasks?opt_fields=gid,name,notes&limit=100`
+        if (offset) {
+          url += `&offset=${offset}`
+        }
+        
+        const response = await axios.get(url, { headers, timeout: 10000 })
+        const tasks = response.data.data || []
+        allTasks = allTasks.concat(tasks)
+        
+        // Check for pagination
+        offset = response.data.next_page?.offset || null
+      } while (offset)
+    } else {
+      // Search in workspace with pagination
+      do {
+        let url = `${asanaApiUrl}/tasks?workspace=${workspaceGid}&opt_fields=gid,name,notes&limit=100`
+        if (offset) {
+          url += `&offset=${offset}`
+        }
+        
+        const response = await axios.get(url, { headers, timeout: 10000 })
+        const tasks = response.data.data || []
+        allTasks = allTasks.concat(tasks)
+        
+        // Check for pagination
+        offset = response.data.next_page?.offset || null
+      } while (offset)
+    }
+    
+    // Find matching task (check both new format and old format for backward compatibility)
+    const existingTask = allTasks.find(task => 
+      task.name === taskName || task.name === oldTaskName || task.name.includes(orderNumber)
+    )
+    
+    return existingTask ? existingTask.gid : null
+  } catch (error) {
+    console.log(`⚠️ Error searching for task: ${error.message}`)
+    return null
+  }
+}
+
+// Find Asana task (search only, don't create)
+async function findAsanaTask(orderNumber, orderData = {}) {
+  try {
+    if (!process.env.ASANA_ACCESS_TOKEN || !process.env.ASANA_WORKSPACE_GID) {
+      return null // Return null instead of throwing, so we can handle gracefully
+    }
+
+    const asanaApiUrl = 'https://app.asana.com/api/1.0'
+    const headers = {
+      'Authorization': `Bearer ${process.env.ASANA_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+
+    // Determine project based on customer name
+    const projectGid = getProjectGidForCustomer(orderData.customerName)
+    const workspaceGid = process.env.ASANA_WORKSPACE_GID
+
+    // Search for existing task only (no creation)
+    // First try the customer-specific project, then fallback to workspace search
+    let existingTaskGid = await searchAsanaTask(orderNumber, projectGid, workspaceGid, headers, asanaApiUrl)
+    
+    // If not found in customer-specific project, search entire workspace
+    if (!existingTaskGid && projectGid) {
+      console.log(`ℹ️  Task not found in customer project, searching entire workspace...`)
+      existingTaskGid = await searchAsanaTask(orderNumber, null, workspaceGid, headers, asanaApiUrl)
+    }
+    
+    if (existingTaskGid) {
+      console.log(`✅ Found existing Asana task for order ${orderNumber}`)
+      return existingTaskGid
+    }
+
+    // Task not found - return null (don't create)
+    console.log(`ℹ️  No Asana task found for order ${orderNumber} (not creating)`)
+    return null
+  } catch (error) {
+    console.error('❌ Error finding Asana task:', error.message)
+    return null // Return null on error instead of throwing
+  }
+}
+
+async function findOrCreateAsanaTask(orderNumber, orderData) {
+  try {
+    if (!process.env.ASANA_ACCESS_TOKEN || !process.env.ASANA_WORKSPACE_GID) {
+      throw new Error('Asana configuration missing. Please set ASANA_ACCESS_TOKEN and ASANA_WORKSPACE_GID in your .env file.')
+    }
+
+    const asanaApiUrl = 'https://app.asana.com/api/1.0'
+    const headers = {
+      'Authorization': `Bearer ${process.env.ASANA_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+
+    // Use just the order number as task name (no "Order " prefix)
+    const taskName = orderNumber
+    
+    // Determine project based on customer name
+    const projectGid = getProjectGidForCustomer(orderData?.customerName)
+    const workspaceGid = process.env.ASANA_WORKSPACE_GID
+    
+    const customerName = orderData?.customerName || 'Unknown'
+    const projectName = projectGid === '1203929818315927' ? 'Reachdesk - Issue Tracking' :
+                       projectGid === '1203911426248815' ? 'Goody - Issue Tracking' :
+                       projectGid === '1203948231536518' ? 'Corp Orders - Issue Tracking' :
+                       projectGid ? 'Bevvi' : 'Workspace (no project)'
+    
+    console.log(`🔍 Searching for task: ${orderNumber}, Customer: ${customerName}, Project: ${projectName}`)
+
+    // Search for existing task - first in customer-specific project, then entire workspace
+    let existingTaskGid = await searchAsanaTask(orderNumber, projectGid, workspaceGid, headers, asanaApiUrl)
+    
+    // If not found in customer-specific project, search entire workspace
+    if (!existingTaskGid && projectGid) {
+      console.log(`ℹ️  Task not found in customer project, searching entire workspace...`)
+      existingTaskGid = await searchAsanaTask(orderNumber, null, workspaceGid, headers, asanaApiUrl)
+    }
+    
+    if (existingTaskGid) {
+      console.log(`✅ Found existing Asana task for order ${orderNumber}`)
+      return existingTaskGid
+    }
+
+    // Create new task if not found
+    console.log(`📝 Creating new Asana task: ${orderNumber} in project: ${projectName}`)
+    const orderNotes = buildOrderNotes(orderNumber, orderData || {})
+    
+    const taskData = {
+      data: {
+        name: taskName,
+        notes: orderNotes,
+        workspace: workspaceGid
+      }
+    }
+
+    if (projectGid) {
+      taskData.data.projects = [projectGid]
+    }
+
+    const createResponse = await axios.post(`${asanaApiUrl}/tasks`, taskData, { headers, timeout: 10000 })
+    const newTaskGid = createResponse.data.data.gid
+    console.log(`✅ Created new Asana task ${newTaskGid} for order ${orderNumber}`)
+    return newTaskGid
+  } catch (error) {
+    console.error('❌ Error finding/creating Asana task:', error.message)
+    if (error.response) {
+      console.error('Asana API error details:', error.response.data)
+    }
+    throw error
+  }
+}
+
+// Get comments from Asana for an order
+app.get('/api/orders/:orderNumber/comments', async (req, res) => {
+  try {
+    const { orderNumber } = req.params
+    const { customerName } = req.query
+    
+    if (!process.env.ASANA_ACCESS_TOKEN) {
+      return res.status(500).json({
+        success: false,
+        error: 'Asana not configured',
+        message: 'ASANA_ACCESS_TOKEN is not set in environment variables.'
+      })
+    }
+
+    const orderData = customerName ? { customerName } : {}
+    const taskGid = await findAsanaTask(orderNumber, orderData)
+    
+    if (!taskGid) {
+      return res.json({
+        success: true,
+        comments: [],
+        taskExists: false
+      })
+    }
+    
+    const asanaApiUrl = 'https://app.asana.com/api/1.0'
+    const headers = {
+      'Authorization': `Bearer ${process.env.ASANA_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+
+    // Get stories (which includes comments)
+    const storiesResponse = await axios.get(
+      `${asanaApiUrl}/tasks/${taskGid}/stories?opt_fields=type,text,created_at,created_by`,
+      { headers, timeout: 10000 }
+    )
+
+    const stories = storiesResponse.data.data || []
+    
+    // Filter for comments only (type === 'comment')
+    const comments = stories
+      .filter(story => story.type === 'comment')
+      .map(story => ({
+        id: story.gid,
+        text: story.text || '',
+        createdAt: story.created_at,
+        createdBy: story.created_by?.name || 'Unknown',
+        createdByEmail: story.created_by?.email || null
+      }))
+      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)) // Sort by date, oldest first
+
+    res.json({
+      success: true,
+      comments: comments,
+      taskGid: taskGid,
+      taskExists: true
+    })
+  } catch (error) {
+    console.error('❌ Error fetching comments from Asana:', error.message)
+    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch comments from Asana',
+      message: errorMessage || 'An error occurred while fetching comments from Asana.'
+    })
+  }
+})
+
+// Get notes from Asana for an order (read-only, doesn't create tasks)
+app.get('/api/orders/:orderNumber/notes', async (req, res) => {
+  try {
+    const { orderNumber } = req.params
+    const { customerName } = req.query // Optional customer name from query params
+    
+    if (!process.env.ASANA_ACCESS_TOKEN) {
+      return res.status(500).json({
+        success: false,
+        error: 'Asana not configured',
+        message: 'ASANA_ACCESS_TOKEN is not set in environment variables. Please configure Asana in your .env file.'
+      })
+    }
+
+    const orderNumberFromParam = orderNumber
+    // Use customer name from query params if provided (for project-specific search)
+    const orderData = customerName ? { customerName } : {}
+    const taskGid = await findAsanaTask(orderNumberFromParam, orderData)
+    
+    // If no task exists, return empty notes (don't create task)
+    if (!taskGid) {
+      return res.json({
+        success: true,
+        notes: '',
+        taskGid: null,
+        taskUrl: null,
+        lastModified: null,
+        createdAt: null,
+        completed: false,
+        taskExists: false
+      })
+    }
+    
+    const asanaApiUrl = 'https://app.asana.com/api/1.0'
+    const headers = {
+      'Authorization': `Bearer ${process.env.ASANA_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+
+    // Get task details including notes
+    const taskResponse = await axios.get(
+      `${asanaApiUrl}/tasks/${taskGid}?opt_fields=name,notes,created_at,modified_at,completed`,
+      { headers, timeout: 10000 }
+    )
+
+    const task = taskResponse.data.data
+    
+    // Extract notes (remove the order info header if present)
+    let notes = task.notes || ''
+    // Remove order info header (everything before the --- separator)
+    // The separator is '\n\n---\n\n' (two newlines before ---)
+    const separatorPattern = '\n\n---\n\n'
+    const separatorIndex = notes.indexOf(separatorPattern)
+    if (separatorIndex !== -1) {
+      // +7 is correct: '\n\n---\n\n' = 7 characters (\n\n---\n\n)
+      notes = notes.substring(separatorIndex + separatorPattern.length).trim()
+    } else {
+      // Fallback: try single newline before ---
+      const altSeparator = '\n---\n\n'
+      const altIndex = notes.indexOf(altSeparator)
+      if (altIndex !== -1) {
+        notes = notes.substring(altIndex + 7).trim()
+      } else {
+        // Fallback: try to find where order info ends
+        // Look for pattern: Order: ... \n\n (followed by user notes)
+        const orderInfoMatch = notes.match(/Order:.*?\n\n(.*)/s)
+        if (orderInfoMatch && orderInfoMatch[1]) {
+          notes = orderInfoMatch[1].trim()
+        } else if (notes.startsWith('Order:')) {
+          // If it starts with Order: but no match, try to find first double newline
+          const doubleNewlineIndex = notes.indexOf('\n\n')
+          if (doubleNewlineIndex !== -1) {
+            notes = notes.substring(doubleNewlineIndex + 2).trim()
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      notes: notes,
+      taskGid: taskGid,
+      taskUrl: getAsanaTaskUrl(taskGid),
+      lastModified: task.modified_at,
+      createdAt: task.created_at,
+      completed: task.completed || false,
+      taskExists: true
+    })
+  } catch (error) {
+    console.error('❌ Error fetching notes from Asana:', error.message)
+    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch notes from Asana',
+      message: errorMessage || 'An error occurred while fetching notes from Asana. Please check your Asana configuration.'
+    })
+  }
+})
+
+// Get Asana task details and URL for an order (read-only, doesn't create tasks)
+app.get('/api/orders/:orderNumber/asana-task', async (req, res) => {
+  try {
+    const { orderNumber } = req.params
+    const { customerName } = req.query // Optional customer name from query params
+    
+    if (!process.env.ASANA_ACCESS_TOKEN) {
+      return res.status(500).json({
+        success: false,
+        error: 'Asana not configured',
+        message: 'ASANA_ACCESS_TOKEN is not set in environment variables'
+      })
+    }
+
+    // Use customer name from query params if provided (for project-specific search)
+    const orderData = customerName ? { customerName } : {}
+    const taskGid = await findAsanaTask(orderNumber, orderData)
+    
+    // If no task exists, return null values
+    if (!taskGid) {
+      return res.json({
+        success: true,
+        taskGid: null,
+        taskUrl: null,
+        taskName: null,
+        completed: false,
+        assignee: null,
+        assigneeStatus: null,
+        createdAt: null,
+        lastModified: null,
+        taskExists: false
+      })
+    }
+    
+    const taskUrl = getAsanaTaskUrl(taskGid)
+    
+    const asanaApiUrl = 'https://app.asana.com/api/1.0'
+    const headers = {
+      'Authorization': `Bearer ${process.env.ASANA_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+
+    // Get task details
+    const taskResponse = await axios.get(
+      `${asanaApiUrl}/tasks/${taskGid}?opt_fields=name,notes,created_at,modified_at,completed,assignee,assignee_status`,
+      { headers, timeout: 10000 }
+    )
+
+    const task = taskResponse.data.data
+
+    res.json({
+      success: true,
+      taskGid: taskGid,
+      taskUrl: taskUrl,
+      taskName: task.name,
+      completed: task.completed || false,
+      assignee: task.assignee || null,
+      assigneeStatus: task.assignee_status || null,
+      createdAt: task.created_at,
+      lastModified: task.modified_at,
+      taskExists: true
+    })
+  } catch (error) {
+    console.error('❌ Error fetching Asana task details:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch Asana task details',
+      message: error.message
+    })
+  }
+})
+
+// Save notes to Asana for an order
+app.post('/api/orders/:orderNumber/notes', async (req, res) => {
+  try {
+    const { orderNumber } = req.params
+    const { notes, orderData } = req.body
+    
+    if (!process.env.ASANA_ACCESS_TOKEN) {
+      return res.status(500).json({
+        success: false,
+        error: 'Asana not configured',
+        message: 'ASANA_ACCESS_TOKEN is not set in environment variables. Please configure Asana in your .env file.'
+      })
+    }
+
+    const orderNumberFromParam = orderNumber
+    const taskGid = await findOrCreateAsanaTask(orderNumberFromParam, orderData || {})
+    
+    const asanaApiUrl = 'https://app.asana.com/api/1.0'
+    const headers = {
+      'Authorization': `Bearer ${process.env.ASANA_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    }
+
+    // Build notes content with order info header
+    // Format: Order info followed by separator, then user notes
+    const orderInfo = buildOrderNotes(orderNumber, orderData || {})
+    
+    // Combine order info with user notes (remove any existing order info to avoid duplication)
+    let userNotes = notes || ''
+    // Remove any existing order info header from user notes (everything before ---)
+    const separatorIndex = userNotes.indexOf('\n---\n\n')
+    if (separatorIndex !== -1) {
+      userNotes = userNotes.substring(separatorIndex + 7).trim()
+    } else {
+      // Fallback: remove order info pattern
+      userNotes = userNotes.replace(/^Order:.*?\n\n/s, '').trim()
+    }
+    
+    const fullNotes = orderInfo + userNotes
+
+    // Update task notes
+    await axios.put(
+      `${asanaApiUrl}/tasks/${taskGid}`,
+      {
+        data: {
+          notes: fullNotes
+        }
+      },
+      { headers, timeout: 10000 }
+    )
+
+    res.json({
+      success: true,
+      message: 'Notes saved to Asana successfully',
+      taskGid: taskGid,
+      taskUrl: getAsanaTaskUrl(taskGid)
+    })
+  } catch (error) {
+    console.error('❌ Error saving notes to Asana:', error.message)
+    const errorMessage = error.response?.data?.errors?.[0]?.message || error.message
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save notes to Asana',
+      message: errorMessage || 'An error occurred while saving notes to Asana. Please check your Asana configuration.'
+    })
+  }
+})
+
 // AI Prompt Parsing endpoint using GPT-4o-mini
 app.post('/api/parse-prompt', async (req, res) => {
   try {
@@ -1729,7 +2581,8 @@ Extract the following information from the user's query:
   * pending_orders: specifically asking for PENDING STATUS orders (must mention "pending")
   * delivered_orders: specifically asking for DELIVERED STATUS orders (must mention "delivered")
   * accepted_orders: specifically asking for ACCEPTED STATUS orders (e.g., "show me all accepted orders", "list accepted orders", "see the accepted orders")
-  * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries)
+  * not_delivered_orders: asking for orders that have NOT been delivered (e.g., "show me all orders that have not been delivered", "orders that haven't been delivered", "undelivered orders"). This should include orders with status "accepted" or "pending", but NOT "delivered".
+  * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries). Also includes "show me all orders from [customer]", "orders from [customer]", "list orders for [customer]"
   * order_status_check: asking to validate/check order statuses (e.g., "are all orders accepted", "are any orders pending", "how many rejected", "check order statuses", "order status summary", "what's the status breakdown")
   * average_order_value: asking for AOV or average
   * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
@@ -1742,7 +2595,7 @@ Extract the following information from the user's query:
   * sales_by_state: asking for sales/revenue breakdown by state (e.g., "sales by state for Nov")
   * unknown: if the query is NOT about orders, revenue, tax, tips, delivery, or customer data (e.g., weather, personal questions, unrelated topics)
   
-- customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire). Always extract full company name, not partial words.
+- customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire, Air Culinaire Worldwide, Vistajet, VistaJet, etc.). Always extract full company name, not partial words. Extract customer names from phrases like "orders from [customer]", "orders for [customer]", "revenue from [customer]", "revenue for [month] for [customer]". For queries like "revenue for Oct for Air Culinaire", extract "Air Culinaire" as the customer name.
 - brand: Brand name if mentioned (Schrader, Dom Perignon, Tito's, Grey Goose, etc.). Extract the full brand name.
 - startDate: Start date in YYYY-MM-DD format
 - endDate: End date in YYYY-MM-DD format
@@ -1751,20 +2604,24 @@ Extract the following information from the user's query:
 - clarificationNeeded: String indicating what's missing - "date_range" if no date/timeframe specified, "customer_name" if asking about a customer but not specifying which one, "brand_name" if asking about a brand but not specifying which one
 
 Important: 
-- Customer names should be exact - "Sendoso" not "sendoso in", "Air Culinaire" not "air", etc.
+- Customer names should be exact - "Sendoso" not "sendoso in", "Air Culinaire" not "air", "Vistajet" not "vista", etc.
 - "show me orders", "orders placed today", "how many orders" = total_orders intent (NOT pending_orders)
+- "show me all orders from Vistajet", "orders from Sendoso", "list orders for Air Culinaire" = total_orders intent WITH customer extracted
 - "show me pending orders", "pending status" = pending_orders intent
 - If a query asks for orders, revenue, tax, etc. WITHOUT specifying any timeframe (no "today", "this month", specific month, etc.), set needsClarification to true and clarificationNeeded to "date_range"
 - Queries like "show me all orders", "what's the revenue", "how much tax" without dates = needsClarification: true
-- EXCEPTION: Status-specific queries (accepted_orders, pending_orders, delivered_orders, delayed_orders) do NOT need clarification even without dates - they can use current loaded data
-- "show me all accepted orders", "list pending orders" = NO clarification needed, process immediately
+- EXCEPTION: Status-specific queries (accepted_orders, pending_orders, delivered_orders, delayed_orders, not_delivered_orders) do NOT need clarification even without dates - they can use current loaded data
+- "show me all accepted orders", "list pending orders", "show me orders that have not been delivered" = NO clarification needed, process immediately
 
 Date parsing rules:
 - "today", "for today" = today's date for both start and end date
+- "this week" = current week Sunday through Saturday (from this week's Sunday to this week's Saturday)
+- "last week" = previous week Sunday through Saturday. Calculate: Find this week's Sunday, then go back 7 days to get last week's Sunday. Last week's Saturday is 6 days after last week's Sunday. Example: If today is Saturday Jan 3, 2026, last week is Sunday Dec 21, 2025 to Saturday Dec 28, 2025.
 - "this month", "this month so far", "MTD", "month to date" = first day of current month to today
 - "last month" = full previous month (1st to last day)
 - "YTD", "year to date", "this year" = January 1st of current year to today
-- "October 2025", "Oct 2025" = 2025-10-01 to 2025-10-31
+- "October 2025", "Oct 2025" = 2025-10-01 to 2025-10-31 (explicit year)
+- "October", "Oct" (no year) = Use smart default: if month is more than 2 months in the future relative to current month, use previous year; otherwise use current year. Then apply MTD logic if end date is in the future.
 - If end date is in the future, set it to today (MTD logic)
 
 Return ONLY valid JSON, no explanation. Format:
@@ -1925,13 +2782,34 @@ app.get('/api/events', (req, res) => {
   }, 30000) // Send heartbeat every 30 seconds
 })
 
-// Serve React app for all other routes
+// Serve React app for all other routes (must be last)
 app.get('*', (req, res) => {
-  const indexPath = path.join(__dirname, 'dist', 'index.html')
-  if (require('fs').existsSync(indexPath)) {
-    res.sendFile(indexPath)
+  console.log(`📄 Serving React app for route: ${req.path}`)
+  const indexPath = path.resolve(__dirname, 'dist', 'index.html')
+  const fs = require('fs')
+  
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error('❌ Error sending index.html:', err)
+        if (!res.headersSent) {
+          res.status(500).json({ 
+            error: 'Failed to serve frontend',
+            message: err.message,
+            path: req.path
+          })
+        }
+      } else {
+        console.log(`✅ Served index.html for route: ${req.path}`)
+      }
+    })
   } else {
-    res.status(404).json({ error: 'Frontend not built. Please run npm run build first.' })
+    console.error('❌ index.html not found at:', indexPath)
+    res.status(404).json({ 
+      error: 'Frontend not built. Please run npm run build first.',
+      path: indexPath,
+      requestedPath: req.path
+    })
   }
 })
 
