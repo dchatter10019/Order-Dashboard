@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2 } from 'lucide-react'
+import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2, Download } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 
 const CommandInterface = ({ 
@@ -2348,36 +2348,98 @@ const CommandInterface = ({
               
               {message.data && message.data.type === 'orders' && message.data.orders.length > 0 && (
                 <div className="mt-3 -mx-4 bg-blue-50 rounded-lg p-3 border border-blue-200">
-                  <div className="flex items-center mb-2">
-                    <Package className="h-4 w-4 text-blue-600 mr-1" />
-                    <span className="text-xs font-medium text-blue-800">
-                      {message.data.customerName 
-                        ? (expandedOrders[index] 
-                            ? `All ${message.data.orderType || 'Orders'} for ${message.data.customerName} (${message.data.total})`
-                            : `${message.data.orderType || 'Orders'} for ${message.data.customerName} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
-                        : (expandedOrders[index] 
-                            ? `All ${message.data.orderType || 'Orders'} (${message.data.total})`
-                            : `${message.data.orderType || 'Orders'} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
-                      }
-                    </span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center">
+                      <Package className="h-4 w-4 text-blue-600 mr-1" />
+                      <span className="text-xs font-medium text-blue-800">
+                        {message.data.customerName 
+                          ? (expandedOrders[index] 
+                              ? `All ${message.data.orderType || 'Orders'} for ${message.data.customerName} (${message.data.total})`
+                              : `${message.data.orderType || 'Orders'} for ${message.data.customerName} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
+                          : (expandedOrders[index] 
+                              ? `All ${message.data.orderType || 'Orders'} (${message.data.total})`
+                              : `${message.data.orderType || 'Orders'} (showing ${Math.min(10, message.data.total)} of ${message.data.total})`)
+                        }
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        // Convert orders to CSV
+                        const ordersToExport = message.data.orders
+                        const headers = ['Order ID', 'Customer', 'Amount', 'Date', 'Status']
+                        const csvRows = [
+                          headers.join(','),
+                          ...ordersToExport.map(order => {
+                            const orderId = (order.ordernum || order.id || '').replace(/,/g, '')
+                            const customer = (order.customerName || '').replace(/,/g, '')
+                            const amount = (order.total || 0).toString().replace(/,/g, '')
+                            const date = (order.orderDate || '').replace(/,/g, '')
+                            const status = (order.status || '').replace(/,/g, '')
+                            return [orderId, customer, amount, date, status].map(field => `"${field}"`).join(',')
+                          })
+                        ]
+                        
+                        const csvContent = csvRows.join('\n')
+                        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+                        const link = document.createElement('a')
+                        const url = URL.createObjectURL(blob)
+                        
+                        // Generate filename
+                        const customerPart = message.data.customerName ? `_${message.data.customerName.replace(/[^a-z0-9]/gi, '_')}` : ''
+                        const orderTypePart = message.data.orderType ? `_${message.data.orderType.replace(/[^a-z0-9]/gi, '_')}` : ''
+                        const filename = `orders${customerPart}${orderTypePart}_${new Date().toISOString().split('T')[0]}.csv`
+                        
+                        link.setAttribute('href', url)
+                        link.setAttribute('download', filename)
+                        link.style.visibility = 'hidden'
+                        document.body.appendChild(link)
+                        link.click()
+                        document.body.removeChild(link)
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 rounded transition-colors"
+                      title="Download as CSV"
+                    >
+                      <Download className="h-3 w-3" />
+                      <span className="hidden sm:inline">CSV</span>
+                    </button>
                   </div>
                   <div className="space-y-1">
+                    {/* Header Row */}
+                    <div className="text-xs bg-gray-50 rounded px-2 py-1.5 border border-blue-200 font-mono font-semibold">
+                      <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr] gap-2 items-center">
+                        <div className="text-gray-600">Order ID</div>
+                        <div className="text-gray-600">Customer</div>
+                        <div className="text-gray-600 text-right">Amount</div>
+                        <div className="text-gray-600 text-center">Date</div>
+                        <div className="text-gray-600 text-right">Status</div>
+                      </div>
+                    </div>
+                    {/* Order Rows */}
                     {(expandedOrders[index] ? message.data.orders : message.data.orders.slice(0, 10)).map((order, idx) => (
                       <div key={idx} className="text-xs bg-white rounded px-2 py-1.5 border border-blue-100 font-mono">
-                        <span className="font-semibold text-gray-900">{order.ordernum || order.id}</span>
-                        <span className="text-gray-400 mx-2">|</span>
-                        <span className="text-gray-700">{order.customerName}</span>
-                        <span className="text-gray-400 mx-2">|</span>
-                        <span className="text-blue-700 font-semibold">{formatDollarAmount(order.total)}</span>
-                        <span className="text-gray-400 mx-2">|</span>
-                        <span className="text-gray-600">{order.orderDate}</span>
-                        <span className="text-gray-400 mx-2">|</span>
-                        <span className={`font-medium ${
-                          order.status?.toLowerCase() === 'delivered' ? 'text-green-600' :
-                          order.status?.toLowerCase() === 'pending' ? 'text-amber-600' :
-                          order.status?.toLowerCase() === 'canceled' ? 'text-red-600' :
-                          'text-gray-600'
-                        }`}>{order.status}</span>
+                        <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr] gap-2 items-center">
+                          <div className="font-semibold text-gray-900 truncate" title={order.ordernum || order.id}>
+                            {order.ordernum || order.id}
+                          </div>
+                          <div className="text-gray-700 truncate" title={order.customerName}>
+                            {order.customerName}
+                          </div>
+                          <div className="text-blue-700 font-semibold text-right">
+                            {formatDollarAmount(order.total)}
+                          </div>
+                          <div className="text-gray-600 text-center">
+                            {order.orderDate}
+                          </div>
+                          <div className={`font-medium text-right ${
+                            order.status?.toLowerCase() === 'delivered' ? 'text-green-600' :
+                            order.status?.toLowerCase() === 'pending' ? 'text-amber-600' :
+                            order.status?.toLowerCase() === 'canceled' ? 'text-red-600' :
+                            order.status?.toLowerCase() === 'in_transit' ? 'text-blue-600' :
+                            'text-gray-600'
+                          }`}>
+                            {order.status}
+                          </div>
+                        </div>
                       </div>
                     ))}
                     {message.data.total > 10 && (
