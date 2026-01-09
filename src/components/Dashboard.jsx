@@ -41,7 +41,8 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [collapsedTiles, setCollapsedTiles] = useState({
     totalOrders: false,
     totalRevenue: false,
-    averageOrderValue: false
+    averageOrderValue: false,
+    bevviRevenue: false
   })
   const [collapsedFilters, setCollapsedFilters] = useState({
     dateRange: false,
@@ -318,6 +319,107 @@ const Dashboard = ({ onSwitchToAI }) => {
   const filteredTotalRevenueBasedOnTotal = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0)
   const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
+  
+  // Fee calculation function based on Bevvi transaction fee rules
+  const calculateFeeRate = (retailer, customer) => {
+    // Normalize inputs for comparison (trim and handle case)
+    const normalizedCustomer = (customer || '').trim()
+    const normalizedRetailer = (retailer || '').trim()
+    
+    // Priority 1: VistaJet Customer Rule (8%)
+    if (normalizedCustomer === 'VistaJet') {
+      return 0.08
+    }
+    
+    // Priority 2: 10% Retailer List Rule
+    const tenPercentRetailers = [
+      'Wine & Spirits Market',
+      'Freshco',
+      'National Liquor and Package',
+      'Mavy Clippership Wine & Spirits',
+      'LIQUOR MASTER',
+      "Sam's Liquor & Market",
+      'Dallas Fine Wine',
+      'Super Duper Liquor',
+      'Fountain Liquor & Spirits',
+      'Aficionados',
+      'Wine & Spirits Discount Warehouse',
+      'Youbooze',
+      'Garfields Beverage',
+      'ROYAL WINES & SPIRITS',
+      'Sundance Liquor & Gifts'
+    ]
+    if (tenPercentRetailers.includes(normalizedRetailer)) {
+      return 0.10
+    }
+    
+    // Priority 3: Sendoso Customer Rule (12%)
+    if (normalizedCustomer === 'Sendoso') {
+      return 0.12
+    }
+    
+    // Priority 4: In Good Taste Wines Rule (25%)
+    if (normalizedRetailer === 'In Good Taste Wines') {
+      return 0.25
+    }
+    
+    // Priority 5: Default Rule (20%)
+    return 0.20
+  }
+
+  // Calculate fees for an order
+  const calculateOrderFees = (order) => {
+    const retailer = (order.establishment || '').trim()
+    const customer = (order.customerName || '').trim()
+    const revenue = parseFloat(order.revenue) || 0
+    
+    if (revenue === 0) {
+      return { serviceFee: 0, retailerFee: 0 }
+    }
+    
+    // Determine fee rate based on retailer and customer rules
+    const feeRate = calculateFeeRate(retailer, customer)
+    
+    // Debug logging for Sendoso orders
+    if (customer === 'Sendoso' || customer.toLowerCase().includes('sendoso')) {
+      console.log(`🔍 Sendoso order detected:`, {
+        orderId: order.id,
+        customer: customer,
+        retailer: retailer,
+        revenue: revenue,
+        feeRate: feeRate,
+        calculatedRetailerFee: Math.round(revenue * feeRate * 100) / 100
+      })
+    }
+    
+    // Retailer fee = revenue × fee_rate
+    // This is the percentage of revenue that goes to the retailer based on the fee rate
+    const retailerFee = Math.round(revenue * feeRate * 100) / 100
+    
+    return { serviceFee: 0, retailerFee }
+  }
+
+  // Calculate total service fee and retailer fee from API data and fee rules
+  const totalFees = useMemo(() => {
+    const fees = filteredAcceptedOrders.reduce((acc, order) => {
+      // Get service fee from API
+      const apiServiceFee = parseFloat(order.serviceCharge) || 0
+      
+      // Calculate retailer fee based on fee rules
+      const { retailerFee } = calculateOrderFees(order)
+      
+      return {
+        serviceFee: acc.serviceFee + apiServiceFee,
+        retailerFee: acc.retailerFee + retailerFee
+      }
+    }, { serviceFee: 0, retailerFee: 0 })
+    
+    return {
+      serviceFee: Math.round(fees.serviceFee * 100) / 100,
+      retailerFee: Math.round(fees.retailerFee * 100) / 100,
+      total: Math.round((fees.serviceFee + fees.retailerFee) * 100) / 100
+    }
+  }, [filteredAcceptedOrders])
 
   // Fetch orders function
   const fetchOrders = async () => {
@@ -878,7 +980,7 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* Summary Tiles - Hidden during loading */}
         {!isLoading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-4 sm:mb-6">
           {/* Total Orders Tile */}
           <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
             <div className="flex items-center justify-between">
@@ -936,7 +1038,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 </div>
               </div>
               <div className="ml-2 sm:ml-4 min-w-0 flex-1">
-                  <p className="text-xs sm:text-sm font-medium text-gray-500">Total Revenue (Excluding Pending/Cancelled/Rejected)</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">GMV (Excluding Pending/Cancelled/Rejected)</p>
                   <dd className="text-lg sm:text-xl font-medium text-gray-900">{formatDollarAmount(filteredTotalRevenue)}</dd>
                 </div>
               </div>
@@ -957,11 +1059,11 @@ const Dashboard = ({ onSwitchToAI }) => {
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="space-y-2 text-sm text-gray-600">
                   <div className="flex justify-between">
-                    <span>Base Revenue:</span>
+                    <span>GMV:</span>
                     <span className="font-medium">{formatDollarAmount(filteredTotalRevenue)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Total Revenue (Based on Total):</span>
+                    <span>GMV + Tax + Shipping/Delivery + Service:</span>
                     <span className="font-medium">{formatDollarAmount(filteredTotalRevenueBasedOnTotal)}</span>
                   </div>
                   <div className="flex justify-between">
@@ -1024,6 +1126,59 @@ const Dashboard = ({ onSwitchToAI }) => {
                 </div>
                 </div>
               )}
+          </div>
+
+          {/* Revenue Tile */}
+          <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.bevviRevenue ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center min-w-0 flex-1">
+                <div className="flex-shrink-0">
+                  <div className="w-6 h-6 sm:w-8 sm:h-8 bg-orange-100 rounded-md flex items-center justify-center">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="ml-2 sm:ml-4 min-w-0 flex-1">
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">Revenue (Excluding Pending/Cancelled/Rejected)</p>
+                  <dd className="text-lg sm:text-xl font-medium text-gray-900">{formatDollarAmount(totalFees.total)}</dd>
+                </div>
+              </div>
+              <button
+                onClick={() => toggleTile('bevviRevenue')}
+                className="p-1 hover:bg-gray-100 rounded transition-colors"
+                title={collapsedTiles.bevviRevenue ? 'Expand' : 'Collapse'}
+              >
+                {collapsedTiles.bevviRevenue ? (
+                  <ChevronDown className="h-5 w-5 text-gray-500" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-gray-500" />
+                )}
+              </button>
+            </div>
+            
+            {!collapsedTiles.bevviRevenue && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <div className="space-y-2 text-sm text-gray-600">
+                  <div className="flex justify-between">
+                    <span>Service Fee:</span>
+                    <span className="font-medium">{formatDollarAmount(totalFees.serviceFee)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Retailer Fee:</span>
+                    <span className="font-medium">{formatDollarAmount(totalFees.retailerFee)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Revenue:</span>
+                    <span className="font-medium">{formatDollarAmount(totalFees.total)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Accepted Orders:</span>
+                    <span className="font-medium">{formatNumber(filteredAcceptedOrders.length)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         )}
@@ -1183,6 +1338,16 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24"
+                    >
+                          <span>Service Fee</span>
+                    </th>
+                    <th 
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24"
+                    >
+                          <span>Retailer Fee</span>
+                    </th>
+                    <th 
                           className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-20"
                           onClick={() => handleSort('total')}
                         >
@@ -1297,6 +1462,16 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </span>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={formatDollarAmount(parseFloat(order.serviceCharge) || 0)}>
+                              {formatDollarAmount(parseFloat(order.serviceCharge) || 0)}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={formatDollarAmount(calculateOrderFees(order).retailerFee)}>
+                              {formatDollarAmount(calculateOrderFees(order).retailerFee)}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={formatDollarAmount(order.revenue)}>
                               {formatDollarAmount(order.revenue)}
                             </div>
@@ -1407,6 +1582,14 @@ const Dashboard = ({ onSwitchToAI }) => {
                               <p className="text-sm font-medium text-gray-900">{deliveryTimeDisplay}</p>
                             </div>
                             <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Service Fee</p>
+                              <p className="text-sm font-medium text-gray-900">{formatDollarAmount(parseFloat(order.serviceCharge) || 0)}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Retailer Fee</p>
+                              <p className="text-sm font-medium text-gray-900">{formatDollarAmount(calculateOrderFees(order).retailerFee)}</p>
+                            </div>
+                            <div>
                               <p className="text-xs text-gray-500 mb-0.5">Total</p>
                               <p className="text-sm font-semibold text-gray-900">{formatDollarAmount(order.revenue)}</p>
                             </div>
@@ -1460,29 +1643,44 @@ const Dashboard = ({ onSwitchToAI }) => {
       <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-gray-700 z-40">
         <div className="max-w-7xl mx-auto">
           {/* Mobile Layout */}
-          <div className="md:hidden space-y-1.5 text-xs">
-            <div className="flex items-center justify-between">
+          <div className="md:hidden text-xs">
+            <div className="flex items-center justify-between flex-wrap gap-1.5">
               <div className="flex items-center space-x-2">
                 <div className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
                 <span className="text-gray-300">
-                  {autoRefresh ? 'Auto-refresh ON' : 'Auto-refresh OFF'}
+                  {autoRefresh ? 'Auto-refresh: Active (20 min)' : 'Auto-refresh: Inactive'}
                 </span>
               </div>
+              {lastRefreshTime && !isLoading && (
+                <div className="text-gray-300">
+                  Last refresh: {lastRefreshTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                </div>
+              )}
+              {isLoading && (
+                <div className="flex items-center text-yellow-300">
+                  <div className="animate-spin rounded-full h-2 w-2 border-b-2 border-yellow-300 mr-1.5"></div>
+                  Fetching data...
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-between flex-wrap gap-1.5 mt-1">
+              {nextRefreshTime && autoRefresh && !isLoading && (
+                <div className="text-gray-300">
+                  Next refresh: {nextRefreshTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                </div>
+              )}
               <div className="text-gray-300">
-                {formatNumber(orders.length)} orders
+                {isLoading ? (
+                  'Loading...'
+                ) : (
+                  <>
+                    Orders: {formatNumber(orders.length)} | 
+                    Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
+                    v2.1.1
+                  </>
+                )}
               </div>
             </div>
-            {lastRefreshTime && !isLoading && (
-              <div className="text-gray-400 text-xs">
-                Last: {lastRefreshTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-              </div>
-            )}
-            {isLoading && (
-              <div className="flex items-center text-yellow-300 text-xs">
-                <div className="animate-spin rounded-full h-2 w-2 border-b-2 border-yellow-300 mr-1.5"></div>
-                Fetching data...
-              </div>
-            )}
           </div>
           
           {/* Desktop Layout */}
@@ -1519,7 +1717,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.1.0
+                    v2.1.1
                   </>
                 )}
               </div>

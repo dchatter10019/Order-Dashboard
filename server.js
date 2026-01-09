@@ -1192,24 +1192,13 @@ app.get('/api/orders', async (req, res) => {
     // Update auto-refresh range when new dates are requested
     updateAutoRefreshRange(startDate, endDate)
     
-    // Check cache first
-    const cacheKey = `${startDate}-${endDate}`
-    const cached = ordersCache.get(cacheKey)
-    console.log(`🔍 Cache check for ${cacheKey}:`, cached ? 'HIT' : 'MISS')
-    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
-      console.log('✅ Returning cached data for:', cacheKey, '- Orders:', cached.data.length)
-      return res.json({
-        success: true,
-        data: cached.data,
-        dateRange: { startDate, endDate },
-        totalOrders: cached.data.length,
-        message: `Orders fetched for ${startDate} to ${endDate}`,
-        source: 'Cache',
-        cached: true
-      })
+    // Automatically start auto-refresh if not already running
+    if (!autoRefreshTimer) {
+      startAutoRefresh()
+      console.log('🔄 Auto-refresh automatically started for date range:', startDate, 'to', endDate)
     }
     
-    console.log('🌐 Cache miss or expired - fetching from Bevvi API...')
+    console.log('🌐 Fetching orders from Bevvi API...')
     
     // Calculate date range in days
     const diffTime = Math.abs(new Date(endDate) - new Date(startDate))
@@ -1240,9 +1229,6 @@ app.get('/api/orders', async (req, res) => {
           // Continue with other chunks even if one fails
         }
       }
-      
-      // Cache the combined results
-      ordersCache.set(cacheKey, { data: allOrders, timestamp: Date.now() })
       
       console.log(`✅ All chunks processed: ${allOrders.length} total orders from ${successfulChunks}/${chunks.length} successful chunks`)
       
@@ -1370,9 +1356,6 @@ app.get('/api/orders', async (req, res) => {
           
           console.log(`🔍 Orders with delivery dates in range: ${filteredOrders.filter(o => o.deliveryDate && o.deliveryDate !== 'N/A' && o.deliveryDate >= startDate && o.deliveryDate <= endDate).length}`)
           console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate >= startDate && o.orderDate <= endDate).length}`)
-          
-          // Cache the results (WITHOUT state enrichment for faster performance)
-          ordersCache.set(cacheKey, { data: filteredOrders, timestamp: Date.now() })
           
           // Check if we got real orders from API
           if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
@@ -1682,9 +1665,7 @@ let lastAutoRefreshRange = null
 // Store connected clients for real-time updates
 let connectedClients = []
 
-// Cache configuration
-const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes cache
-const ordersCache = new Map() // key: "startDate-endDate", value: { data, timestamp }
+// Orders cache removed - always fetch fresh from API
 
 // Products cache - loaded on server startup
 let productsCache = []
@@ -1964,17 +1945,15 @@ app.get('/api/health', (req, res) => {
   })
 })
 
-// Clear cache endpoint
+// Clear cache endpoint (orders cache removed - endpoint kept for compatibility)
 app.post('/api/cache/clear', (req, res) => {
   try {
-    const cacheSize = ordersCache.size
-    ordersCache.clear()
-    console.log(`🧹 Cache cleared - ${cacheSize} entries removed`)
+    console.log(`🧹 Cache clear requested (orders cache disabled - always fetches fresh)`)
     
     res.json({
       success: true,
-      message: `Cache cleared successfully. ${cacheSize} entries removed.`,
-      previousSize: cacheSize
+      message: `Orders cache is disabled - orders are always fetched fresh from the API.`,
+      previousSize: 0
     })
   } catch (error) {
     console.error('❌ Error clearing cache:', error)
@@ -2837,9 +2816,8 @@ app.listen(PORT, async () => {
   console.log(`   GET  /api/products/status - Get cache status`)
   console.log(``)
   
-  // Clear orders cache on startup to ensure fresh data
-  ordersCache.clear()
-  console.log(`🧹 Orders cache cleared on startup`)
+  // Orders cache disabled - always fetch fresh from API
+  console.log(`📦 Orders cache disabled - always fetching fresh data from API`)
   
   console.log(`📦 Loading all Bevvi products on startup...`)
   await loadAllProducts()
