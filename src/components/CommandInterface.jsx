@@ -9,7 +9,8 @@ const CommandInterface = ({
   onFetchOrders, 
   isLoadingData,
   messages: providedMessages,
-  setMessages: providedSetMessages
+  setMessages: providedSetMessages,
+  dateRange: currentDateRange // Add current dateRange from parent
 }) => {
   const [input, setInput] = useState('')
   const [expandedOrders, setExpandedOrders] = useState({}) // Track which message's orders are expanded
@@ -378,6 +379,72 @@ const CommandInterface = ({
              (gptParsedData?.intent === 'revenue_by_customer') ||
              (!gptParsedData && lower.includes('revenue') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' of ')))) {
       console.log('🔍 Entering revenue by customer block')
+      
+      // Check if we need to fetch data for a date range first
+      const dateRangeForQuery = gptParsedData?.dateRange || parseDate(command)
+      console.log('🔍 Revenue by customer - checking date range:', {
+        hasDateRangeForQuery: !!dateRangeForQuery,
+        dateRangeForQuery: dateRangeForQuery,
+        currentDateRange: currentDateRange,
+        hasOnDateRangeChange: !!onDateRangeChange,
+        hasOnFetchOrders: !!onFetchOrders
+      })
+      
+      if (dateRangeForQuery && onDateRangeChange && onFetchOrders) {
+        // Check if current dateRange matches the query dateRange
+        const needsFetch = !currentDateRange || 
+          currentDateRange.startDate !== dateRangeForQuery.startDate || 
+          currentDateRange.endDate !== dateRangeForQuery.endDate
+        
+        console.log('🔍 Revenue by customer - needsFetch check:', {
+          needsFetch,
+          currentDateRangeExists: !!currentDateRange,
+          datesMatch: currentDateRange && 
+            currentDateRange.startDate === dateRangeForQuery.startDate && 
+            currentDateRange.endDate === dateRangeForQuery.endDate
+        })
+        
+        if (needsFetch) {
+          console.log('⏸️ Revenue query needs date range fetch, DEFERRING processing')
+          console.log(`   Current dateRange: ${currentDateRange?.startDate} to ${currentDateRange?.endDate}`)
+          console.log(`   Query dateRange: ${dateRangeForQuery.startDate} to ${dateRangeForQuery.endDate}`)
+          
+          // Save command to process after fetch
+          pendingCommandRef.current = command
+          pendingGPTDataRef.current = gptParsedData || {
+            customer: gptParsedData?.customer,
+            intent: 'revenue_by_customer',
+            dateRange: dateRangeForQuery
+          }
+          
+          console.log('💾 Saved pending command:', {
+            command: pendingCommandRef.current,
+            gptData: pendingGPTDataRef.current
+          })
+          
+          // Show loading message
+          const loadingMessage = {
+            type: 'assistant',
+            content: dateRangeForQuery.isMTD 
+              ? `📊 Fetching orders for ${dateRangeForQuery.startDate} to ${dateRangeForQuery.endDate} (Month-to-Date)...`
+              : `📊 Fetching orders for ${dateRangeForQuery.startDate} to ${dateRangeForQuery.endDate}...`,
+            loading: true
+          }
+          setMessages(prev => [...prev, loadingMessage])
+          
+          // Trigger fetch (same logic as below)
+          console.log('🚀 Calling onDateRangeChange to trigger fetch...')
+          onDateRangeChange(dateRangeForQuery)
+          
+          // Return the loading message (it's already added to messages above, but return it so handleSubmit knows)
+          return loadingMessage
+        } else {
+          console.log('✅ Date range matches, processing immediately with current orders')
+        }
+      } else {
+        console.log('⚠️ Cannot defer - missing dateRangeForQuery, onDateRangeChange, or onFetchOrders')
+      }
+      
       // Use GPT-parsed customer name if available, otherwise extract with regex
       let customerName = gptParsedData?.customer || ''
       
@@ -1101,8 +1168,9 @@ const CommandInterface = ({
         // Pattern 2: "orders from Vistajet for Oct 2025"
         // Pattern 3: "orders for Vistajet"
         const patterns = [
-          /(?:show\s+me\s+all\s+)?(?:the\s+)?orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+from\s+|\s+in\s+|\s+during\s+|$)/i,
-          /orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+for\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+from\s+|\s+in\s+|\s+during\s+|$)/i
+          /(?:show\s+me\s+all\s+)?(?:the\s+)?orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:for|in|during)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+(?:from|in|during)\s+|$)/i,
+          /orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:for|in|during)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+(?:from|in|during)\s+|$)/i,
+          /(?:show\s+me\s+all\s+)?orders?\s+of\s+([a-zA-Z0-9\s]+?)(?:\s+in\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|$)/i
         ]
         
         for (const pattern of patterns) {
@@ -1121,14 +1189,85 @@ const CommandInterface = ({
       }
       
       console.log('💼 Customer name for orders query:', customerName, '| Source:', gptParsedData?.customer ? 'GPT' : 'Regex')
+      console.log('📊 Relevant orders before customer filter:', relevantOrders.length)
+      console.log('📅 Date range:', dateRange)
       
-      // Filter by customer if specified
+      // Filter by customer if specified - use sophisticated matching
       let ordersToShow = relevantOrders
       if (customerName && customerName.length >= 3) {
-        ordersToShow = relevantOrders.filter(order => 
-          order.customerName?.toLowerCase().includes(customerName.toLowerCase())
-        )
+        // Normalize customer name: trim, normalize spaces, handle common variations
+        const normalizedSearchName = customerName.toLowerCase().trim().replace(/\s+/g, ' ')
+        console.log('🔍 Normalized search name:', normalizedSearchName)
+        
+        // Helper function to match customer names with multiple strategies
+        const matchesCustomer = (orderCustomerName) => {
+          if (!orderCustomerName) return false
+          
+          const normalizedOrderName = orderCustomerName.toLowerCase().trim().replace(/\s+/g, ' ')
+          
+          // Strategy 1: Exact match (normalized)
+          if (normalizedOrderName === normalizedSearchName) return true
+          
+          // Strategy 2: Order name contains search name
+          if (normalizedOrderName.includes(normalizedSearchName)) return true
+          
+          // Strategy 3: Search name contains order name (for partial searches)
+          if (normalizedSearchName.includes(normalizedOrderName)) return true
+          
+          // Strategy 4: Word-based matching (handle "Air Culinaire" vs "Air Culinaire Worldwide")
+          const searchWords = normalizedSearchName.split(/\s+/).filter(w => w.length > 2)
+          const orderWords = normalizedOrderName.split(/\s+/).filter(w => w.length > 2)
+          
+          if (searchWords.length > 0) {
+            // Check if all significant words from search are in order name
+            const allWordsMatch = searchWords.every(word => 
+              orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+            )
+            if (allWordsMatch) return true
+          }
+          
+          // Strategy 5: Handle variations like "AirCulinaire" vs "Air Culinaire" or "Vistajet" vs "VistaJet"
+          const searchNoSpaces = normalizedSearchName.replace(/\s+/g, '')
+          const orderNoSpaces = normalizedOrderName.replace(/\s+/g, '')
+          if (searchNoSpaces === orderNoSpaces) return true
+          if (orderNoSpaces.includes(searchNoSpaces)) return true
+          
+          return false
+        }
+        
+        // Show sample customer names from relevant orders for debugging
+        const sampleCustomerNames = [...new Set(relevantOrders.slice(0, 20).map(o => o.customerName).filter(Boolean))]
+        console.log('🔍 Sample customer names in date range:', sampleCustomerNames)
+        
+        ordersToShow = relevantOrders.filter(order => matchesCustomer(order.customerName))
+        
         console.log(`🔍 Filtered to ${ordersToShow.length} orders for customer "${customerName}"`)
+        
+        // Debug logging for customer matching
+        if (ordersToShow.length === 0 && relevantOrders.length > 0) {
+          const allCustomerNames = [...new Set(relevantOrders.map(o => o.customerName).filter(Boolean))]
+          console.log('❌ No matches found. All unique customer names in date range:', allCustomerNames)
+          console.log('🔍 Searching for normalized:', normalizedSearchName)
+          
+          // Try fuzzy matching to suggest similar names
+          const fuzzyMatches = allCustomerNames.filter(name => {
+            const normalized = name.toLowerCase().trim()
+            return normalized.includes(normalizedSearchName) || 
+                   normalizedSearchName.includes(normalized) ||
+                   normalized.replace(/\s+/g, '').includes(normalizedSearchName.replace(/\s+/g, ''))
+          })
+          
+          if (fuzzyMatches.length > 0) {
+            console.log('💡 Fuzzy matches found:', fuzzyMatches)
+          } else {
+            console.log('⚠️ No fuzzy matches found. Customer name might be spelled differently in data.')
+          }
+        } else if (ordersToShow.length > 0) {
+          const matchedNames = [...new Set(ordersToShow.map(o => o.customerName))].slice(0, 5)
+          console.log('✅ Matched customer names:', matchedNames)
+        }
+      } else {
+        console.log('⚠️ No customer name provided or customer name too short')
       }
       
       // Check if user wants to SEE the orders (show, list, display) or just get a count
@@ -1201,15 +1340,55 @@ const CommandInterface = ({
 
   // Watch for orders change after date range update
   useEffect(() => {
+    const pendingDateRange = pendingGPTDataRef.current?.dateRange
     console.log('🔍 Orders or loading status changed:', {
       hasPendingCommand: !!pendingCommandRef.current,
       isLoadingData,
       ordersCount: orders.length,
       pendingCommand: pendingCommandRef.current,
-      pendingGPTData: pendingGPTDataRef.current
+      pendingDateRange: pendingDateRange,
+      currentDateRange: currentDateRange // Add current date range from props
     })
     
     if (pendingCommandRef.current && !isLoadingData) {
+      // Check if we're waiting for a specific date range
+      if (pendingDateRange) {
+        // CRITICAL: Verify that the current dateRange matches the pending dateRange
+        // This ensures we're processing with orders from the correct date range
+        const dateRangeMatches = currentDateRange && 
+          currentDateRange.startDate === pendingDateRange.startDate && 
+          currentDateRange.endDate === pendingDateRange.endDate
+        
+        if (!dateRangeMatches) {
+          console.log(`⏳ Date range mismatch - waiting for date range to update:`)
+          console.log(`   Current: ${currentDateRange?.startDate} to ${currentDateRange?.endDate}`)
+          console.log(`   Pending: ${pendingDateRange.startDate} to ${pendingDateRange.endDate}`)
+          return // Don't process yet, wait for date range to match
+        }
+        
+        // Verify that we have orders for the requested date range
+        const ordersInRange = orders.filter(order => {
+          const orderDate = order.orderDate
+          return orderDate >= pendingDateRange.startDate && orderDate <= pendingDateRange.endDate
+        })
+        console.log(`📅 Date range matches! Checking orders:`)
+        console.log(`   Requested: ${pendingDateRange.startDate} to ${pendingDateRange.endDate}`)
+        console.log(`   Found ${ordersInRange.length} orders in requested date range out of ${orders.length} total orders`)
+        
+        // CRITICAL: Only process if we have orders in the requested range
+        // Don't process if we only have orders from a different date range
+        if (ordersInRange.length === 0) {
+          console.log('⏳ Waiting for orders in date range to load... (not processing yet)')
+          return // Don't process yet, wait for orders in the correct date range
+        }
+        
+        console.log(`✅ Found ${ordersInRange.length} orders in requested date range, processing command`)
+      } else if (orders.length === 0) {
+        // No date range specified, but no orders loaded - wait
+        console.log('⏳ Waiting for orders to load...')
+        return
+      }
+      
       console.log('🤖 Processing pending command with loaded data:', orders.length, 'orders')
       console.log('🎯 Pending GPT data:', pendingGPTDataRef.current)
       
@@ -1235,7 +1414,7 @@ const CommandInterface = ({
       }, 500) // Increased to 500ms to ensure orders state is updated
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, isLoadingData])
+  }, [orders, isLoadingData, currentDateRange]) // Add currentDateRange to dependencies
   
   // Cleanup on unmount
   useEffect(() => {
@@ -1396,6 +1575,54 @@ const CommandInterface = ({
       dateRange = parseDate(userInput)
     }
     
+    // CRITICAL: If a date range is specified, ALWAYS fetch orders for that date range FIRST
+    // before processing any command (including customer filters). This ensures we have the
+    // correct data before filtering by customer.
+    if (dateRange && onDateRangeChange && onFetchOrders) {
+      console.log('📅 Date range detected in query - will fetch orders FIRST, then process command')
+      console.log(`   Requested date range: ${dateRange.startDate} to ${dateRange.endDate}`)
+      console.log(`   Current date range: ${currentDateRange?.startDate} to ${currentDateRange?.endDate}`)
+      
+      // Check if we need to fetch (date range doesn't match current)
+      const needsFetch = !currentDateRange || 
+        currentDateRange.startDate !== dateRange.startDate || 
+        currentDateRange.endDate !== dateRange.endDate
+      
+      if (needsFetch) {
+        console.log('⏸️ Date range mismatch - DEFERRING command processing until orders are loaded')
+        console.log('   Step 1: Fetching orders for date range...')
+        console.log('   Step 2: Will filter by customer after orders are loaded')
+        
+        // Save command and GPT data to process after fetch completes
+        pendingCommandRef.current = userInput
+        pendingGPTDataRef.current = {
+          customer: parsedCustomer,
+          intent: parsedIntent,
+          brand: parsedBrand,
+          dateRange: dateRange
+        }
+        
+        // Show loading message
+        const loadingMessage = {
+          type: 'assistant',
+          content: dateRange.isMTD 
+            ? `📊 Fetching orders for ${dateRange.startDate} to ${dateRange.endDate} (Month-to-Date)...`
+            : `📊 Fetching orders for ${dateRange.startDate} to ${dateRange.endDate}...`,
+          loading: true
+        }
+        setMessages(prev => [...prev, loadingMessage])
+        
+        // Trigger fetch - useEffect will process command after orders load
+        console.log('🚀 Triggering fetch for date range...')
+        onDateRangeChange(dateRange)
+        
+        // Exit early - don't process command yet
+        return
+      } else {
+        console.log('✅ Date range matches current - orders already loaded, processing immediately')
+      }
+    }
+    
     // Check if this is a query with specific filters (customer, specific state) that should use existing data
     const lower = userInput.toLowerCase()
     
@@ -1408,6 +1635,7 @@ const CommandInterface = ({
                                   (lower.includes('who') && (lower.includes('bought') || lower.includes('ordered') || lower.includes('purchased') || lower.includes('buy')))
     
     // Only skip fetch for customer-specific queries or brand-customer queries (NOT for breakdown queries)
+    // NOTE: This check is now AFTER the date range fetch check above, so date range always takes priority
     const hasSpecificFilter = 
       parsedCustomer || // GPT found a customer
       needsCustomersByBrand || // Customers by brand query
@@ -1667,9 +1895,13 @@ const CommandInterface = ({
           pendingGPTDataRef.current = null
         }
       }, timeoutDuration)
+      
+      // IMPORTANT: Don't process command here - wait for fetch to complete
+      // The useEffect will process the pending command after orders are loaded
+      return // Exit early - don't process command yet
     } else {
-      // Process command immediately with current data
-      console.log('🤖 Processing command with current data:', orders.length, 'orders')
+      // Process command immediately with current data (no date range change needed)
+      console.log('🤖 Processing command with current data (no fetch needed):', orders.length, 'orders')
       const gptParsedData = {
         customer: parsedCustomer,
         intent: parsedIntent,

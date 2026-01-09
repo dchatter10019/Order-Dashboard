@@ -77,10 +77,22 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
       }
       
       console.log(`✅ AI Assistant received ${data.data?.length || 0} orders${useStateEnrichment ? ' (state-enriched)' : ''}`)
+      console.log(`📅 Date range for fetched orders: ${dateRange.startDate} to ${dateRange.endDate}`)
       
       if (data.data && Array.isArray(data.data)) {
+        // Log sample of order dates to verify they're in the right range
+        if (data.data.length > 0) {
+          const sampleDates = data.data.slice(0, 5).map(o => o.orderDate)
+          console.log(`📊 Sample order dates from API:`, sampleDates)
+          const ordersInRange = data.data.filter(o => {
+            const orderDate = o.orderDate
+            return orderDate >= dateRange.startDate && orderDate <= dateRange.endDate
+          })
+          console.log(`✅ ${ordersInRange.length} orders are in the requested date range (${dateRange.startDate} to ${dateRange.endDate})`)
+        }
         setOrders(data.data)
       } else {
+        console.log('⚠️ No orders data received from API')
         setOrders([])
       }
     } catch (error) {
@@ -116,9 +128,10 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
 
   // Handle date range changes AFTER initial mount
   useEffect(() => {
-    if (hasMounted) {
-      console.log('📅 Date range changed after mount, fetching new orders')
+    if (hasMounted && dateRange && dateRange.startDate && dateRange.endDate) {
+      console.log('📅 Date range changed after mount, fetching new orders:', dateRange.startDate, 'to', dateRange.endDate)
       const debounceTimer = setTimeout(() => {
+        console.log('🚀 Executing fetchOrders for date range:', dateRange.startDate, 'to', dateRange.endDate)
         fetchOrders()
       }, 500)
       return () => clearTimeout(debounceTimer)
@@ -146,6 +159,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
         
         <CommandInterface 
           orders={orders}
+          dateRange={dateRange}
           onDateRangeChange={setDateRange}
           onFetchOrders={fetchOrders}
           isLoadingData={isLoading}

@@ -2574,7 +2574,7 @@ Extract the following information from the user's query:
   * sales_by_state: asking for sales/revenue breakdown by state (e.g., "sales by state for Nov")
   * unknown: if the query is NOT about orders, revenue, tax, tips, delivery, or customer data (e.g., weather, personal questions, unrelated topics)
   
-- customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire, Air Culinaire Worldwide, Vistajet, VistaJet, etc.). Always extract full company name, not partial words. Extract customer names from phrases like "orders from [customer]", "orders for [customer]", "revenue from [customer]", "revenue for [month] for [customer]". For queries like "revenue for Oct for Air Culinaire", extract "Air Culinaire" as the customer name.
+- customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire, Air Culinaire Worldwide, Vistajet, VistaJet, etc.). Always extract full company name, not partial words. Extract customer names from phrases like "orders from [customer]", "orders for [customer]", "orders of [customer]", "revenue from [customer]", "revenue for [month] for [customer]". For queries like "revenue for Oct for Air Culinaire" or "show me all orders of Vistajet in Dec 2025", extract the full customer name. Note: "Vistajet" and "VistaJet" refer to the same customer - extract as "Vistajet" or "VistaJet" based on what appears in the query.
 - brand: Brand name if mentioned (Schrader, Dom Perignon, Tito's, Grey Goose, etc.). Extract the full brand name.
 - startDate: Start date in YYYY-MM-DD format
 - endDate: End date in YYYY-MM-DD format
