@@ -1118,14 +1118,10 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <div className="flex justify-between">
                     <span>Revenue Orders:</span>
                     <span className="font-medium">{formatNumber(filteredAcceptedOrders.length)}</span>
-          </div>
-                  <div className="flex justify-between">
-                    <span>Calculation:</span>
-                    <span className="font-medium">{filteredAcceptedOrders.length > 0 ? `${formatDollarAmount(filteredTotalRevenue)} ÷ ${formatNumber(filteredAcceptedOrders.length)} = ${formatDollarAmount(filteredAverageOrderValue)}` : 'N/A'}</span>
-            </div>
+                  </div>
                 </div>
-                </div>
-              )}
+              </div>
+            )}
           </div>
 
           {/* Revenue Tile */}
