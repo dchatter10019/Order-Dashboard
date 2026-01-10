@@ -1304,8 +1304,174 @@ const CommandInterface = ({
         }
       }
     }
-    // Average order value
-    else if ((gptParsedData?.intent === 'average_order_value') || (!gptParsedData && (lower.includes('average') || lower.includes('aov')))) {
+    
+    // Check if query mentions retailer (used for both retailer-specific and general AOV handlers)
+    // Check for retailer mentions in multiple ways
+    const hasRetailerMention = 
+      lower.includes('from retailer') || 
+      lower.includes('from store') || 
+      lower.includes('retailer') || 
+      !!gptParsedData?.retailer ||
+      // Also check if query has retailer name patterns (capitalized words after "retailer")
+      /retailer\s+[A-Z][a-zA-Z\s]+/i.test(command)
+    
+    const isAOVQuery = 
+      lower.includes('aov') || 
+      lower.includes('average') || 
+      gptParsedData?.intent === 'average_order_value' || 
+      gptParsedData?.intent === 'aov_by_retailer'
+    
+    // Check if this should be a retailer query (even if GPT didn't identify it)
+    const shouldBeRetailerQuery = isAOVQuery && hasRetailerMention && 
+      !(gptParsedData?.intent === 'revenue_by_store' || gptParsedData?.intent === 'revenue_by_brand')
+    
+    console.log('🔍 AOV query detection:', {
+      command: command,
+      lower: lower,
+      gptIntent: gptParsedData?.intent,
+      gptRetailer: gptParsedData?.retailer,
+      hasRetailerMention,
+      isAOVQuery,
+      shouldBeRetailerQuery,
+      willMatchRetailerHandler: gptParsedData?.intent === 'aov_by_retailer' || shouldBeRetailerQuery
+    })
+    
+    // AOV by retailer (must check BEFORE general AOV to avoid conflicts)
+    // Be very aggressive - if query has "aov"/"average" AND "retailer" AND a retailer name pattern, route here
+    const hasRetailerNamePattern = /(?:retailer|from retailer|from store)\s+([A-Z][a-zA-Z\s&'\-]+)/i.test(command)
+    const definitelyRetailerQuery = (isAOVQuery && (hasRetailerMention || hasRetailerNamePattern)) && 
+      !(gptParsedData?.intent === 'revenue_by_store' || gptParsedData?.intent === 'revenue_by_brand')
+    
+    if (gptParsedData?.intent === 'aov_by_retailer' || shouldBeRetailerQuery || definitelyRetailerQuery) {
+      console.log('✅ AOV by retailer query detected - using retailer handler', {
+        gptIntent: gptParsedData?.intent,
+        shouldBeRetailerQuery,
+        definitelyRetailerQuery,
+        hasRetailerNamePattern
+      })
+      let retailerName = gptParsedData?.retailer || ''
+      
+      // Extract retailer name from query if not provided by GPT
+      // Try multiple patterns to catch different query formats
+      if (!retailerName) {
+        // Pattern 1: "from retailer [name]"
+        let retailerMatch = command.match(/(?:from\s+retailer|from\s+store)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|\s+from|$)/i)
+        if (retailerMatch && retailerMatch[1]) {
+          retailerName = retailerMatch[1].trim()
+        } else {
+          // Pattern 2: "retailer [name]" (without "from")
+          retailerMatch = command.match(/retailer\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|\s+from|$)/i)
+          if (retailerMatch && retailerMatch[1]) {
+            retailerName = retailerMatch[1].trim()
+          } else {
+            // Pattern 3: Look for capitalized words after "retailer" or common retailer names
+            const words = command.split(/\s+/)
+            const retailerIndex = words.findIndex(w => w.toLowerCase() === 'retailer')
+            if (retailerIndex >= 0 && retailerIndex < words.length - 1) {
+              // Take the next 2-3 words as potential retailer name
+              const potentialName = words.slice(retailerIndex + 1, retailerIndex + 4).join(' ')
+              if (potentialName.length >= 3) {
+                retailerName = potentialName.trim()
+              }
+            }
+          }
+        }
+      }
+      
+      console.log('🏪 Retailer name extracted:', retailerName, '| GPT retailer:', gptParsedData?.retailer)
+      console.log('📊 Relevant orders before retailer filter:', relevantOrders.length)
+      console.log('📝 Original command:', command)
+      
+      if (!retailerName || retailerName.length < 3) {
+        response.content = 'Please specify a retailer name. For example: "Show me the AOV for all orders in Dec from retailer Liquor Master"'
+        return response
+      }
+      
+      // Helper function to match retailer names
+      const matchesRetailer = (orderRetailer) => {
+        if (!orderRetailer) return false
+        const normalizedSearch = retailerName.toLowerCase().trim().replace(/\s+/g, ' ')
+        const normalizedOrder = orderRetailer.toLowerCase().trim().replace(/\s+/g, ' ')
+        
+        // Exact match
+        if (normalizedOrder === normalizedSearch) {
+          console.log(`✅ Exact match: "${orderRetailer}" === "${retailerName}"`)
+          return true
+        }
+        
+        // Contains match
+        if (normalizedOrder.includes(normalizedSearch)) {
+          console.log(`✅ Contains match: "${orderRetailer}" contains "${retailerName}"`)
+          return true
+        }
+        if (normalizedSearch.includes(normalizedOrder)) {
+          console.log(`✅ Contains match: "${retailerName}" contains "${orderRetailer}"`)
+          return true
+        }
+        
+        // Word-based matching - match all significant words
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2) // Changed to >= 2 to catch "li" in "liquor"
+        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length >= 2)
+        
+        if (searchWords.length > 0) {
+          const allWordsMatch = searchWords.every(word => 
+            orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+          )
+          if (allWordsMatch) {
+            console.log(`✅ Word match: "${orderRetailer}" matches "${retailerName}"`)
+            return true
+          }
+        }
+        
+        return false
+      }
+      
+      const retailerOrders = relevantOrders.filter(order => matchesRetailer(order.establishment))
+      console.log('🏪 Orders after retailer filter:', retailerOrders.length)
+      
+      // Show sample retailer names for debugging
+      if (retailerOrders.length === 0 && relevantOrders.length > 0) {
+        const sampleRetailers = [...new Set(relevantOrders.slice(0, 20).map(o => o.establishment).filter(Boolean))]
+        console.log('🔍 Sample retailer names in data:', sampleRetailers)
+        console.log('🔍 Searching for:', retailerName)
+      }
+      
+      const acceptedOrders = retailerOrders.filter(order => 
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      const totalRevenue = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.revenue) || 0), 0
+      )
+      const avgOrderValue = acceptedOrders.length > 0 ? totalRevenue / acceptedOrders.length : 0
+      
+      console.log('💰 AOV calculation:', {
+        retailerName,
+        totalOrders: retailerOrders.length,
+        acceptedOrders: acceptedOrders.length,
+        totalRevenue,
+        avgOrderValue
+      })
+      
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      const periodText = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+      
+      if (retailerOrders.length === 0) {
+        const sampleRetailers = [...new Set(relevantOrders.slice(0, 10).map(o => o.establishment).filter(Boolean))]
+        response.content = `No orders found for retailer "${retailerName}"${periodText}.\n\nSample retailer names in data: ${sampleRetailers.join(', ')}`
+      } else {
+        response.content = `Average order value for retailer "${retailerName}"${periodText}: ${formatDollarAmount(avgOrderValue)} (from ${formatNumber(acceptedOrders.length)} accepted orders)`
+        response.data = {
+          type: 'aov_by_retailer',
+          average: avgOrderValue,
+          orderCount: acceptedOrders.length,
+          retailer: retailerName
+        }
+      }
+    }
+    // Average order value (general - only if NOT a retailer query)
+    else if ((gptParsedData?.intent === 'average_order_value' && !hasRetailerMention) || 
+             (!gptParsedData && (lower.includes('average') || lower.includes('aov')) && !hasRetailerMention)) {
       const acceptedOrders = relevantOrders.filter(order => 
         !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
@@ -1321,6 +1487,131 @@ const CommandInterface = ({
         type: 'aov',
         average: avgOrderValue,
         orderCount: acceptedOrders.length
+      }
+    }
+    // Total transactions by retailer
+    else if (gptParsedData?.intent === 'total_transactions_by_retailer' || (!gptParsedData && (lower.includes('total transaction') || lower.includes('how many order')) && (lower.includes('from retailer') || lower.includes('from store') || lower.includes('retailer')))) {
+      let retailerName = gptParsedData?.retailer || ''
+      
+      // Extract retailer name from query if not provided by GPT
+      if (!retailerName) {
+        const retailerMatch = command.match(/(?:from\s+retailer|from\s+store|retailer)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|$)/i)
+        if (retailerMatch && retailerMatch[1]) {
+          retailerName = retailerMatch[1].trim()
+        }
+      }
+      
+      if (!retailerName || retailerName.length < 3) {
+        response.content = 'Please specify a retailer name. For example: "Show me the total transactions in Dec from retailer Liquor Master"'
+        return response
+      }
+      
+      // Helper function to match retailer names
+      const matchesRetailer = (orderRetailer) => {
+        if (!orderRetailer) return false
+        const normalizedSearch = retailerName.toLowerCase().trim().replace(/\s+/g, ' ')
+        const normalizedOrder = orderRetailer.toLowerCase().trim().replace(/\s+/g, ' ')
+        
+        if (normalizedOrder === normalizedSearch) return true
+        if (normalizedOrder.includes(normalizedSearch)) return true
+        if (normalizedSearch.includes(normalizedOrder)) return true
+        
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2)
+        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length > 2)
+        
+        if (searchWords.length > 0) {
+          const allWordsMatch = searchWords.every(word => 
+            orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+          )
+          if (allWordsMatch) return true
+        }
+        
+        return false
+      }
+      
+      const retailerOrders = relevantOrders.filter(order => matchesRetailer(order.establishment))
+      const acceptedOrders = retailerOrders.filter(order => 
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      const periodText = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+      
+      if (retailerOrders.length === 0) {
+        response.content = `No orders found for retailer "${retailerName}"${periodText}.`
+      } else {
+        response.content = `Total transactions for retailer "${retailerName}"${periodText}: ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(retailerOrders.length)} total orders)`
+        response.data = {
+          type: 'total_transactions_by_retailer',
+          orderCount: acceptedOrders.length,
+          totalOrders: retailerOrders.length,
+          retailer: retailerName
+        }
+      }
+    }
+    // Revenue by retailer
+    else if (gptParsedData?.intent === 'revenue_by_retailer' || (!gptParsedData && (lower.includes('total revenue') || lower.includes('revenue')) && (lower.includes('from retailer') || lower.includes('from store') || lower.includes('retailer')))) {
+      let retailerName = gptParsedData?.retailer || ''
+      
+      // Extract retailer name from query if not provided by GPT
+      if (!retailerName) {
+        const retailerMatch = command.match(/(?:from\s+retailer|from\s+store|retailer)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|$)/i)
+        if (retailerMatch && retailerMatch[1]) {
+          retailerName = retailerMatch[1].trim()
+        }
+      }
+      
+      if (!retailerName || retailerName.length < 3) {
+        response.content = 'Please specify a retailer name. For example: "Show me the Total Revenue for all orders in Dec from retailer Liquor Master"'
+        return response
+      }
+      
+      // Helper function to match retailer names
+      const matchesRetailer = (orderRetailer) => {
+        if (!orderRetailer) return false
+        const normalizedSearch = retailerName.toLowerCase().trim().replace(/\s+/g, ' ')
+        const normalizedOrder = orderRetailer.toLowerCase().trim().replace(/\s+/g, ' ')
+        
+        if (normalizedOrder === normalizedSearch) return true
+        if (normalizedOrder.includes(normalizedSearch)) return true
+        if (normalizedSearch.includes(normalizedOrder)) return true
+        
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2)
+        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length > 2)
+        
+        if (searchWords.length > 0) {
+          const allWordsMatch = searchWords.every(word => 
+            orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+          )
+          if (allWordsMatch) return true
+        }
+        
+        return false
+      }
+      
+      const retailerOrders = relevantOrders.filter(order => matchesRetailer(order.establishment))
+      const acceptedOrders = retailerOrders.filter(order => 
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      )
+      
+      const totalRevenue = acceptedOrders.reduce((sum, order) => 
+        sum + (parseFloat(order.revenue) || 0), 0
+      )
+      
+      const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
+      const periodText = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
+      
+      if (retailerOrders.length === 0) {
+        response.content = `No orders found for retailer "${retailerName}"${periodText}.`
+      } else {
+        response.content = `Total revenue for retailer "${retailerName}"${periodText}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(retailerOrders.length)} total orders)`
+        response.data = {
+          type: 'revenue_by_retailer',
+          revenue: totalRevenue,
+          orderCount: acceptedOrders.length,
+          totalOrders: retailerOrders.length,
+          retailer: retailerName
+        }
       }
     }
     else {

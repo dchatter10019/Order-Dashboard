@@ -2564,6 +2564,9 @@ Extract the following information from the user's query:
   * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries). Also includes "show me all orders from [customer]", "orders from [customer]", "list orders for [customer]"
   * order_status_check: asking to validate/check order statuses (e.g., "are all orders accepted", "are any orders pending", "how many rejected", "check order statuses", "order status summary", "what's the status breakdown")
   * average_order_value: asking for AOV or average
+  * aov_by_retailer: asking for AOV filtered by a specific retailer/store (e.g., "AOV for Liquor Master", "average order value from retailer [name]", "show me the AOV for all orders in Dec from retailer Liquor Master")
+  * total_transactions_by_retailer: asking for total transaction count filtered by a specific retailer/store (e.g., "total transactions from Liquor Master", "how many orders from retailer [name]", "show me the total transactions in Dec from retailer Liquor Master")
+  * revenue_by_retailer: asking for total revenue filtered by a specific retailer/store (e.g., "revenue from Liquor Master", "total revenue from retailer [name]", "show me the Total Revenue for all orders in Dec from retailer Liquor Master")
   * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
   * revenue_by_customer: asking for revenue for a specific customer
   * revenue_by_brand: asking for revenue breakdown by PRODUCT BRAND (e.g., "revenue by brand", "top brands", "which brands sell the most", "brand performance") - actual liquor brands like Tito's, Grey Goose, etc.
@@ -2576,6 +2579,7 @@ Extract the following information from the user's query:
   
 - customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire, Air Culinaire Worldwide, Vistajet, VistaJet, etc.). Always extract full company name, not partial words. Extract customer names from phrases like "orders from [customer]", "orders for [customer]", "orders of [customer]", "revenue from [customer]", "revenue for [month] for [customer]". For queries like "revenue for Oct for Air Culinaire" or "show me all orders of Vistajet in Dec 2025", extract the full customer name. Note: "Vistajet" and "VistaJet" refer to the same customer - extract as "Vistajet" or "VistaJet" based on what appears in the query.
 - brand: Brand name if mentioned (Schrader, Dom Perignon, Tito's, Grey Goose, etc.). Extract the full brand name.
+- retailer: Retailer/store/establishment name if mentioned (e.g., "Liquor Master", "Wine & Spirits Market", "Freshco", etc.). Extract from phrases like "from retailer [name]", "from store [name]", "from [retailer name]". Extract the full retailer name.
 - startDate: Start date in YYYY-MM-DD format
 - endDate: End date in YYYY-MM-DD format
 - isMTD: Boolean, true if asking for "month to date" or "this month so far"
@@ -2617,6 +2621,7 @@ Return ONLY valid JSON, no explanation. Format:
 
 If customer is not mentioned, omit the "customer" field.
 If brand is not mentioned, omit the "brand" field.
+If retailer is not mentioned, omit the "retailer" field.
 If no clarification needed, omit "clarificationNeeded" field or set to null.`
 
     const completion = await openai.chat.completions.create({
