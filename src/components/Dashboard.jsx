@@ -122,7 +122,9 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   // Calculate summary statistics
   const totalOrders = orders.length
-  const revenueOrders = orders.filter(order => order.status === 'accepted')
+  const revenueOrders = orders.filter(order => 
+    !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+  )
   const totalRevenue = revenueOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
   const averageOrderValue = revenueOrders.length > 0 ? totalRevenue / revenueOrders.length : 0
@@ -312,7 +314,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   // Calculate filtered summary statistics
   const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
   const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter(order => 
-    !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+    !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
   )
   const filteredTotalRevenue = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
@@ -322,12 +324,12 @@ const Dashboard = ({ onSwitchToAI }) => {
   
   // Fee calculation function based on Bevvi transaction fee rules
   const calculateFeeRate = (retailer, customer) => {
-    // Normalize inputs for comparison (trim and handle case)
-    const normalizedCustomer = (customer || '').trim()
+    // Normalize inputs for comparison (trim and lowercase for case-insensitive matching)
+    const normalizedCustomer = (customer || '').trim().toLowerCase()
     const normalizedRetailer = (retailer || '').trim()
     
     // Priority 1: VistaJet Customer Rule (8%)
-    if (normalizedCustomer === 'VistaJet') {
+    if (normalizedCustomer === 'vistajet') {
       return 0.08
     }
     
@@ -354,7 +356,7 @@ const Dashboard = ({ onSwitchToAI }) => {
     }
     
     // Priority 3: Sendoso Customer Rule (12%)
-    if (normalizedCustomer === 'Sendoso') {
+    if (normalizedCustomer === 'sendoso') {
       return 0.12
     }
     
@@ -1138,6 +1140,13 @@ const Dashboard = ({ onSwitchToAI }) => {
                 <div className="ml-2 sm:ml-4 min-w-0 flex-1">
                   <p className="text-xs sm:text-sm font-medium text-gray-500">Revenue (Excluding Pending/Cancelled/Rejected)</p>
                   <dd className="text-lg sm:text-xl font-medium text-gray-900">{formatDollarAmount(totalFees.total)}</dd>
+                  {collapsedTiles.bevviRevenue && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      {filteredTotalRevenue > 0 
+                        ? `${((totalFees.total / filteredTotalRevenue) * 100).toFixed(2)}% of GMV`
+                        : '0.00% of GMV'}
+                    </p>
+                  )}
                 </div>
               </div>
               <button
@@ -1167,6 +1176,14 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <div className="flex justify-between">
                     <span>Total Revenue:</span>
                     <span className="font-medium">{formatDollarAmount(totalFees.total)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Revenue as % of GMV:</span>
+                    <span className="font-medium">
+                      {filteredTotalRevenue > 0 
+                        ? `${((totalFees.total / filteredTotalRevenue) * 100).toFixed(2)}%`
+                        : '0.00%'}
+                    </span>
                   </div>
                   <div className="flex justify-between">
                     <span>Accepted Orders:</span>

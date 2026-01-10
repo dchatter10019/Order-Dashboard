@@ -721,7 +721,7 @@ const CommandInterface = ({
     // Revenue by month breakdown
     else if ((gptParsedData?.intent === 'revenue_by_month') || (!gptParsedData && (lower.includes('revenue') || lower.includes('sales')) && lower.includes('by month'))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       
       // Group revenue by month
@@ -777,7 +777,7 @@ const CommandInterface = ({
     else if ((gptParsedData?.intent === 'revenue') || (!gptParsedData && (lower.includes('revenue') || lower.includes('sales')) && !lower.includes('tax'))) {
       console.log('💰 General revenue query - relevant orders:', relevantOrders.length)
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       console.log('💰 Accepted orders:', acceptedOrders.length)
       const totalRevenue = acceptedOrders.reduce((sum, order) => 
@@ -806,7 +806,7 @@ const CommandInterface = ({
     // Service charge query
     else if ((gptParsedData?.intent === 'service_charge') || (!gptParsedData && lower.includes('service charge'))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       const totalServiceCharge = acceptedOrders.reduce((sum, order) => 
         sum + (parseFloat(order.serviceCharge) || 0), 0
@@ -833,7 +833,7 @@ const CommandInterface = ({
     // Tip query
     else if ((gptParsedData?.intent === 'tip') || (!gptParsedData && (lower.includes('tip') || lower.includes('gratuity')))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       const totalTip = acceptedOrders.reduce((sum, order) => 
         sum + (parseFloat(order.tip) || 0), 0
@@ -860,7 +860,7 @@ const CommandInterface = ({
     // Delivery charge query
     else if ((gptParsedData?.intent === 'delivery_charge') || (!gptParsedData && (lower.includes('delivery') && (lower.includes('charge') || lower.includes('fee'))))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       const totalDeliveryCharge = acceptedOrders.reduce((sum, order) => 
         sum + (parseFloat(order.shippingFee) || 0) + (parseFloat(order.deliveryFee) || 0), 0
@@ -935,7 +935,7 @@ const CommandInterface = ({
     // Sales/Revenue by state query
     else if ((gptParsedData?.intent === 'sales_by_state') || (!gptParsedData && (lower.includes('sales') || lower.includes('revenue')) && lower.includes('by state'))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       
       // Group revenue by state
@@ -977,7 +977,7 @@ const CommandInterface = ({
     // General tax query
     else if ((gptParsedData?.intent === 'tax') || (!gptParsedData && lower.includes('tax'))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       const totalTax = acceptedOrders.reduce((sum, order) => 
         sum + (parseFloat(order.tax) || 0) + (parseFloat(order.serviceChargeTax) || 0), 0
@@ -1307,7 +1307,7 @@ const CommandInterface = ({
     // Average order value
     else if ((gptParsedData?.intent === 'average_order_value') || (!gptParsedData && (lower.includes('average') || lower.includes('aov')))) {
       const acceptedOrders = relevantOrders.filter(order => 
-        !['pending', 'cancelled', 'rejected'].includes(order.status?.toLowerCase())
+        !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
       const totalRevenue = acceptedOrders.reduce((sum, order) => 
         sum + (parseFloat(order.revenue) || 0), 0
