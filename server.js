@@ -2526,7 +2526,7 @@ app.post('/api/orders/:orderNumber/notes', async (req, res) => {
 // AI Prompt Parsing endpoint using GPT-4o-mini
 app.post('/api/parse-prompt', async (req, res) => {
   try {
-    const { prompt } = req.body
+    const { prompt, context } = req.body
     
     if (!prompt || typeof prompt !== 'string') {
       return res.status(400).json({
@@ -2544,10 +2544,29 @@ app.post('/api/parse-prompt', async (req, res) => {
     }
     
     console.log('🤖 Parsing prompt with GPT-4o-mini:', prompt)
+    if (context) {
+      console.log('💬 Conversation context:', context)
+    }
+    
+    // Build context string for GPT
+    let contextString = ''
+    if (context) {
+      const contextParts = []
+      if (context.lastCustomer) contextParts.push(`Last customer mentioned: ${context.lastCustomer}`)
+      if (context.lastDateRange) contextParts.push(`Last date range: ${context.lastDateRange.startDate} to ${context.lastDateRange.endDate}`)
+      if (context.lastIntent) contextParts.push(`Last query type: ${context.lastIntent}`)
+      if (context.lastRetailer) contextParts.push(`Last retailer mentioned: ${context.lastRetailer}`)
+      if (context.lastBrand) contextParts.push(`Last brand mentioned: ${context.lastBrand}`)
+      if (context.lastQuery) contextParts.push(`Last query: "${context.lastQuery}"`)
+      
+      if (contextParts.length > 0) {
+        contextString = `\n\nCONVERSATION CONTEXT (for follow-up queries):\n${contextParts.join('\n')}\n\nIf the current query is a follow-up (e.g., "what about last month?", "show me more details", "what's the revenue?") and doesn't specify certain fields, use the context values:\n- If no customer is mentioned, use lastCustomer from context\n- If no date range is mentioned, use lastDateRange from context\n- If no retailer is mentioned but context has lastRetailer, use it\n- If no brand is mentioned but context has lastBrand, use it\n`
+      }
+    }
     
     const systemPrompt = `You are an AI assistant that parses natural language queries about order data into structured JSON.
 
-Today's date is ${new Date().toISOString().split('T')[0]}.
+Today's date is ${new Date().toISOString().split('T')[0]}.${contextString}
 
 Extract the following information from the user's query:
 - intent: The type of query. Choose from:
@@ -2561,12 +2580,12 @@ Extract the following information from the user's query:
   * delivered_orders: specifically asking for DELIVERED STATUS orders (must mention "delivered")
   * accepted_orders: specifically asking for ACCEPTED STATUS orders (e.g., "show me all accepted orders", "list accepted orders", "see the accepted orders")
   * not_delivered_orders: asking for orders that have NOT been delivered (e.g., "show me all orders that have not been delivered", "orders that haven't been delivered", "undelivered orders"). This should include orders with status "accepted" or "pending", but NOT "delivered".
-  * total_orders: asking for ALL orders, order count, or "orders placed today/this week" (general order queries). Also includes "show me all orders from [customer]", "orders from [customer]", "list orders for [customer]"
+  * total_orders: asking for ALL orders, order count, transactions, or "orders placed today/this week" (general order queries). Also includes "show me all orders from [customer]", "orders from [customer]", "list orders for [customer]", "show me all transactions for [customer]", "transactions for [customer]"
   * order_status_check: asking to validate/check order statuses (e.g., "are all orders accepted", "are any orders pending", "how many rejected", "check order statuses", "order status summary", "what's the status breakdown")
   * average_order_value: asking for AOV or average
   * aov_by_retailer: asking for AOV filtered by a specific retailer/store (e.g., "AOV for Liquor Master", "average order value from retailer [name]", "show me the AOV for all orders in Dec from retailer Liquor Master")
   * total_transactions_by_retailer: asking for total transaction count filtered by a specific retailer/store (e.g., "total transactions from Liquor Master", "how many orders from retailer [name]", "show me the total transactions in Dec from retailer Liquor Master")
-  * revenue_by_retailer: asking for total revenue filtered by a specific retailer/store (e.g., "revenue from Liquor Master", "total revenue from retailer [name]", "show me the Total Revenue for all orders in Dec from retailer Liquor Master")
+  * revenue_by_retailer: asking for total revenue or total value filtered by a specific retailer/store (e.g., "revenue from Liquor Master", "total revenue from retailer [name]", "total value of transactions for retailer [name]", "show me the Total Revenue for all orders in Dec from retailer Liquor Master")
   * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
   * revenue_by_customer: asking for revenue for a specific customer
   * revenue_by_brand: asking for revenue breakdown by PRODUCT BRAND (e.g., "revenue by brand", "top brands", "which brands sell the most", "brand performance") - actual liquor brands like Tito's, Grey Goose, etc.
@@ -2596,6 +2615,15 @@ Important:
 - EXCEPTION: Status-specific queries (accepted_orders, pending_orders, delivered_orders, delayed_orders, not_delivered_orders) do NOT need clarification even without dates - they can use current loaded data
 - "show me all accepted orders", "list pending orders", "show me orders that have not been delivered" = NO clarification needed, process immediately
 
+FOLLOW-UP QUERIES:
+- If the query is a follow-up (e.g., "what about last month?", "show me more details", "what's the revenue?", "how about Sendoso?") and doesn't specify certain fields, use the context values:
+  * If no customer is mentioned but context has lastCustomer, use it
+  * If no date range is mentioned but context has lastDateRange, use it (unless query explicitly asks for a different period like "last month")
+  * If no retailer is mentioned but context has lastRetailer, use it
+  * If no brand is mentioned but context has lastBrand, use it
+- Examples of follow-up queries: "what about last month?", "show me more details", "what's the revenue?", "how about Sendoso?", "and what about Oct?", "also show me"
+- When a follow-up query mentions a different period (e.g., "what about last month?"), use that period but keep other context (customer, retailer, brand) if not mentioned
+
 Date parsing rules:
 - "today", "for today" = today's date for both start and end date
 - "this week" = current week Sunday through Saturday (from this week's Sunday to this week's Saturday)
@@ -2605,6 +2633,8 @@ Date parsing rules:
 - "YTD", "year to date", "this year" = January 1st of current year to today
 - "October 2025", "Oct 2025" = 2025-10-01 to 2025-10-31 (explicit year)
 - "October", "Oct" (no year) = Use smart default: if month is more than 2 months in the future relative to current month, use previous year; otherwise use current year. Then apply MTD logic if end date is in the future.
+- "Aug - Dec 2025", "August to December 2025", "Aug-Dec 2025" = 2025-08-01 to 2025-12-31 (month range)
+- "Aug - Dec" (no year) = Use current year (or previous year if range would be in future)
 - If end date is in the future, set it to today (MTD logic)
 
 Return ONLY valid JSON, no explanation. Format:

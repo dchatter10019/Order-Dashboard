@@ -19,6 +19,14 @@ const CommandInterface = ({
   const pendingGPTDataRef = useRef(null) // Store GPT-parsed data for pending command
   const loadingTimeoutRef = useRef(null)
   const originalQueryRef = useRef(null) // Store original query when clarification is requested
+  const conversationContextRef = useRef({
+    lastCustomer: null,
+    lastDateRange: null,
+    lastIntent: null,
+    lastRetailer: null,
+    lastBrand: null,
+    lastQuery: null
+  }) // Track conversation context for follow-up queries
   
   // Default messages if none provided
   const defaultMessages = [
@@ -87,6 +95,50 @@ const CommandInterface = ({
       october: 9, oct: 9,
       november: 10, nov: 10,
       december: 11, dec: 11
+    }
+    
+    // Check for month range (e.g., "Aug - Dec 2025", "August to December 2025", "Aug-Dec")
+    const monthRangePatterns = [
+      /(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s*[-–—]\s*(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)(?:\s+(20\d{2}))?/i,
+      /(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+to\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)(?:\s+(20\d{2}))?/i
+    ]
+    
+    for (const pattern of monthRangePatterns) {
+      const match = text.match(pattern)
+      if (match) {
+        const month1Name = match[1].toLowerCase()
+        const month2Name = match[2].toLowerCase()
+        const yearStr = match[3] // Year if present
+        
+        const month1Num = months[month1Name]
+        const month2Num = months[month2Name]
+        
+        if (month1Num !== undefined && month2Num !== undefined) {
+          // Extract year
+          const yearMatch = text.match(/\b(20\d{2})\b/)
+          let year = yearMatch ? parseInt(yearMatch[1]) : now.getFullYear()
+          
+          // If month range spans across year boundary (e.g., Nov - Jan), handle it
+          let startDate, endDate
+          if (month1Num <= month2Num) {
+            // Normal range (e.g., Aug - Dec)
+            startDate = new Date(year, month1Num, 1)
+            endDate = new Date(year, month2Num + 1, 0) // Last day of month2
+          } else {
+            // Cross-year range (e.g., Nov - Jan) - not common but handle it
+            startDate = new Date(year, month1Num, 1)
+            endDate = new Date(year + 1, month2Num + 1, 0)
+          }
+          
+          console.log(`📅 Parsed month range: ${month1Name} - ${month2Name} ${year} -> ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
+          
+          return {
+            startDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0],
+            isMTD: false
+          }
+        }
+      }
     }
     
     // Check for specific month with optional year
@@ -224,8 +276,31 @@ const CommandInterface = ({
     const lower = command.toLowerCase()
     
     // Check if GPT identified this as an unknown/unrelated query
-    if (gptParsedData?.intent === 'unknown') {
-      console.log('❌ GPT identified query as unrelated to orders')
+    // BUT first check if it's an AOV + retailer query (we have fallback detection for these)
+    const hasRetailerMention = 
+      lower.includes('from retailer') || 
+      lower.includes('for retailer') ||
+      lower.includes('from store') || 
+      lower.includes('retailer') || 
+      !!gptParsedData?.retailer ||
+      /retailer\s+[A-Z][a-zA-Z\s]+/i.test(command)
+    const isAOVQuery = 
+      lower.includes('aov') || 
+      lower.includes('average') || 
+      gptParsedData?.intent === 'average_order_value' || 
+      gptParsedData?.intent === 'aov_by_retailer'
+    
+    // Don't exit early if it's an AOV + retailer query (we can handle it with fallback detection)
+    const isAOVRetailerQuery = isAOVQuery && hasRetailerMention
+    console.log('🔍 Early unknown check:', {
+      gptIntent: gptParsedData?.intent,
+      isAOVQuery,
+      hasRetailerMention,
+      isAOVRetailerQuery,
+      willExitEarly: gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery
+    })
+    if (gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery) {
+      console.log('❌ GPT identified query as unrelated to orders (not AOV+retailer)')
       return {
         type: 'assistant',
         content: "Sorry, I don't know how to handle this request.\n\nI'm designed to help with order data queries like:\n• Revenue, tax, tips, service charges, delivery charges\n• Delayed, pending, or delivered orders\n• Orders by customer (Sendoso, OnGoody, Air Culinaire)\n• Date-based queries (MTD, YTD, specific months)\n\nPlease ask a question about your orders.",
@@ -1155,7 +1230,7 @@ const CommandInterface = ({
       }
     }
     // Total orders
-    else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders') || (lower.includes('show') && lower.includes('orders'))))) {
+    else if ((gptParsedData?.intent === 'total_orders') || (!gptParsedData && (lower.includes('how many orders') || lower.includes('total orders') || lower.includes('how many transactions') || lower.includes('total transactions') || (lower.includes('show') && (lower.includes('orders') || lower.includes('transactions')))))) {
       const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
       
       // Extract customer name if present (from GPT or regex fallback)
@@ -1167,10 +1242,12 @@ const CommandInterface = ({
         // Pattern 1: "show me all the orders from Vistajet for Oct 2025"
         // Pattern 2: "orders from Vistajet for Oct 2025"
         // Pattern 3: "orders for Vistajet"
+        // Pattern 4: "show me all the transactions for OnGoody for Dec 2025"
+        // Pattern 5: "transactions for OnGoody"
         const patterns = [
-          /(?:show\s+me\s+all\s+)?(?:the\s+)?orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:for|in|during)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+(?:from|in|during)\s+|$)/i,
-          /orders?\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:for|in|during)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+(?:from|in|during)\s+|$)/i,
-          /(?:show\s+me\s+all\s+)?orders?\s+of\s+([a-zA-Z0-9\s]+?)(?:\s+in\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|$)/i
+          /(?:show\s+me\s+all\s+)?(?:the\s+)?(?:orders?|transactions?)\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:for|in|during)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+(?:from|in|during)\s+|$)/i,
+          /(?:orders?|transactions?)\s+(?:from|for|by|of)\s+([a-zA-Z0-9\s]+?)(?:\s+(?:for|in|during)\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|\s+(?:from|in|during)\s+|$)/i,
+          /(?:show\s+me\s+all\s+)?(?:orders?|transactions?)\s+of\s+([a-zA-Z0-9\s]+?)(?:\s+in\s+(?:oct|jan|feb|mar|apr|may|jun|jul|aug|sep|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)\s+|$)/i
         ]
         
         for (const pattern of patterns) {
@@ -1271,26 +1348,44 @@ const CommandInterface = ({
       }
       
       // Check if user wants to SEE the orders (show, list, display) or just get a count
-      const wantsToSeeOrders = lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see')
+      // Also check for "transactions" as a synonym
+      const wantsToSeeOrders = lower.includes('show') || lower.includes('list') || lower.includes('display') || lower.includes('see') || lower.includes('transaction')
+      
+      console.log('🔍 Query analysis:', {
+        wantsToSeeOrders,
+        customerName,
+        ordersToShowCount: ordersToShow.length,
+        relevantOrdersCount: relevantOrders.length,
+        hasDateRange: !!dateRange
+      })
       
       if (wantsToSeeOrders && ordersToShow.length > 0) {
         // Show the actual orders
         const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
         const customerInfo = customerName ? ` for ${customerName}` : ''
-        response.content = `Found ${formatNumber(ordersToShow.length)} orders${customerInfo}${dateInfo}`
+        const transactionText = lower.includes('transaction') ? 'transactions' : 'orders'
+        response.content = `Found ${formatNumber(ordersToShow.length)} ${transactionText}${customerInfo}${dateInfo}`
         
         response.data = {
           type: 'orders',
           orders: ordersToShow,
           total: ordersToShow.length,
-          orderType: customerName ? `Orders for ${customerName}` : 'All Orders',
+          orderType: customerName ? `${transactionText.charAt(0).toUpperCase() + transactionText.slice(1)} for ${customerName}` : `All ${transactionText.charAt(0).toUpperCase() + transactionText.slice(1)}`,
           customerName: customerName || undefined
         }
       } else if (ordersToShow.length === 0) {
-        // No orders found
+        // No orders found - provide helpful debugging info
         const dateInfo = dateRange ? ` from ${dateRange.startDate} to ${dateRange.endDate}` : ''
         const customerInfo = customerName ? ` for customer "${customerName}"` : ''
-        response.content = `No orders found${customerInfo}${dateInfo}`
+        
+        // Show sample customer names if available
+        let debugInfo = ''
+        if (relevantOrders.length > 0 && customerName) {
+          const allCustomerNames = [...new Set(relevantOrders.map(o => o.customerName).filter(Boolean))]
+          debugInfo = `\n\nAvailable customers in this date range: ${allCustomerNames.slice(0, 10).join(', ')}`
+        }
+        
+        response.content = `No orders found${customerInfo}${dateInfo}${debugInfo}`
         response.data = null
       } else {
         // Just show count
@@ -1305,21 +1400,7 @@ const CommandInterface = ({
       }
     }
     
-    // Check if query mentions retailer (used for both retailer-specific and general AOV handlers)
-    // Check for retailer mentions in multiple ways
-    const hasRetailerMention = 
-      lower.includes('from retailer') || 
-      lower.includes('from store') || 
-      lower.includes('retailer') || 
-      !!gptParsedData?.retailer ||
-      // Also check if query has retailer name patterns (capitalized words after "retailer")
-      /retailer\s+[A-Z][a-zA-Z\s]+/i.test(command)
-    
-    const isAOVQuery = 
-      lower.includes('aov') || 
-      lower.includes('average') || 
-      gptParsedData?.intent === 'average_order_value' || 
-      gptParsedData?.intent === 'aov_by_retailer'
+    // hasRetailerMention and isAOVQuery are already declared above (before unknown check)
     
     // Check if this should be a retailer query (even if GPT didn't identify it)
     const shouldBeRetailerQuery = isAOVQuery && hasRetailerMention && 
@@ -1338,38 +1419,61 @@ const CommandInterface = ({
     
     // AOV by retailer (must check BEFORE general AOV to avoid conflicts)
     // Be very aggressive - if query has "aov"/"average" AND "retailer" AND a retailer name pattern, route here
-    const hasRetailerNamePattern = /(?:retailer|from retailer|from store)\s+([A-Z][a-zA-Z\s&'\-]+)/i.test(command)
+    const hasRetailerNamePattern = /(?:retailer|from retailer|for retailer|from store)\s+([A-Z][a-zA-Z\s&'\-]+)/i.test(command)
     const definitelyRetailerQuery = (isAOVQuery && (hasRetailerMention || hasRetailerNamePattern)) && 
       !(gptParsedData?.intent === 'revenue_by_store' || gptParsedData?.intent === 'revenue_by_brand')
+    
+    console.log('🔍 AOV by retailer handler check:', {
+      gptIntent: gptParsedData?.intent,
+      isAOVQuery,
+      hasRetailerMention,
+      hasRetailerNamePattern,
+      shouldBeRetailerQuery,
+      definitelyRetailerQuery,
+      willTrigger: gptParsedData?.intent === 'aov_by_retailer' || shouldBeRetailerQuery || definitelyRetailerQuery
+    })
     
     if (gptParsedData?.intent === 'aov_by_retailer' || shouldBeRetailerQuery || definitelyRetailerQuery) {
       console.log('✅ AOV by retailer query detected - using retailer handler', {
         gptIntent: gptParsedData?.intent,
         shouldBeRetailerQuery,
         definitelyRetailerQuery,
-        hasRetailerNamePattern
+        hasRetailerNamePattern,
+        condition1: gptParsedData?.intent === 'aov_by_retailer',
+        condition2: shouldBeRetailerQuery,
+        condition3: definitelyRetailerQuery,
+        willExecute: true
       })
       let retailerName = gptParsedData?.retailer || ''
       
       // Extract retailer name from query if not provided by GPT
       // Try multiple patterns to catch different query formats
       if (!retailerName) {
-        // Pattern 1: "from retailer [name]"
-        let retailerMatch = command.match(/(?:from\s+retailer|from\s+store)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|\s+from|$)/i)
+        // Pattern 1: "for retailer [name] in [month]" or "for retailer [name]"
+        let retailerMatch = command.match(/(?:for\s+retailer|from\s+retailer|from\s+store)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)|\s+for\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)|\s+from|\s+for\s+\d|\s+in\s+\d|$)/i)
         if (retailerMatch && retailerMatch[1]) {
           retailerName = retailerMatch[1].trim()
+          // Remove any trailing date-related words that might have been captured
+          retailerName = retailerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|2025|2024|2023|2026)\s*$/i, '').trim()
         } else {
-          // Pattern 2: "retailer [name]" (without "from")
-          retailerMatch = command.match(/retailer\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|\s+from|$)/i)
+          // Pattern 2: "retailer [name] in [month]" or "retailer [name]"
+          retailerMatch = command.match(/retailer\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)|\s+for\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)|\s+from|\s+for\s+\d|\s+in\s+\d|$)/i)
           if (retailerMatch && retailerMatch[1]) {
             retailerName = retailerMatch[1].trim()
+            // Remove any trailing date-related words
+            retailerName = retailerName.replace(/\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|2025|2024|2023|2026)\s*$/i, '').trim()
           } else {
             // Pattern 3: Look for capitalized words after "retailer" or common retailer names
             const words = command.split(/\s+/)
             const retailerIndex = words.findIndex(w => w.toLowerCase() === 'retailer')
             if (retailerIndex >= 0 && retailerIndex < words.length - 1) {
-              // Take the next 2-3 words as potential retailer name
-              const potentialName = words.slice(retailerIndex + 1, retailerIndex + 4).join(' ')
+              // Find where the date/month starts
+              const monthIndex = words.findIndex((w, idx) => idx > retailerIndex && 
+                /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|\d{4})$/i.test(w))
+              
+              // Take words between "retailer" and the month/date
+              const endIndex = monthIndex >= 0 ? monthIndex : retailerIndex + 4
+              const potentialName = words.slice(retailerIndex + 1, endIndex).join(' ')
               if (potentialName.length >= 3) {
                 retailerName = potentialName.trim()
               }
@@ -1388,37 +1492,43 @@ const CommandInterface = ({
       }
       
       // Helper function to match retailer names
+      // Use strict matching - only exact matches or very close matches
       const matchesRetailer = (orderRetailer) => {
         if (!orderRetailer) return false
         const normalizedSearch = retailerName.toLowerCase().trim().replace(/\s+/g, ' ')
         const normalizedOrder = orderRetailer.toLowerCase().trim().replace(/\s+/g, ' ')
         
-        // Exact match
+        // Exact match (normalized)
         if (normalizedOrder === normalizedSearch) {
           console.log(`✅ Exact match: "${orderRetailer}" === "${retailerName}"`)
           return true
         }
         
-        // Contains match
-        if (normalizedOrder.includes(normalizedSearch)) {
-          console.log(`✅ Contains match: "${orderRetailer}" contains "${retailerName}"`)
-          return true
-        }
-        if (normalizedSearch.includes(normalizedOrder)) {
-          console.log(`✅ Contains match: "${retailerName}" contains "${orderRetailer}"`)
+        // Exact match without spaces (e.g., "LiquorMart" === "Liquor Mart")
+        const searchNoSpaces = normalizedSearch.replace(/\s+/g, '')
+        const orderNoSpaces = normalizedOrder.replace(/\s+/g, '')
+        if (searchNoSpaces === orderNoSpaces) {
+          console.log(`✅ Exact match (no spaces): "${orderRetailer}" === "${retailerName}"`)
           return true
         }
         
-        // Word-based matching - match all significant words
-        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2) // Changed to >= 2 to catch "li" in "liquor"
+        // Word-based matching - ALL words must match exactly (not just contains)
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2)
         const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length >= 2)
         
-        if (searchWords.length > 0) {
-          const allWordsMatch = searchWords.every(word => 
-            orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+        if (searchWords.length > 0 && orderWords.length > 0) {
+          // Check if all search words match order words exactly (not substring)
+          const allWordsMatchExactly = searchWords.every(searchWord => 
+            orderWords.some(orderWord => orderWord === searchWord)
           )
-          if (allWordsMatch) {
-            console.log(`✅ Word match: "${orderRetailer}" matches "${retailerName}"`)
+          // Also check reverse - all order words match search words
+          const allOrderWordsMatch = orderWords.every(orderWord => 
+            searchWords.some(searchWord => searchWord === orderWord)
+          )
+          
+          // Only match if ALL words match exactly (bidirectional)
+          if (allWordsMatchExactly && allOrderWordsMatch && searchWords.length === orderWords.length) {
+            console.log(`✅ Exact word match: "${orderRetailer}" matches "${retailerName}"`)
             return true
           }
         }
@@ -1468,6 +1578,7 @@ const CommandInterface = ({
           retailer: retailerName
         }
       }
+      return response
     }
     // Average order value (general - only if NOT a retailer query)
     else if ((gptParsedData?.intent === 'average_order_value' && !hasRetailerMention) || 
@@ -1506,24 +1617,34 @@ const CommandInterface = ({
         return response
       }
       
-      // Helper function to match retailer names
+      // Helper function to match retailer names (strict matching)
       const matchesRetailer = (orderRetailer) => {
         if (!orderRetailer) return false
         const normalizedSearch = retailerName.toLowerCase().trim().replace(/\s+/g, ' ')
         const normalizedOrder = orderRetailer.toLowerCase().trim().replace(/\s+/g, ' ')
         
+        // Exact match
         if (normalizedOrder === normalizedSearch) return true
-        if (normalizedOrder.includes(normalizedSearch)) return true
-        if (normalizedSearch.includes(normalizedOrder)) return true
         
-        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2)
-        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length > 2)
+        // Exact match without spaces
+        const searchNoSpaces = normalizedSearch.replace(/\s+/g, '')
+        const orderNoSpaces = normalizedOrder.replace(/\s+/g, '')
+        if (searchNoSpaces === orderNoSpaces) return true
         
-        if (searchWords.length > 0) {
-          const allWordsMatch = searchWords.every(word => 
-            orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+        // Word-based matching - ALL words must match exactly
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2)
+        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length >= 2)
+        
+        if (searchWords.length > 0 && orderWords.length > 0) {
+          const allWordsMatchExactly = searchWords.every(searchWord => 
+            orderWords.some(orderWord => orderWord === searchWord)
           )
-          if (allWordsMatch) return true
+          const allOrderWordsMatch = orderWords.every(orderWord => 
+            searchWords.some(searchWord => searchWord === orderWord)
+          )
+          if (allWordsMatchExactly && allOrderWordsMatch && searchWords.length === orderWords.length) {
+            return true
+          }
         }
         
         return false
@@ -1550,46 +1671,94 @@ const CommandInterface = ({
       }
     }
     // Revenue by retailer
-    else if (gptParsedData?.intent === 'revenue_by_retailer' || (!gptParsedData && (lower.includes('total revenue') || lower.includes('revenue')) && (lower.includes('from retailer') || lower.includes('from store') || lower.includes('retailer')))) {
+    // Also handle "total value" as synonym for revenue
+    // Check pattern even if GPT didn't identify it correctly
+    const hasRevenueValuePattern = lower.includes('total revenue') || lower.includes('revenue') || lower.includes('total value') || lower.includes('value')
+    const hasRetailerPattern = lower.includes('from retailer') || lower.includes('from store') || lower.includes('retailer') || lower.includes('for retailer')
+    const isRevenueByRetailerQuery = hasRevenueValuePattern && hasRetailerPattern
+    
+    if (gptParsedData?.intent === 'revenue_by_retailer' || isRevenueByRetailerQuery) {
+      console.log('✅ Revenue by retailer query detected:', {
+        gptIntent: gptParsedData?.intent,
+        hasRevenueValuePattern,
+        hasRetailerPattern,
+        isRevenueByRetailerQuery
+      })
       let retailerName = gptParsedData?.retailer || ''
       
       // Extract retailer name from query if not provided by GPT
+      // Try multiple patterns to catch different query formats
       if (!retailerName) {
-        const retailerMatch = command.match(/(?:from\s+retailer|from\s+store|retailer)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|$)/i)
+        // Pattern 1: "for retailer [name]" (most common)
+        let retailerMatch = command.match(/(?:for\s+retailer|from\s+retailer|from\s+store|retailer)\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|\s+from|$)/i)
         if (retailerMatch && retailerMatch[1]) {
           retailerName = retailerMatch[1].trim()
+        } else {
+          // Pattern 2: "retailer [name]" (without "for" or "from")
+          retailerMatch = command.match(/retailer\s+([a-zA-Z0-9\s&'\-]+?)(?:\s+in|\s+for|\s+from|$)/i)
+          if (retailerMatch && retailerMatch[1]) {
+            retailerName = retailerMatch[1].trim()
+          }
         }
       }
+      
+      console.log('🏪 Revenue by retailer - extracted retailer name:', retailerName, '| GPT retailer:', gptParsedData?.retailer)
       
       if (!retailerName || retailerName.length < 3) {
         response.content = 'Please specify a retailer name. For example: "Show me the Total Revenue for all orders in Dec from retailer Liquor Master"'
         return response
       }
       
-      // Helper function to match retailer names
+      // Helper function to match retailer names (strict matching)
       const matchesRetailer = (orderRetailer) => {
         if (!orderRetailer) return false
         const normalizedSearch = retailerName.toLowerCase().trim().replace(/\s+/g, ' ')
         const normalizedOrder = orderRetailer.toLowerCase().trim().replace(/\s+/g, ' ')
         
-        if (normalizedOrder === normalizedSearch) return true
-        if (normalizedOrder.includes(normalizedSearch)) return true
-        if (normalizedSearch.includes(normalizedOrder)) return true
+        // Exact match
+        if (normalizedOrder === normalizedSearch) {
+          console.log(`✅ Exact match: "${orderRetailer}" === "${retailerName}"`)
+          return true
+        }
         
-        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length > 2)
-        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length > 2)
+        // Exact match without spaces
+        const searchNoSpaces = normalizedSearch.replace(/\s+/g, '')
+        const orderNoSpaces = normalizedOrder.replace(/\s+/g, '')
+        if (searchNoSpaces === orderNoSpaces) {
+          console.log(`✅ Exact match (no spaces): "${orderRetailer}" === "${retailerName}"`)
+          return true
+        }
         
-        if (searchWords.length > 0) {
-          const allWordsMatch = searchWords.every(word => 
-            orderWords.some(orderWord => orderWord.includes(word) || word.includes(orderWord))
+        // Word-based matching - ALL words must match exactly
+        const searchWords = normalizedSearch.split(/\s+/).filter(w => w.length >= 2)
+        const orderWords = normalizedOrder.split(/\s+/).filter(w => w.length >= 2)
+        
+        if (searchWords.length > 0 && orderWords.length > 0) {
+          const allWordsMatchExactly = searchWords.every(searchWord => 
+            orderWords.some(orderWord => orderWord === searchWord)
           )
-          if (allWordsMatch) return true
+          const allOrderWordsMatch = orderWords.every(orderWord => 
+            searchWords.some(searchWord => searchWord === orderWord)
+          )
+          if (allWordsMatchExactly && allOrderWordsMatch && searchWords.length === orderWords.length) {
+            console.log(`✅ Exact word match: "${orderRetailer}" matches "${retailerName}"`)
+            return true
+          }
         }
         
         return false
       }
       
       const retailerOrders = relevantOrders.filter(order => matchesRetailer(order.establishment))
+      console.log('🏪 Orders after retailer filter:', retailerOrders.length, 'out of', relevantOrders.length)
+      
+      // Show sample retailer names for debugging
+      if (retailerOrders.length === 0 && relevantOrders.length > 0) {
+        const sampleRetailers = [...new Set(relevantOrders.slice(0, 20).map(o => o.establishment).filter(Boolean))]
+        console.log('🔍 Sample retailer names in data:', sampleRetailers)
+        console.log('🔍 Searching for:', retailerName)
+      }
+      
       const acceptedOrders = retailerOrders.filter(order => 
         !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       )
@@ -1598,11 +1767,19 @@ const CommandInterface = ({
         sum + (parseFloat(order.revenue) || 0), 0
       )
       
+      console.log('💰 Revenue calculation:', {
+        retailerName,
+        totalOrders: retailerOrders.length,
+        acceptedOrders: acceptedOrders.length,
+        totalRevenue
+      })
+      
       const mtdSuffix = dateRange?.isMTD ? ' (Month-to-Date)' : ''
       const periodText = dateRange ? ` for ${dateRange.startDate} to ${dateRange.endDate}${mtdSuffix}` : ''
       
       if (retailerOrders.length === 0) {
-        response.content = `No orders found for retailer "${retailerName}"${periodText}.`
+        const sampleRetailers = [...new Set(relevantOrders.slice(0, 10).map(o => o.establishment).filter(Boolean))]
+        response.content = `No orders found for retailer "${retailerName}"${periodText}.\n\nSample retailer names in data: ${sampleRetailers.join(', ')}`
       } else {
         response.content = `Total revenue for retailer "${retailerName}"${periodText}: ${formatDollarAmount(totalRevenue)} from ${formatNumber(acceptedOrders.length)} accepted orders (out of ${formatNumber(retailerOrders.length)} total orders)`
         response.data = {
@@ -1694,6 +1871,20 @@ const CommandInterface = ({
         if (pendingCommandRef.current) {
           const response = processCommand(pendingCommandRef.current, pendingGPTDataRef.current)
           console.log('📊 Generated response:', response)
+          
+          // Update conversation context after processing
+          if (pendingGPTDataRef.current) {
+            conversationContextRef.current = {
+              lastCustomer: pendingGPTDataRef.current.customer || conversationContextRef.current.lastCustomer,
+              lastDateRange: pendingGPTDataRef.current.dateRange || conversationContextRef.current.lastDateRange,
+              lastIntent: pendingGPTDataRef.current.intent || conversationContextRef.current.lastIntent,
+              lastRetailer: pendingGPTDataRef.current.retailer || conversationContextRef.current.lastRetailer,
+              lastBrand: pendingGPTDataRef.current.brand || conversationContextRef.current.lastBrand,
+              lastQuery: pendingCommandRef.current
+            }
+            console.log('💾 Updated conversation context (pending):', conversationContextRef.current)
+          }
+          
           setMessages(prev => {
             // Remove any loading messages first
             const filtered = prev.filter(m => !m.loading)
@@ -1738,13 +1929,19 @@ const CommandInterface = ({
     let parsedIntent = null
     let parsedCustomer = null
     let parsedBrand = null
+    let parsedRetailer = null
     
     try {
       console.log('🤖 Attempting GPT-4o-mini parsing...')
+      // Include conversation context for follow-up queries
+      const conversationContext = conversationContextRef.current
       const parseResponse = await fetch('/api/parse-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: userInput })
+        body: JSON.stringify({ 
+          prompt: userInput,
+          context: conversationContext
+        })
       })
       
       if (parseResponse.ok) {
@@ -1799,10 +1996,59 @@ const CommandInterface = ({
         parsedIntent = parseData.parsed.intent
         parsedCustomer = parseData.parsed.customer
         parsedBrand = parseData.parsed.brand
+        parsedRetailer = parseData.parsed.retailer
+        
+        // Use context to fill in missing fields for follow-up queries
+        const lowerInput = userInput.toLowerCase()
+        const isFollowUp = lowerInput.includes('what about') || 
+                          lowerInput.includes('how about') || 
+                          lowerInput.includes('also') ||
+                          lowerInput.includes('and') ||
+                          lowerInput.includes('more') ||
+                          lowerInput.includes('details') ||
+                          lowerInput.includes('show me') && !lowerInput.includes('for') && !lowerInput.includes('from')
+        
+        if (isFollowUp && conversationContextRef.current.lastCustomer && !parsedCustomer) {
+          parsedCustomer = conversationContextRef.current.lastCustomer
+          console.log('🔄 Using context customer:', parsedCustomer)
+        }
+        if (isFollowUp && conversationContextRef.current.lastRetailer && !parsedRetailer) {
+          parsedRetailer = conversationContextRef.current.lastRetailer
+          console.log('🔄 Using context retailer:', parsedRetailer)
+        }
+        if (isFollowUp && conversationContextRef.current.lastDateRange && !dateRange) {
+          dateRange = conversationContextRef.current.lastDateRange
+          console.log('🔄 Using context date range:', dateRange)
+        }
+        
+        if (isFollowUp && conversationContextRef.current.lastRetailer && !parseData.parsed.retailer) {
+          // Will be handled in processCommand
+          console.log('🔄 Context retailer available:', conversationContextRef.current.lastRetailer)
+        }
         
         // Check if clarification is needed
-        if (parseData.parsed.needsClarification) {
+        // BUT: If it's an AOV + retailer query and we have a date range (from GPT or fallback), proceed anyway
+        const lowerInputCheck = userInput.toLowerCase()
+        const hasRetailerMentionInInput = 
+          lowerInputCheck.includes('from retailer') || 
+          lowerInputCheck.includes('for retailer') ||
+          lowerInputCheck.includes('from store') || 
+          lowerInputCheck.includes('retailer')
+        const isAOVQueryInInput = 
+          lowerInputCheck.includes('aov') || 
+          lowerInputCheck.includes('average')
+        const hasDateRange = parseData.parsed.startDate && parseData.parsed.endDate
+        const isAOVRetailerWithDate = isAOVQueryInInput && hasRetailerMentionInInput && hasDateRange
+        
+        if (parseData.parsed.needsClarification && !isAOVRetailerWithDate) {
           console.log('🤔 Clarification needed:', parseData.parsed.clarificationNeeded)
+          console.log('🔍 AOV+retailer check:', {
+            isAOVQueryInInput,
+            hasRetailerMentionInInput,
+            hasDateRange,
+            isAOVRetailerWithDate,
+            willBlock: true
+          })
           
           // Store the original query for later use
           originalQueryRef.current = userInput
@@ -1849,6 +2095,8 @@ const CommandInterface = ({
           
           setMessages(prev => [...prev, clarificationResponse])
           return // Exit early - don't process further
+        } else if (parseData.parsed.needsClarification && isAOVRetailerWithDate) {
+          console.log('✅ AOV+retailer query with date range - proceeding despite clarification flag')
         }
         
         console.log('📊 Token usage:', parseData.usage)
@@ -1890,6 +2138,7 @@ const CommandInterface = ({
           customer: parsedCustomer,
           intent: parsedIntent,
           brand: parsedBrand,
+          retailer: parsedRetailer,
           dateRange: dateRange
         }
         
@@ -2076,6 +2325,8 @@ const CommandInterface = ({
       pendingGPTDataRef.current = {
         customer: parsedCustomer,
         intent: parsedIntent,
+        brand: parsedBrand,
+        retailer: parsedRetailer,
         dateRange: dateRange
       }
       
@@ -2178,6 +2429,20 @@ const CommandInterface = ({
         if (pendingCommandRef.current) {
           console.log('⏰ Loading timeout reached, processing with available data')
           const response = processCommand(pendingCommandRef.current, pendingGPTDataRef.current)
+          
+          // Update conversation context after processing
+          if (pendingGPTDataRef.current) {
+            conversationContextRef.current = {
+              lastCustomer: pendingGPTDataRef.current.customer || conversationContextRef.current.lastCustomer,
+              lastDateRange: pendingGPTDataRef.current.dateRange || conversationContextRef.current.lastDateRange,
+              lastIntent: pendingGPTDataRef.current.intent || conversationContextRef.current.lastIntent,
+              lastRetailer: pendingGPTDataRef.current.retailer || conversationContextRef.current.lastRetailer,
+              lastBrand: pendingGPTDataRef.current.brand || conversationContextRef.current.lastBrand,
+              lastQuery: pendingCommandRef.current
+            }
+            console.log('💾 Updated conversation context (timeout):', conversationContextRef.current)
+          }
+          
           setMessages(prev => {
             const filtered = prev.filter(m => !m.loading)
             return [...filtered, response]
@@ -2199,6 +2464,20 @@ const CommandInterface = ({
         dateRange: dateRange
       }
       const response = processCommand(userInput, gptParsedData)
+      
+      // Update conversation context after processing
+      if (gptParsedData) {
+        conversationContextRef.current = {
+          lastCustomer: gptParsedData.customer || conversationContextRef.current.lastCustomer,
+          lastDateRange: dateRange || conversationContextRef.current.lastDateRange,
+          lastIntent: gptParsedData.intent || conversationContextRef.current.lastIntent,
+          lastRetailer: gptParsedData.retailer || conversationContextRef.current.lastRetailer,
+          lastBrand: gptParsedData.brand || conversationContextRef.current.lastBrand,
+          lastQuery: userInput
+        }
+        console.log('💾 Updated conversation context:', conversationContextRef.current)
+      }
+      
       setMessages(prev => [...prev, response])
     }
     
