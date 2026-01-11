@@ -27,15 +27,8 @@ app.use((req, res, next) => {
 })
 
 // Serve static files from the dist directory with no-cache headers for HTML
-app.use((req, res, next) => {
-  if (req.url.endsWith('.html') || req.url === '/' || req.url === '/dashboard' || req.url === '/products') {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
-    res.setHeader('Pragma', 'no-cache')
-    res.setHeader('Expires', '0')
-  }
-  next()
-})
-app.use(express.static(path.join(__dirname, 'dist')))
+// IMPORTANT: Static files are served AFTER API routes to prevent API requests from being intercepted
+// See line ~2840 where static files are actually served
 
 // CSV parsing function
 function parseCSVToOrders(csvData, orderDate) {
@@ -2822,8 +2815,33 @@ app.get('/api/events', (req, res) => {
   }, 30000) // Send heartbeat every 30 seconds
 })
 
-// Serve React app for all other routes (must be last)
+// Set no-cache headers for HTML files
+app.use((req, res, next) => {
+  if (req.url.endsWith('.html') || req.url === '/' || req.url === '/dashboard' || req.url === '/products') {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+  }
+  next()
+})
+
+// Serve static files from dist directory (for assets like JS, CSS, images)
+// This must come AFTER all API routes to prevent API requests from being served as static files
+app.use(express.static(path.join(__dirname, 'dist'), {
+  // Don't serve index.html for API routes - let them 404 if route doesn't exist
+  index: false
+}))
+
+// Serve React app for all non-API routes (must be last)
 app.get('*', (req, res) => {
+  // Skip API routes - they should have been handled above
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ 
+      error: 'API endpoint not found',
+      path: req.path
+    })
+  }
+  
   console.log(`📄 Serving React app for route: ${req.path}`)
   const indexPath = path.resolve(__dirname, 'dist', 'index.html')
   const fs = require('fs')
