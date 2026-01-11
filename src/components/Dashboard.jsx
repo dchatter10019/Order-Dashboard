@@ -491,6 +491,14 @@ const Dashboard = ({ onSwitchToAI }) => {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
       
+      // Check if response is JSON before parsing
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text()
+        console.error('❌ Expected JSON but got:', text.substring(0, 200))
+        throw new Error(`Server returned non-JSON response (status ${response.status}). Check if API endpoint exists.`)
+      }
+      
       const data = await response.json()
       console.log(`✅ Received ${data.data?.length || 0} orders ${data.cached ? '(cached)' : ''}${data.chunked ? ` (${data.chunks} chunks)` : ''}`)
       

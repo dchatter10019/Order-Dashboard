@@ -105,30 +105,54 @@ const ProductManagement = () => {
 
   // Load stores and check product cache status on mount
   useEffect(() => {
+    let isMounted = true // Flag to prevent state updates if component unmounts
+    
     const loadInitialData = async () => {
       // Check product cache status from backend
       try {
         const statusResponse = await fetch('/api/products/status')
-        const statusData = await statusResponse.json()
-        setProductCacheStatus(statusData)
-        console.log('📦 Product cache status:', statusData)
+        if (statusResponse.ok && isMounted) {
+          // Check if response is JSON before parsing
+          const contentType = statusResponse.headers.get('content-type')
+          if (contentType && contentType.includes('application/json')) {
+            const statusData = await statusResponse.json()
+            setProductCacheStatus(statusData)
+            console.log('📦 Product cache status:', statusData)
+          } else {
+            console.warn('⚠️ Product status endpoint returned non-JSON response')
+          }
+        }
       } catch (error) {
         console.error('Error checking product cache status:', error)
       }
       
-      // Always try to load stores on mount
-      setIsLoadingData(true)
-      try {
-        await loadStores()
-        console.log('✅ Stores loaded successfully')
-      } catch (error) {
-        console.error('Error loading stores:', error)
-        setMessage(`Error loading stores: ${error.message}. Click "Load Stores" to retry.`)
-      } finally {
-        setIsLoadingData(false)
+      // Always try to load stores on mount (only if component is still mounted)
+      if (isMounted) {
+        setIsLoadingData(true)
+        try {
+          await loadStores()
+          if (isMounted) {
+            console.log('✅ Stores loaded successfully')
+          }
+        } catch (error) {
+          console.error('Error loading stores:', error)
+          if (isMounted) {
+            setMessage(`Error loading stores: ${error.message}. Click "Load Stores" to retry.`)
+          }
+        } finally {
+          if (isMounted) {
+            setIsLoadingData(false)
+          }
+        }
       }
     }
+    
     loadInitialData()
+    
+    // Cleanup function
+    return () => {
+      isMounted = false
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
 
@@ -136,9 +160,39 @@ const ProductManagement = () => {
   const loadStores = async () => {
     try {
       const response = await fetch('/api/stores')
+      
+      // Check Content-Type BEFORE trying to parse
+      const contentType = response.headers.get('content-type') || ''
+      
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.message || `Failed to fetch stores: ${response.status}`)
+        // If it's JSON, try to parse error details
+        if (contentType.includes('application/json')) {
+          try {
+            const errorData = await response.json()
+            throw new Error(errorData.message || `Failed to fetch stores: ${response.status}`)
+          } catch (parseError) {
+            throw new Error(`Failed to fetch stores: ${response.status} ${response.statusText}`)
+          }
+        } else {
+          // Non-JSON error response (likely HTML error page)
+          const text = await response.text()
+          console.error('❌ API returned HTML instead of JSON:', text.substring(0, 300))
+          throw new Error(`API endpoint returned HTML (status ${response.status}). The backend server may not be running or the route is not configured.`)
+        }
+      }
+      
+      // Check if response is JSON before parsing
+      if (!contentType.includes('application/json')) {
+        // Read as text first to see what we got
+        const text = await response.text()
+        console.error('❌ Expected JSON but got:', text.substring(0, 300))
+        
+        // Check if it's HTML
+        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+          throw new Error('API endpoint returned HTML instead of JSON. The backend server may not be running or the /api/stores route is not configured in production.')
+        }
+        
+        throw new Error('Server returned non-JSON response. Check if API endpoint exists.')
       }
       
       const data = await response.json()
@@ -397,10 +451,23 @@ const ProductManagement = () => {
               await loadStores()
               // Refresh product cache status
               const statusResponse = await fetch('/api/products/status')
+              if (!statusResponse.ok) {
+                throw new Error(`Failed to fetch product status: ${statusResponse.status}`)
+              }
+              
+              // Check if response is JSON before parsing
+              const contentType = statusResponse.headers.get('content-type')
+              if (!contentType || !contentType.includes('application/json')) {
+                const text = await statusResponse.text()
+                console.error('❌ Expected JSON but got:', text.substring(0, 200))
+                throw new Error('Server returned non-JSON response for product status. Check if API endpoint exists.')
+              }
+              
               const statusData = await statusResponse.json()
               setProductCacheStatus(statusData)
               setMessage('✅ Stores and product cache refreshed from API')
             } catch (error) {
+              console.error('Error refreshing data:', error)
               setMessage(`Error refreshing data: ${error.message}`)
             } finally {
               setIsLoadingData(false)
@@ -426,6 +493,18 @@ const ProductManagement = () => {
           onClick={async () => {
             try {
               const response = await fetch('/api/products/refresh', { method: 'POST' })
+              if (!response.ok) {
+                throw new Error(`Failed to refresh products: ${response.status}`)
+              }
+              
+              // Check if response is JSON before parsing
+              const contentType = response.headers.get('content-type')
+              if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text()
+                console.error('❌ Expected JSON but got:', text.substring(0, 200))
+                throw new Error('Server returned non-JSON response. Check if API endpoint exists.')
+              }
+              
               const data = await response.json()
               if (data.success) {
                 setProductCacheStatus({
@@ -437,6 +516,7 @@ const ProductManagement = () => {
                 setMessage(`Error: ${data.message}`)
               }
             } catch (error) {
+              console.error('Error refreshing products:', error)
               setMessage(`Error refreshing products: ${error.message}`)
             }
           }}
