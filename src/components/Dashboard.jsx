@@ -5,6 +5,7 @@ import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import OrderModal from './OrderModal'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
+import { apiFetch, getApiUrl } from '../utils/api'
 
 const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
@@ -478,7 +479,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
       console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
       
-      const response = await fetch(apiUrl, {
+      const response = await apiFetch(apiUrl, {
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -535,7 +536,7 @@ const Dashboard = ({ onSwitchToAI }) => {
     if (autoRefresh) {
       // Stop auto-refresh
       try {
-        await fetch('/api/auto-refresh/stop', { method: 'POST' })
+        await apiFetch('/api/auto-refresh/stop', { method: 'POST' })
         if (autoRefreshInterval) {
           clearInterval(autoRefreshInterval)
           setAutoRefreshInterval(null)
@@ -559,7 +560,7 @@ const Dashboard = ({ onSwitchToAI }) => {
           }
         }
         
-        const response = await fetch('/api/auto-refresh/start', {
+        const response = await apiFetch('/api/auto-refresh/start', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -651,7 +652,7 @@ const Dashboard = ({ onSwitchToAI }) => {
             }
           }
           
-          await fetch('/api/auto-refresh/start', {
+          await apiFetch('/api/auto-refresh/start', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -725,7 +726,7 @@ const Dashboard = ({ onSwitchToAI }) => {
     
     const connectToRealTimeUpdates = () => {
       try {
-        eventSource = new EventSource('/api/events')
+        eventSource = new EventSource(getApiUrl('/api/events'))
         
         eventSource.onopen = () => {
           console.log('🔗 Connected to real-time updates')
@@ -793,7 +794,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       // Start backend auto-refresh with current date range
       const startBackendAutoRefresh = async () => {
         try {
-          const response = await fetch('/api/auto-refresh/start', {
+          const response = await apiFetch('/api/auto-refresh/start', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -826,7 +827,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   useEffect(() => {
     const checkAutoRefreshStatus = async () => {
       try {
-        const response = await fetch('/api/auto-refresh/status')
+        const response = await apiFetch('/api/auto-refresh/status')
         if (response.ok) {
           const status = await response.json()
           setAutoRefresh(status.active)

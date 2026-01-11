@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2, Download } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
+import { apiFetch } from '../utils/api'
 
 const CommandInterface = ({ 
   orders, 
@@ -1935,7 +1936,7 @@ const CommandInterface = ({
       console.log('🤖 Attempting GPT-4o-mini parsing...')
       // Include conversation context for follow-up queries
       const conversationContext = conversationContextRef.current
-      const parseResponse = await fetch('/api/parse-prompt', {
+      const parseResponse = await apiFetch('/api/parse-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

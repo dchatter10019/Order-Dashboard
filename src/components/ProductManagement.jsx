@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Search, Plus, Store, Building, Package, RefreshCw } from 'lucide-react'
+import { apiFetch } from '../utils/api'
 
 const ProductManagement = () => {
   // State declarations first
@@ -110,7 +111,7 @@ const ProductManagement = () => {
     const loadInitialData = async () => {
       // Check product cache status from backend
       try {
-        const statusResponse = await fetch('/api/products/status')
+        const statusResponse = await apiFetch('/api/products/status')
         if (statusResponse.ok && isMounted) {
           // Check if response is JSON before parsing
           const contentType = statusResponse.headers.get('content-type')
@@ -159,7 +160,7 @@ const ProductManagement = () => {
   // Function to load stores from API (via backend proxy)
   const loadStores = async () => {
     try {
-      const response = await fetch('/api/stores')
+      const response = await apiFetch('/api/stores')
       
       // Check Content-Type BEFORE trying to parse
       const contentType = response.headers.get('content-type') || ''
@@ -450,7 +451,7 @@ const ProductManagement = () => {
               // Refresh stores from API
               await loadStores()
               // Refresh product cache status
-              const statusResponse = await fetch('/api/products/status')
+              const statusResponse = await apiFetch('/api/products/status')
               if (!statusResponse.ok) {
                 throw new Error(`Failed to fetch product status: ${statusResponse.status}`)
               }
@@ -492,7 +493,7 @@ const ProductManagement = () => {
         <button
           onClick={async () => {
             try {
-              const response = await fetch('/api/products/refresh', { method: 'POST' })
+              const response = await apiFetch('/api/products/refresh', { method: 'POST' })
               if (!response.ok) {
                 throw new Error(`Failed to refresh products: ${response.status}`)
               }

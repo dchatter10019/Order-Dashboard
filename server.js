@@ -13,6 +13,17 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
 
+// CRITICAL: Set API route headers FIRST, before any other middleware
+// This ensures API routes always return JSON, never HTML
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    // Immediately set JSON content type for all API routes
+    res.setHeader('Content-Type', 'application/json')
+    console.log(`🔵 API route detected early: ${req.method} ${req.path}`)
+  }
+  next()
+})
+
 // Middleware
 app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3001'],
@@ -20,13 +31,9 @@ app.use(cors({
 }))
 app.use(express.json())
 
-// Add some debugging and ensure API routes are never intercepted
+// Add some debugging
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`)
-  // Early return for API routes to prevent any middleware from intercepting
-  if (req.path.startsWith('/api/')) {
-    console.log(`🔵 API route detected: ${req.path} - skipping middleware`)
-  }
   next()
 })
 
