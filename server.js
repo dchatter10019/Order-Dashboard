@@ -1988,7 +1988,9 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
 // Proxy endpoint for stores API
 app.get('/api/stores', async (req, res) => {
   try {
-    console.log('🔍 Proxying stores request')
+    console.log('🔍 Proxying stores request - Route handler hit!')
+    console.log('🔍 Request path:', req.path)
+    console.log('🔍 Request URL:', req.url)
     
     const response = await axios.get('https://api.getbevvi.com/api/corputil/getStoresAsJSON', {
       headers: {
@@ -2001,9 +2003,12 @@ app.get('/api/stores', async (req, res) => {
     console.log('📊 Stores response status:', response.status)
     console.log('📊 Stores loaded:', response.data?.results?.length || 0, 'stores')
     
+    // Ensure we're sending JSON with proper headers
+    res.setHeader('Content-Type', 'application/json')
     res.json(response.data)
   } catch (error) {
     console.error('❌ Error proxying stores:', error.message)
+    res.setHeader('Content-Type', 'application/json')
     res.status(500).json({
       error: 'Failed to fetch stores',
       message: error.message
@@ -2826,11 +2831,17 @@ app.use((req, res, next) => {
 })
 
 // Serve static files from dist directory (for assets like JS, CSS, images)
-// This must come AFTER all API routes to prevent API requests from being served as static files
-app.use(express.static(path.join(__dirname, 'dist'), {
-  // Don't serve index.html for API routes - let them 404 if route doesn't exist
-  index: false
-}))
+// IMPORTANT: Explicitly exclude /api/* paths to prevent API routes from being served as static files
+app.use((req, res, next) => {
+  // Skip static file serving for API routes
+  if (req.path.startsWith('/api/')) {
+    return next()
+  }
+  // Serve static files for non-API routes
+  express.static(path.join(__dirname, 'dist'), {
+    index: false
+  })(req, res, next)
+})
 
 // Serve React app for all non-API routes (must be last)
 app.get('*', (req, res) => {
