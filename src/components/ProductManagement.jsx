@@ -236,7 +236,7 @@ const ProductManagement = () => {
         // Search backend cache - all Bevvi products
         console.log(`🔍 Searching backend cache for "${debouncedSearchTerm}"`)
         
-        const response = await fetch(`/api/products/search?q=${encodeURIComponent(debouncedSearchTerm)}`)
+        const response = await apiFetch(`/api/products/search?q=${encodeURIComponent(debouncedSearchTerm)}`)
         if (!response.ok) throw new Error('Search failed')
         
         const data = await response.json()
