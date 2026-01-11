@@ -1992,6 +1992,32 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
   }
 })
 
+// Proxy endpoint for stores API
+app.get('/api/stores', async (req, res) => {
+  try {
+    console.log('🔍 Proxying stores request')
+    
+    const response = await axios.get('https://api.getbevvi.com/api/corputil/getStoresAsJSON', {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000
+    })
+    
+    console.log('📊 Stores response status:', response.status)
+    console.log('📊 Stores loaded:', response.data?.results?.length || 0, 'stores')
+    
+    res.json(response.data)
+  } catch (error) {
+    console.error('❌ Error proxying stores:', error.message)
+    res.status(500).json({
+      error: 'Failed to fetch stores',
+      message: error.message
+    })
+  }
+})
+
 // Asana API helper functions
 // Helper to generate Asana task URL from task GID
 function getAsanaTaskUrl(taskGid) {

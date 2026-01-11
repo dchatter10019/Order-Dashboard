@@ -116,30 +116,30 @@ const ProductManagement = () => {
         console.error('Error checking product cache status:', error)
       }
       
-      // Always load stores on mount (check cache first)
-      const hasStoresInStorage = sessionStorage.getItem('bevvi_stores')
-      
-      if (!hasStoresInStorage || stores.length === 0) {
-        setIsLoadingData(true)
-        try {
-          await loadStores()
-          console.log('✅ Stores loaded successfully')
-        } catch (error) {
-          setMessage(`Error loading stores: ${error.message}`)
-        } finally {
-          setIsLoadingData(false)
-        }
+      // Always try to load stores on mount
+      setIsLoadingData(true)
+      try {
+        await loadStores()
+        console.log('✅ Stores loaded successfully')
+      } catch (error) {
+        console.error('Error loading stores:', error)
+        setMessage(`Error loading stores: ${error.message}. Click "Load Stores" to retry.`)
+      } finally {
+        setIsLoadingData(false)
       }
     }
     loadInitialData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Only run once on mount
 
-  // Function to load stores from API
+  // Function to load stores from API (via backend proxy)
   const loadStores = async () => {
     try {
-      const response = await fetch('https://api.getbevvi.com/api/corputil/getStoresAsJSON')
-      if (!response.ok) throw new Error('Failed to fetch stores')
+      const response = await fetch('/api/stores')
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.message || `Failed to fetch stores: ${response.status}`)
+      }
       
       const data = await response.json()
       console.log('🏪 Stores loaded from API:', data)
@@ -389,40 +389,38 @@ const ProductManagement = () => {
 
       {/* Action Buttons */}
       <div className="mb-8 flex justify-center gap-4">
-        {stores.length > 0 && (
-          <button
-            onClick={async () => {
-              setIsLoadingData(true)
-              try {
-                // Refresh stores from API
-                await loadStores()
-                // Refresh product cache status
-                const statusResponse = await fetch('/api/products/status')
-                const statusData = await statusResponse.json()
-                setProductCacheStatus(statusData)
-                setMessage('✅ Stores and product cache refreshed from API')
-              } catch (error) {
-                setMessage(`Error refreshing data: ${error.message}`)
-              } finally {
-                setIsLoadingData(false)
-              }
-            }}
-            disabled={isLoadingData}
-            className="flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoadingData ? (
-              <>
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                Refreshing...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-5 h-5 mr-2" />
-                Refresh Stores
-              </>
-            )}
-          </button>
-        )}
+        <button
+          onClick={async () => {
+            setIsLoadingData(true)
+            try {
+              // Refresh stores from API
+              await loadStores()
+              // Refresh product cache status
+              const statusResponse = await fetch('/api/products/status')
+              const statusData = await statusResponse.json()
+              setProductCacheStatus(statusData)
+              setMessage('✅ Stores and product cache refreshed from API')
+            } catch (error) {
+              setMessage(`Error refreshing data: ${error.message}`)
+            } finally {
+              setIsLoadingData(false)
+            }
+          }}
+          disabled={isLoadingData}
+          className="flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isLoadingData ? (
+            <>
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+              {stores.length > 0 ? 'Refreshing...' : 'Loading...'}
+            </>
+          ) : (
+            <>
+              <RefreshCw className="w-5 h-5 mr-2" />
+              {stores.length > 0 ? 'Refresh Stores' : 'Load Stores'}
+            </>
+          )}
+        </button>
         
         <button
           onClick={async () => {
