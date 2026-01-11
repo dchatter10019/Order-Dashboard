@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { LogOut, Package, FileText, Sparkles } from 'lucide-react'
+import { LogOut, Package, FileText, Sparkles, Store } from 'lucide-react'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
+import RetailerManagement from './RetailerManagement'
 import AIAssistant from './AIAssistant'
 import Logo from './Logo'
 
@@ -96,6 +97,20 @@ const MainDashboard = ({ onLogout }) => {
             </button>
             
             <button
+              onClick={() => setActiveTab('retailers')}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === 'retailers'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Store className="w-5 h-5 mr-2" />
+                Retailers
+              </div>
+            </button>
+            
+            <button
               onClick={() => setActiveTab('ai-assistant')}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === 'ai-assistant'
@@ -116,6 +131,7 @@ const MainDashboard = ({ onLogout }) => {
       <main className="max-w-7xl mx-auto">
         {activeTab === 'orders' && <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />}
         {activeTab === 'products' && <ProductManagement />}
+        {activeTab === 'retailers' && <RetailerManagement />}
         {/* Always render AIAssistant to preserve state, just hide it */}
         <div style={{ display: activeTab === 'ai-assistant' ? 'block' : 'none' }}>
           <AIAssistant 
