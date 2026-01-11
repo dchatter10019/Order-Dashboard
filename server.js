@@ -20,9 +20,13 @@ app.use(cors({
 }))
 app.use(express.json())
 
-// Add some debugging
+// Add some debugging and ensure API routes are never intercepted
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`)
+  // Early return for API routes to prevent any middleware from intercepting
+  if (req.path.startsWith('/api/')) {
+    console.log(`🔵 API route detected: ${req.path} - skipping middleware`)
+  }
   next()
 })
 
@@ -1986,11 +1990,16 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
 })
 
 // Proxy endpoint for stores API
+// CRITICAL: This route MUST be defined before any static middleware or catch-all routes
 app.get('/api/stores', async (req, res) => {
+  // Immediately set JSON content type to prevent any middleware from changing it
+  res.setHeader('Content-Type', 'application/json')
+  
   try {
-    console.log('🔍 Proxying stores request - Route handler hit!')
+    console.log('🔍 /api/stores route handler EXECUTED - Route handler hit!')
     console.log('🔍 Request path:', req.path)
     console.log('🔍 Request URL:', req.url)
+    console.log('🔍 Request method:', req.method)
     
     const response = await axios.get('https://api.getbevvi.com/api/corputil/getStoresAsJSON', {
       headers: {
@@ -2003,12 +2012,11 @@ app.get('/api/stores', async (req, res) => {
     console.log('📊 Stores response status:', response.status)
     console.log('📊 Stores loaded:', response.data?.results?.length || 0, 'stores')
     
-    // Ensure we're sending JSON with proper headers
-    res.setHeader('Content-Type', 'application/json')
+    // Send JSON response
     res.json(response.data)
   } catch (error) {
     console.error('❌ Error proxying stores:', error.message)
-    res.setHeader('Content-Type', 'application/json')
+    console.error('❌ Error stack:', error.stack)
     res.status(500).json({
       error: 'Failed to fetch stores',
       message: error.message
@@ -2844,12 +2852,17 @@ app.use((req, res, next) => {
 })
 
 // Serve React app for all non-API routes (must be last)
-app.get('*', (req, res) => {
-  // Skip API routes - they should have been handled above
+// CRITICAL: This catch-all must NEVER match API routes - they should be handled by specific routes above
+app.get('*', (req, res, next) => {
+  // CRITICAL CHECK: If this is an API route, something is wrong - API routes should be handled above
   if (req.path.startsWith('/api/')) {
+    console.error(`❌ CRITICAL: Catch-all route intercepted API request: ${req.path}`)
+    console.error(`❌ This should never happen - API routes should be matched before this catch-all`)
+    // Return JSON error, not HTML
     return res.status(404).json({ 
       error: 'API endpoint not found',
-      path: req.path
+      path: req.path,
+      message: 'The API route was not matched by any specific route handler'
     })
   }
   
