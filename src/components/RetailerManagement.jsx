@@ -260,6 +260,33 @@ const RetailerManagement = () => {
     console.log('Charge Fees clicked for:', retailerName)
   }
 
+  // Calculate optimal column width based on content
+  const calculateColumnWidth = (sheet, columnIndex, minWidth = 10, maxWidth = 50) => {
+    let maxLength = minWidth
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
+    
+    for (let row = 0; row <= range.e.r; row++) {
+      const cellRef = XLSX.utils.encode_cell({ r: row, c: columnIndex })
+      const cell = sheet[cellRef]
+      if (cell) {
+        let cellValue = ''
+        if (cell.v !== null && cell.v !== undefined) {
+          cellValue = String(cell.v)
+        } else if (cell.w) {
+          cellValue = cell.w
+        }
+        // Account for currency formatting (adds ~2 chars for $ and commas)
+        if (cell.z && cell.z.includes('$')) {
+          cellValue = cellValue + '$$'
+        }
+        maxLength = Math.max(maxLength, cellValue.length)
+      }
+    }
+    
+    // Add padding for better readability
+    return Math.min(maxLength + 2, maxWidth)
+  }
+
   // Sanitize sheet name for Excel
   const sanitizeSheetName = (name) => {
     if (!name) return 'Sheet1'
@@ -359,7 +386,7 @@ const RetailerManagement = () => {
       })
 
       // Create Executive Summary sheet for this retailer only
-      const summaryData = [['Retailer Name', 'Subtotal', 'Service Fees', 'Total']]
+      const summaryData = [['Retailer Name', 'Subtotal', 'Bevvi Marketing Fees', 'Total']]
       
       // Aggregate totals for this retailer
       const retailerSubtotal = transactions.reduce((sum, t) => sum + t.subtotal, 0)
@@ -404,12 +431,12 @@ const RetailerManagement = () => {
         summarySheet[`D${row}`].z = currencyFormat
       }
 
-      // Set column widths
+      // Calculate and set column widths based on content
       summarySheet['!cols'] = [
-        { wch: 30 }, // Retailer Name
-        { wch: 15 }, // Subtotal
-        { wch: 15 }, // Service Fees
-        { wch: 15 }  // Total
+        { wch: calculateColumnWidth(summarySheet, 0, 15, 50) }, // Retailer Name
+        { wch: calculateColumnWidth(summarySheet, 1, 12, 20) }, // Subtotal
+        { wch: calculateColumnWidth(summarySheet, 2, 12, 25) }, // Bevvi Marketing Fees
+        { wch: calculateColumnWidth(summarySheet, 3, 12, 20) }  // Total
       ]
 
       XLSX.utils.book_append_sheet(wb, summarySheet, 'Executive Summary')
@@ -419,7 +446,7 @@ const RetailerManagement = () => {
 
         // Customer Summary Section
         retailerSheetData.push(['Customer Summary'])
-        retailerSheetData.push(['Customer', 'Subtotal', 'Service Fees', 'Total'])
+        retailerSheetData.push(['Customer', 'Subtotal', 'Bevvi Marketing Fees', 'Total'])
 
         // Group by customer for this retailer
         const customerMap = new Map()
@@ -465,7 +492,7 @@ const RetailerManagement = () => {
 
         // Detailed Transactions Section
         retailerSheetData.push(['Detailed Transactions'])
-        retailerSheetData.push(['Date', 'Customer', 'Order Number', 'Subtotal', 'Service Fee', 'Service Fee Tax', 'Total'])
+        retailerSheetData.push(['Date', 'Customer', 'Order Number', 'Subtotal', 'Bevvi Marketing Fee', 'Service Fee Tax', 'Total'])
 
         // Sort transactions by date, then customer
         const sortedTransactions = [...transactions].sort((a, b) => {
@@ -554,15 +581,15 @@ const RetailerManagement = () => {
           }
         }
 
-        // Set column widths
+        // Calculate and set column widths based on content
         retailerSheet['!cols'] = [
-          { wch: 12 }, // Date
-          { wch: 25 }, // Customer
-          { wch: 15 }, // Order Number
-          { wch: 12 }, // Subtotal
-          { wch: 12 }, // Service Fee
-          { wch: 15 }, // Service Fee Tax
-          { wch: 12 }  // Total
+          { wch: calculateColumnWidth(retailerSheet, 0, 10, 15) }, // Date
+          { wch: calculateColumnWidth(retailerSheet, 1, 15, 40) }, // Customer
+          { wch: calculateColumnWidth(retailerSheet, 2, 12, 20) }, // Order Number
+          { wch: calculateColumnWidth(retailerSheet, 3, 12, 20) }, // Subtotal
+          { wch: calculateColumnWidth(retailerSheet, 4, 12, 25) }, // Bevvi Marketing Fee
+          { wch: calculateColumnWidth(retailerSheet, 5, 12, 20) }, // Service Fee Tax
+          { wch: calculateColumnWidth(retailerSheet, 6, 12, 20) }  // Total
         ]
 
       XLSX.utils.book_append_sheet(wb, retailerSheet, sanitizeSheetName(retailerName))
