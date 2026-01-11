@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
@@ -423,8 +423,8 @@ const Dashboard = ({ onSwitchToAI }) => {
     }
   }, [filteredAcceptedOrders])
 
-  // Fetch orders function
-  const fetchOrders = async () => {
+  // Fetch orders function (wrapped in useCallback to avoid dependency issues)
+  const fetchOrders = useCallback(async () => {
     try {
       // Validate date range before making API call
       if (dateRange.startDate && dateRange.endDate) {
@@ -451,7 +451,14 @@ const Dashboard = ({ onSwitchToAI }) => {
       const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
       console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
       
-      const response = await fetch(apiUrl)
+      const response = await fetch(apiUrl, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      })
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -486,7 +493,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       })
       setIsLoading(false)
     }
-  }
+  }, [dateRange])
 
   // Auto-refresh functionality
   const toggleAutoRefresh = async () => {
@@ -630,6 +637,52 @@ const Dashboard = ({ onSwitchToAI }) => {
     // Cleanup: cancel the timer if dateRange changes again before it fires
     return () => clearTimeout(debounceTimer)
   }, [dateRange, autoRefresh])
+
+  // Fetch data on page visibility change (mobile app switching, tab switching, page refresh)
+  useEffect(() => {
+    let visibilityTimeout = null
+    let focusTimeout = null
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('📱 Page became visible - fetching fresh data')
+        // Clear any pending timeout
+        if (visibilityTimeout) {
+          clearTimeout(visibilityTimeout)
+        }
+        // Add small delay to ensure page is fully loaded and debounce rapid changes
+        visibilityTimeout = setTimeout(() => {
+          fetchOrders()
+        }, 300)
+      }
+    }
+
+    const handleFocus = () => {
+      console.log('📱 Window focused - fetching fresh data')
+      // Clear any pending timeout
+      if (focusTimeout) {
+        clearTimeout(focusTimeout)
+      }
+      // Debounce focus events
+      focusTimeout = setTimeout(() => {
+        fetchOrders()
+      }, 300)
+    }
+
+    // Listen for visibility changes (works on mobile)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    
+    // Listen for window focus (backup for mobile)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      // Cleanup timeouts
+      if (visibilityTimeout) clearTimeout(visibilityTimeout)
+      if (focusTimeout) clearTimeout(focusTimeout)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [fetchOrders]) // Re-fetch when fetchOrders changes (which happens when dateRange changes)
 
   // Real-time updates using Server-Sent Events
   useEffect(() => {
@@ -1641,11 +1694,24 @@ const Dashboard = ({ onSwitchToAI }) => {
           {/* Refresh Button */}
           <div className="mt-4 sm:mt-6">
             <button
-              onClick={fetchOrders}
+              onClick={() => {
+                console.log('🔄 Manual refresh triggered')
+                fetchOrders()
+              }}
               disabled={isLoading}
-              className="w-full sm:w-auto px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
-              {isLoading ? 'Refreshing...' : 'Refresh Orders'}
+              {isLoading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  Refreshing...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh Orders
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -1689,7 +1755,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.2.0
+                    v2.2.1
                   </>
                 )}
               </div>
@@ -1730,7 +1796,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.2.0
+                    v2.2.1
                   </>
                 )}
               </div>
