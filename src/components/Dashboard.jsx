@@ -320,6 +320,33 @@ const Dashboard = ({ onSwitchToAI }) => {
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
   const filteredTotalRevenueBasedOnTotal = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0)
+  
+  // Verification: Calculate what the total should be (all components)
+  // order.total should = revenue + tax + tip + shippingFee + deliveryFee + serviceCharge + serviceChargeTax + giftNoteCharge - promoDiscAmt
+  const calculatedTotalFromComponents = filteredAcceptedOrders.reduce((sum, order) => {
+    const revenue = parseFloat(order.revenue) || 0
+    const tax = parseFloat(order.tax) || 0
+    const tip = parseFloat(order.tip) || 0
+    const shippingFee = parseFloat(order.shippingFee) || 0
+    const deliveryFee = parseFloat(order.deliveryFee) || 0
+    const serviceCharge = parseFloat(order.serviceCharge) || 0
+    const serviceChargeTax = parseFloat(order.serviceChargeTax) || 0
+    const giftNoteCharge = parseFloat(order.giftNoteCharge) || 0
+    const promoDiscAmt = parseFloat(order.promoDiscAmt) || 0 // This is a discount, so subtract it
+    
+    return sum + revenue + tax + tip + shippingFee + deliveryFee + serviceCharge + serviceChargeTax + giftNoteCharge - promoDiscAmt
+  }, 0)
+  
+  // Log verification for debugging (only if there's a significant difference)
+  if (Math.abs(filteredTotalRevenueBasedOnTotal - calculatedTotalFromComponents) > 0.01) {
+    console.log('⚠️ Total verification:', {
+      fromTotalField: filteredTotalRevenueBasedOnTotal,
+      calculatedFromComponents: calculatedTotalFromComponents,
+      difference: filteredTotalRevenueBasedOnTotal - calculatedTotalFromComponents,
+      orderCount: filteredAcceptedOrders.length
+    })
+  }
+  
   const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
   
   // Fee calculation function based on Bevvi transaction fee rules
