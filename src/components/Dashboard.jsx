@@ -810,8 +810,8 @@ const Dashboard = ({ onSwitchToAI }) => {
             const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
             setNextRefreshTime(nextRefresh)
             
-            // Fetch orders immediately
-            fetchOrders()
+            // Don't fetch orders here - the useEffect at line 633 already handles fetching
+            // when dateRange/autoRefresh changes, preventing double refresh
           }
         } catch (error) {
           console.error('Failed to start backend auto-refresh:', error)
