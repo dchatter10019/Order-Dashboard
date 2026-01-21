@@ -21,7 +21,7 @@ const ProductManagement = () => {
     { name: 'sendoso' },
     { name: 'OnGoody' }
   ])
-  const [selectedProduct, setSelectedProduct] = useState('')
+  const [selectedProduct, setSelectedProduct] = useState(null) // Store full product object instead of just name
   const [selectedStore, setSelectedStore] = useState('')
   const [storeSearchTerm, setStoreSearchTerm] = useState('')
   const [debouncedStoreSearchTerm, setDebouncedStoreSearchTerm] = useState('')
@@ -309,18 +309,8 @@ const ProductManagement = () => {
     setMessage('')
 
     try {
-      // Find the selected product to get UPC from search results
-      const product = searchResults.find(p => 
-        p.name === selectedProduct || p.Name === selectedProduct
-      )
-      
-      if (!product) {
-        setMessage('Selected product not found. Please search and select a product again.')
-        setIsLoading(false)
-        return
-      }
-
-      const upc = product.upc || product.UPC
+      // Use the stored product object directly (no need to search)
+      const upc = selectedProduct.upc || selectedProduct.UPC
       const storeName = encodeURIComponent(selectedStore)
       const client = encodeURIComponent(selectedCompany)
 
@@ -332,7 +322,7 @@ const ProductManagement = () => {
       if (response.ok) {
         setMessage('✓ Product added successfully! Search the product to verify it was added.')
         // Reset form
-        setSelectedProduct('')
+        setSelectedProduct(null)
         setProductSearchTerm('')
         setDebouncedSearchTerm('')
         setSelectedStore('')
@@ -562,6 +552,11 @@ const ProductManagement = () => {
             <div ref={productSearchRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center justify-between">
                 <span>Product *</span>
+                {selectedProduct && (
+                  <span className="text-xs font-normal text-gray-500">
+                    UPC: {selectedProduct.upc || selectedProduct.UPC}
+                  </span>
+                )}
               </label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
@@ -572,6 +567,10 @@ const ProductManagement = () => {
                   onChange={(e) => {
                     setProductSearchTerm(e.target.value)
                     setShowProductDropdown(true)
+                    // Clear selected product when user types
+                    if (selectedProduct) {
+                      setSelectedProduct(null)
+                    }
                   }}
                   onFocus={() => {
                     if (productSearchTerm.length >= 3) {
@@ -602,8 +601,9 @@ const ProductManagement = () => {
                         <div
                           key={`${product.upc || product.UPC}-${index}`}
                           onClick={() => {
+                            // Store the full product object, not just the name
+                            setSelectedProduct(product)
                             const productName = product.name || product.Name
-                            setSelectedProduct(productName)
                             setProductSearchTerm(productName)
                             setDebouncedSearchTerm(productName)
                             setShowProductDropdown(false)
