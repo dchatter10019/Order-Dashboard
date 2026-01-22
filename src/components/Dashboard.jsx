@@ -1791,7 +1791,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.2.1
+                    v2.2.2
                   </>
                 )}
               </div>
@@ -1832,7 +1832,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.2.1
+                    v2.2.2
                   </>
                 )}
               </div>
