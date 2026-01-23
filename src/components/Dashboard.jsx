@@ -51,6 +51,16 @@ const Dashboard = ({ onSwitchToAI }) => {
     deliveryFilter: false
   })
 
+  // Parse API deliveryDateTime as local time (ignore timezone suffix)
+  const parseLocalDateTime = useCallback((dateTimeValue) => {
+    if (!dateTimeValue) return null
+    let normalized = dateTimeValue
+    normalized = normalized.replace(/Z$/, '')
+    normalized = normalized.replace(/[+-]\d{2}:\d{2}$/, '')
+    const parsed = new Date(normalized)
+    return isNaN(parsed.getTime()) ? new Date(dateTimeValue) : parsed
+  }, [])
+
   // Helper function to check if date is this week
   const isThisWeek = (dateString) => {
     const date = new Date(dateString)
@@ -1513,7 +1523,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                                 // If we have orderDateTime, use it to get local date
                                 if (order.orderDateTime) {
                                   try {
-                                    const date = new Date(order.orderDateTime)
+                                    const date = parseLocalDateTime(order.orderDateTime)
                                     // Convert to local date string
                                     return date.getFullYear() + '-' + 
                                            String(date.getMonth() + 1).padStart(2, '0') + '-' + 
@@ -1529,7 +1539,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={`Raw orderDateTime: "${order.orderDateTime || 'null'}"`}>
                               {order.orderDateTime ? 
-                                new Date(order.orderDateTime).toLocaleTimeString('en-US', { 
+                                parseLocalDateTime(order.orderDateTime).toLocaleTimeString('en-US', { 
                                   hour: 'numeric', 
                                   minute: '2-digit',
                                   hour12: true 
@@ -1543,10 +1553,10 @@ const Dashboard = ({ onSwitchToAI }) => {
                                 // Convert UTC delivery date to local date for display
                                 if (order.deliveryDate === 'N/A') return 'N/A'
                                 if (order.deliveryDateTime) {
-                                  const utcDate = new Date(order.deliveryDateTime)
-                                  const localDate = utcDate.getFullYear() + '-' + 
-                                                   String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                                   String(utcDate.getDate()).padStart(2, '0')
+                                  const localDateTime = parseLocalDateTime(order.deliveryDateTime)
+                                  const localDate = localDateTime.getFullYear() + '-' + 
+                                                   String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                                   String(localDateTime.getDate()).padStart(2, '0')
                                   return localDate
                                 }
                                 return order.deliveryDate
@@ -1556,7 +1566,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={`Raw deliveryDateTime: "${order.deliveryDateTime || 'null'}"`}>
                               {order.deliveryDateTime ? 
-                                new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
+                                parseLocalDateTime(order.deliveryDateTime).toLocaleTimeString('en-US', { 
                                   hour: 'numeric', 
                                   minute: '2-digit',
                                   hour12: true 
@@ -1621,23 +1631,23 @@ const Dashboard = ({ onSwitchToAI }) => {
                       const deliveryDateDisplay = (() => {
                         if (order.deliveryDate === 'N/A') return 'N/A'
                         if (order.deliveryDateTime) {
-                          const utcDate = new Date(order.deliveryDateTime)
-                          return utcDate.getFullYear() + '-' + 
-                                 String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                 String(utcDate.getDate()).padStart(2, '0')
+                          const localDateTime = parseLocalDateTime(order.deliveryDateTime)
+                          return localDateTime.getFullYear() + '-' + 
+                                 String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                 String(localDateTime.getDate()).padStart(2, '0')
                         }
                         return order.deliveryDate
                       })()
                       
                       const deliveryTimeDisplay = order.deliveryDateTime ? 
-                        new Date(order.deliveryDateTime).toLocaleTimeString('en-US', { 
+                        parseLocalDateTime(order.deliveryDateTime).toLocaleTimeString('en-US', { 
                           hour: 'numeric', 
                           minute: '2-digit',
                           hour12: true 
                         }) : 'N/A'
 
                       const orderTimeDisplay = order.orderDateTime ? 
-                        new Date(order.orderDateTime).toLocaleTimeString('en-US', { 
+                        parseLocalDateTime(order.orderDateTime).toLocaleTimeString('en-US', { 
                           hour: 'numeric', 
                           minute: '2-digit',
                           hour12: true 
@@ -1699,7 +1709,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                                   // If we have orderDateTime, use it to get local date
                                   if (order.orderDateTime) {
                                     try {
-                                      const date = new Date(order.orderDateTime)
+                                      const date = parseLocalDateTime(order.orderDateTime)
                                       // Convert to local date string
                                       return date.getFullYear() + '-' + 
                                              String(date.getMonth() + 1).padStart(2, '0') + '-' + 
