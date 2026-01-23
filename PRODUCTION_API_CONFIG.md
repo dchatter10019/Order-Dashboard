@@ -69,6 +69,20 @@ Then build:
 npm run build
 ```
 
+## Slack Notifications (Backend)
+The backend uses `SLACK_WEBHOOK_URL` to send time-based order alerts.
+
+- Set this in your server runtime environment (not in the frontend).
+- Do not commit real webhook URLs to the repo.
+
+**Example (runtime env):**
+```bash
+export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+node server.js
+```
+
+If `SLACK_WEBHOOK_URL` is not set, Slack notifications are skipped.
+
 ## Verification
 
 After building, check the browser console. You should see log messages like:

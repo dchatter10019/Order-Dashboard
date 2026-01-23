@@ -7,11 +7,121 @@ require('dotenv').config()
 
 const app = express()
 const PORT = process.env.PORT || 3001
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
+// Initialize OpenAI client only when configured
+let openai = null
+if (process.env.OPENAI_API_KEY) {
+  openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+  })
+} else {
+  console.warn('⚠️ OPENAI_API_KEY not set; AI parsing endpoint will be disabled.')
+}
+
+// Slack notifications state (in-memory)
+const slackNotificationState = new Map()
+
+function getSlackNotificationState(orderId) {
+  if (!slackNotificationState.has(orderId)) {
+    slackNotificationState.set(orderId, {
+      pending15Sent: false,
+      accepted30Sent: false
+    })
+  }
+  return slackNotificationState.get(orderId)
+}
+
+function pruneSlackNotificationState(currentOrderIds) {
+  for (const orderId of slackNotificationState.keys()) {
+    if (!currentOrderIds.has(orderId)) {
+      slackNotificationState.delete(orderId)
+    }
+  }
+}
+
+function formatSlackDateTime(dateTimeValue) {
+  if (!dateTimeValue) return 'N/A'
+  const parsed = new Date(dateTimeValue)
+  if (isNaN(parsed.getTime())) return 'N/A'
+  return parsed.toLocaleString()
+}
+
+async function sendSlackMessage(text) {
+  if (!SLACK_WEBHOOK_URL) {
+    return false
+  }
+  try {
+    await axios.post(SLACK_WEBHOOK_URL, { text })
+    return true
+  } catch (error) {
+    console.error('❌ Slack notification failed:', error.message)
+    return false
+  }
+}
+
+async function evaluateSlackNotifications(orders) {
+  if (!SLACK_WEBHOOK_URL || !Array.isArray(orders) || orders.length === 0) {
+    return
+  }
+
+  const now = new Date()
+  const currentOrderIds = new Set()
+
+  for (const order of orders) {
+    if (!order || !order.id) continue
+    currentOrderIds.add(order.id)
+
+    const state = getSlackNotificationState(order.id)
+    const normalizedStatus = (order.status || '').toLowerCase()
+
+    if (normalizedStatus === 'pending' && !state.pending15Sent && order.orderDateTime) {
+      const orderDateTime = new Date(order.orderDateTime)
+      if (!isNaN(orderDateTime.getTime())) {
+        const minutesSinceReceipt = (now.getTime() - orderDateTime.getTime()) / (1000 * 60)
+        if (minutesSinceReceipt >= 15) {
+          const message = [
+            '⚠️ Order Pending > 15 mins',
+            `Order ID: ${order.id}`,
+            `Customer: ${order.customerName || 'N/A'}`,
+            `Status: ${order.status || 'N/A'}`,
+            `Order Time: ${formatSlackDateTime(order.orderDateTime)}`,
+            `Delivery Time: ${formatSlackDateTime(order.deliveryDateTime)}`,
+            `Total: $${(order.total || 0).toFixed(2)}`
+          ].join('\n')
+          const sent = await sendSlackMessage(message)
+          if (sent) {
+            state.pending15Sent = true
+          }
+        }
+      }
+    }
+
+    if (normalizedStatus === 'accepted' && !state.accepted30Sent && order.deliveryDateTime) {
+      const deliveryDateTime = new Date(order.deliveryDateTime)
+      if (!isNaN(deliveryDateTime.getTime())) {
+        const minutesUntilDelivery = (deliveryDateTime.getTime() - now.getTime()) / (1000 * 60)
+        if (minutesUntilDelivery <= 30 && minutesUntilDelivery >= 0) {
+          const message = [
+            '⚠️ Order Still Accepted 30 mins Before Delivery',
+            `Order ID: ${order.id}`,
+            `Customer: ${order.customerName || 'N/A'}`,
+            `Status: ${order.status || 'N/A'}`,
+            `Order Time: ${formatSlackDateTime(order.orderDateTime)}`,
+            `Delivery Time: ${formatSlackDateTime(order.deliveryDateTime)}`,
+            `Total: $${(order.total || 0).toFixed(2)}`
+          ].join('\n')
+          const sent = await sendSlackMessage(message)
+          if (sent) {
+            state.accepted30Sent = true
+          }
+        }
+      }
+    }
+  }
+
+  pruneSlackNotificationState(currentOrderIds)
+}
 
 // CRITICAL: Set API route headers FIRST, before any other middleware
 // This ensures API routes always return JSON, never HTML
@@ -1662,9 +1772,11 @@ app.get('/api/brands/revenue', async (req, res) => {
 
 // Auto-refresh configuration
 const AUTO_REFRESH_INTERVAL = 20 * 60 * 1000 // 20 minutes in milliseconds
+const SLACK_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes for Slack status checks
 let autoRefreshTimer = null
 let lastAutoRefreshDate = null
 let lastAutoRefreshRange = null
+let slackCheckTimer = null
 
 // Store connected clients for real-time updates
 let connectedClients = []
@@ -1726,6 +1838,9 @@ function startAutoRefresh() {
             timestamp: lastAutoRefreshDate,
             dateRange: lastAutoRefreshRange
           }
+
+          // Send Slack alerts for time-sensitive status checks
+          await evaluateSlackNotifications(orders)
           
           // Notify all connected clients about the data refresh
           notifyClientsOfRefresh(orders.length, lastAutoRefreshDate)
@@ -1746,6 +1861,30 @@ function stopAutoRefresh() {
     autoRefreshTimer = null
     console.log('🛑 Auto-refresh stopped')
   }
+}
+
+// Function to start Slack check timer (independent of auto-refresh)
+function startSlackChecks() {
+  if (!SLACK_WEBHOOK_URL) {
+    console.log('ℹ️  Slack webhook not configured; Slack checks disabled')
+    return
+  }
+  if (slackCheckTimer) {
+    clearInterval(slackCheckTimer)
+  }
+
+  slackCheckTimer = setInterval(async () => {
+    try {
+      const lastOrders = global.lastRefreshedOrders?.orders || []
+      if (lastOrders.length > 0) {
+        await evaluateSlackNotifications(lastOrders)
+      }
+    } catch (error) {
+      console.error('❌ Slack check error:', error.message)
+    }
+  }, SLACK_CHECK_INTERVAL)
+
+  console.log(`🔔 Slack checks started - every ${SLACK_CHECK_INTERVAL / 60000} minutes`)
 }
 
 // Function to update auto-refresh with new date range
@@ -2932,4 +3071,7 @@ app.listen(PORT, async () => {
   console.log(`📦 Loading all Bevvi products on startup...`)
   await loadAllProducts()
   console.log(`✅ Server ready with products cache loaded`)
+
+  // Start periodic Slack checks independent of auto-refresh
+  startSlackChecks()
 })

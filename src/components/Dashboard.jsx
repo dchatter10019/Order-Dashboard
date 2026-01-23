@@ -273,6 +273,14 @@ const Dashboard = ({ onSwitchToAI }) => {
           } else {
             return dateB - dateA
           }
+        } else if (sortConfig.key === 'orderTime') {
+          const timeA = a.orderDateTime ? new Date(a.orderDateTime).getTime() : 0
+          const timeB = b.orderDateTime ? new Date(b.orderDateTime).getTime() : 0
+          if (sortConfig.direction === 'asc') {
+            return timeA - timeB
+          } else {
+            return timeB - timeA
+          }
         } else if (sortConfig.key === 'deliveryTime') {
           const timeA = a.deliveryDateTime ? new Date(a.deliveryDateTime).getTime() : 0
           const timeB = b.deliveryDateTime ? new Date(b.deliveryDateTime).getTime() : 0
@@ -1384,6 +1392,17 @@ const Dashboard = ({ onSwitchToAI }) => {
                             )}
                       </div>
                     </th>
+                    <th 
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
+                      onClick={() => handleSort('orderTime')}
+                    >
+                          <div className="flex items-center space-x-1">
+                            <span>Order Time</span>
+                            {sortConfig.key === 'orderTime' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                      </div>
+                    </th>
                                         <th 
                           className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
                           onClick={() => handleSort('deliveryDate')}
@@ -1508,6 +1527,17 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={`Raw orderDateTime: "${order.orderDateTime || 'null'}"`}>
+                              {order.orderDateTime ? 
+                                new Date(order.orderDateTime).toLocaleTimeString('en-US', { 
+                                  hour: 'numeric', 
+                                  minute: '2-digit',
+                                  hour12: true 
+                                }) : 
+                                'N/A'}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={`Raw: deliveryDate="${order.deliveryDate}", deliveryDateTime="${order.deliveryDateTime || 'null'}"`}>
                               {(() => {
                                 // Convert UTC delivery date to local date for display
@@ -1606,6 +1636,13 @@ const Dashboard = ({ onSwitchToAI }) => {
                           hour12: true 
                         }) : 'N/A'
 
+                      const orderTimeDisplay = order.orderDateTime ? 
+                        new Date(order.orderDateTime).toLocaleTimeString('en-US', { 
+                          hour: 'numeric', 
+                          minute: '2-digit',
+                          hour12: true 
+                        }) : 'N/A'
+
                       return (
                         <div 
                           key={order.id} 
@@ -1674,6 +1711,10 @@ const Dashboard = ({ onSwitchToAI }) => {
                                   return order.orderDate
                                 })() : 'N/A'}
                               </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500 mb-0.5">Order Time</p>
+                              <p className="text-sm font-medium text-gray-900">{orderTimeDisplay}</p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Delivery Date</p>
@@ -1791,7 +1832,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.2.2
+                    v2.3.0
                   </>
                 )}
               </div>
@@ -1832,7 +1873,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.2.2
+                    v2.3.0
                   </>
                 )}
               </div>
