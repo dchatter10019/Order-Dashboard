@@ -51,14 +51,11 @@ const Dashboard = ({ onSwitchToAI }) => {
     deliveryFilter: false
   })
 
-  // Parse API deliveryDateTime as local time (ignore timezone suffix)
+  // Parse API date/time into local time
   const parseLocalDateTime = useCallback((dateTimeValue) => {
     if (!dateTimeValue) return null
-    let normalized = dateTimeValue
-    normalized = normalized.replace(/Z$/, '')
-    normalized = normalized.replace(/[+-]\d{2}:\d{2}$/, '')
-    const parsed = new Date(normalized)
-    return isNaN(parsed.getTime()) ? new Date(dateTimeValue) : parsed
+    const parsed = new Date(dateTimeValue)
+    return isNaN(parsed.getTime()) ? null : parsed
   }, [])
 
   // Helper function to check if date is this week
@@ -372,7 +369,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   const calculateFeeRate = (retailer, customer) => {
     // Normalize inputs for comparison (trim and lowercase for case-insensitive matching)
     const normalizedCustomer = (customer || '').trim().toLowerCase()
-    const normalizedRetailer = (retailer || '').trim()
+    const normalizedRetailer = (retailer || '').trim().toLowerCase()
     
     // Priority 1: VistaJet Customer Rule (8%)
     if (normalizedCustomer === 'vistajet') {
@@ -381,37 +378,42 @@ const Dashboard = ({ onSwitchToAI }) => {
     
     // Priority 2: 10% Retailer List Rule
     const tenPercentRetailers = [
-      'Wine & Spirits Market',
-      'Freshco',
-      'National Liquor and Package',
-      'Mavy Clippership Wine & Spirits',
-      'LIQUOR MASTER',
-      "Sam's Liquor & Market",
-      'Dallas Fine Wine',
-      'Super Duper Liquor',
-      'Fountain Liquor & Spirits',
-      'Aficionados',
-      'Wine & Spirits Discount Warehouse',
-      'Youbooze',
-      'Garfields Beverage',
-      'ROYAL WINES & SPIRITS',
-      'Sundance Liquor & Gifts'
+      'wine & spirits market',
+      'freshco',
+      'national liquor and package',
+      'mavy clippership wine & spirits',
+      'liquor master',
+      "sam's liquor & market",
+      'dallas fine wine',
+      'super duper liquor',
+      'fountain liquor & spirits',
+      'aficionados',
+      'wine & spirits discount warehouse',
+      'youbooze',
+      'garfields beverage',
+      'royal wines & spirits',
+      'sundance liquor & gifts'
     ]
     if (tenPercentRetailers.includes(normalizedRetailer)) {
       return 0.10
     }
     
-    // Priority 3: Sendoso Customer Rule (12%)
+    // Priority 3: Ashburn Wine Shop Rule (15%)
+    if (normalizedRetailer === 'ashburn wine shop') {
+      return 0.15
+    }
+    
+    // Priority 4: Sendoso Customer Rule (12%)
     if (normalizedCustomer === 'sendoso') {
       return 0.12
     }
     
-    // Priority 4: In Good Taste Wines Rule (25%)
-    if (normalizedRetailer === 'In Good Taste Wines') {
+    // Priority 5: In Good Taste Wines Rule (25%)
+    if (normalizedRetailer === 'in good taste wines') {
       return 0.25
     }
     
-    // Priority 5: Default Rule (20%)
+    // Priority 6: Default Rule (20%)
     return 0.20
   }
 
@@ -441,7 +443,6 @@ const Dashboard = ({ onSwitchToAI }) => {
     }
     
     // Retailer fee = revenue × fee_rate
-    // This is the percentage of revenue that goes to the retailer based on the fee rate
     const retailerFee = Math.round(revenue * feeRate * 100) / 100
     
     return { serviceFee: 0, retailerFee }
@@ -1170,10 +1171,6 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <div className="flex justify-between">
                     <span>GMV:</span>
                     <span className="font-medium">{formatDollarAmount(filteredTotalRevenue)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>GMV + Tax + Shipping/Delivery + Service:</span>
-                    <span className="font-medium">{formatDollarAmount(filteredTotalRevenueBasedOnTotal)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Accepted Orders Count:</span>

@@ -224,18 +224,35 @@ function parseCSVToOrders(csvData, orderDate) {
   }
 }
 
-// Parse CSV line with proper quote handling
+// Parse CSV line with proper quote handling and JSON field support
 function parseCSVLine(line) {
   const values = []
   let current = ''
   let inQuotes = false
+  let braceDepth = 0
   
   for (let i = 0; i < line.length; i++) {
     const char = line[i]
+    const nextChar = i + 1 < line.length ? line[i + 1] : ''
+    
+    if (char === '"' && inQuotes && nextChar === '"') {
+      current += '"'
+      i += 1
+      continue
+    }
     
     if (char === '"') {
       inQuotes = !inQuotes
-    } else if (char === ',' && !inQuotes) {
+      continue
+    }
+    
+    if (!inQuotes && char === '{') {
+      braceDepth += 1
+    } else if (!inQuotes && char === '}' && braceDepth > 0) {
+      braceDepth -= 1
+    }
+    
+    if (char === ',' && !inQuotes && braceDepth === 0) {
       values.push(current.trim())
       current = ''
     } else {

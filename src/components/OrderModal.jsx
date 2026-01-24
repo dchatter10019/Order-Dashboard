@@ -16,6 +16,12 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
 
   if (!isOpen || !order) return null
 
+  const parseLocalDateTime = (dateTimeValue) => {
+    if (!dateTimeValue) return null
+    const parsed = new Date(dateTimeValue)
+    return isNaN(parsed.getTime()) ? null : parsed
+  }
+
   // Auto-trigger API call when modal opens
   useEffect(() => {
     if (isOpen && order && !orderDetails && !isLoadingDetails) {
@@ -326,12 +332,21 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                 <div>
                   <p className="text-sm font-medium text-gray-600">Order Date</p>
                   <p className="text-gray-900">
-                    {order.orderDate ? new Date(order.orderDate + 'T00:00:00').toLocaleDateString('en-US', {
+                    {order.orderDate ? (() => {
+                      let displayDate = order.orderDate
+                      if (order.orderDateTime) {
+                        const localDateTime = parseLocalDateTime(order.orderDateTime)
+                        displayDate = localDateTime.getFullYear() + '-' + 
+                                      String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                      String(localDateTime.getDate()).padStart(2, '0')
+                      }
+                      return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
                       weekday: 'long',
                       year: 'numeric',
                       month: 'long',
                       day: 'numeric'
-                    }) : 'N/A'}
+                      })
+                    })() : 'N/A'}
                   </p>
                 </div>
                 <div>
@@ -341,10 +356,10 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                       // Convert UTC delivery date to local date for display
                       let displayDate = order.deliveryDate
                       if (order.deliveryDateTime) {
-                        const utcDate = new Date(order.deliveryDateTime)
-                        displayDate = utcDate.getFullYear() + '-' + 
-                                     String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                     String(utcDate.getDate()).padStart(2, '0')
+                        const localDateTime = parseLocalDateTime(order.deliveryDateTime)
+                        displayDate = localDateTime.getFullYear() + '-' + 
+                                     String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                     String(localDateTime.getDate()).padStart(2, '0')
                       }
                       return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
                         weekday: 'long',
@@ -559,11 +574,20 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                   <div className="flex justify-between items-center py-2">
                     <span className="text-sm font-medium text-amber-700">Order Date</span>
                     <span className="font-semibold text-amber-900">
-                      {order.orderDate ? new Date(order.orderDate + 'T00:00:00').toLocaleDateString('en-US', {
+                      {order.orderDate ? (() => {
+                        let displayDate = order.orderDate
+                        if (order.orderDateTime) {
+                          const localDateTime = parseLocalDateTime(order.orderDateTime)
+                          displayDate = localDateTime.getFullYear() + '-' + 
+                                        String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                        String(localDateTime.getDate()).padStart(2, '0')
+                        }
+                        return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
                         year: 'numeric',
                         month: 'short',
                         day: 'numeric'
-                      }) : 'N/A'}
+                        })
+                      })() : 'N/A'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center py-2">
@@ -573,10 +597,10 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                         // Convert UTC delivery date to local date for display
                         let displayDate = order.deliveryDate
                         if (order.deliveryDateTime) {
-                          const utcDate = new Date(order.deliveryDateTime)
-                          displayDate = utcDate.getFullYear() + '-' + 
-                                       String(utcDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                       String(utcDate.getDate()).padStart(2, '0')
+                          const localDateTime = parseLocalDateTime(order.deliveryDateTime)
+                          displayDate = localDateTime.getFullYear() + '-' + 
+                                       String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                       String(localDateTime.getDate()).padStart(2, '0')
                         }
                         return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
                           year: 'numeric',
