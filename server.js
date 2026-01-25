@@ -3,7 +3,7 @@ const cors = require('cors')
 const axios = require('axios')
 const path = require('path')
 const OpenAI = require('openai')
-require('dotenv').config()
+require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -2783,7 +2783,7 @@ Extract the following information from the user's query:
   * revenue_by_retailer: asking for total revenue or total value filtered by a specific retailer/store (e.g., "revenue from Liquor Master", "total revenue from retailer [name]", "total value of transactions for retailer [name]", "show me the Total Revenue for all orders in Dec from retailer Liquor Master")
   * revenue_by_month: ONLY use when explicitly asking for BREAKDOWN by month (e.g., "revenue by month", "breakdown by month")
   * revenue_by_customer: asking for revenue for a specific customer
-  * revenue_by_brand: asking for revenue breakdown by PRODUCT BRAND (e.g., "revenue by brand", "top brands", "which brands sell the most", "brand performance") - actual liquor brands like Tito's, Grey Goose, etc.
+  * revenue_by_brand: asking for revenue breakdown by PRODUCT BRAND (e.g., "revenue by brand", "top brands", "which brands sell the most", "top brands sold in Dec 2025", "brand performance") - actual liquor brands like Tito's, Grey Goose, etc.
   * revenue_by_store: asking for revenue breakdown by store/retailer/establishment (e.g., "revenue by store", "top stores", "which retailers make the most", "revenue by retailer")
   * customers_by_brand: asking which customers bought/ordered/purchased a specific brand (e.g., "which customers bought Schrader", "who ordered Dom Perignon", "which customers purchased Tito's", "who bought Macallan")
   * delayed_orders_by_customer: asking for delayed orders for a specific customer

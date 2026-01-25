@@ -9,6 +9,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   const orders = persistedState.orders
   const dateRange = persistedState.dateRange
   const messages = persistedState.messages
+  const lastFetchedRange = persistedState.lastFetchedRange
   
   // Debug logging
   useEffect(() => {
@@ -37,18 +38,26 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
       onStateChange(prev => ({ ...prev, messages: messagesOrUpdater }))
     }
   }
+  
+  const setLastFetchedRange = (newRange) => {
+    onStateChange(prev => ({ ...prev, lastFetchedRange: newRange }))
+  }
 
   const fetchOrders = async (useStateEnrichment = false) => {
+    const requestedRange = { ...dateRange }
     try {
-      console.log(`🔍 AI Assistant fetching orders${useStateEnrichment ? ' WITH STATE DATA' : ''}: ${dateRange.startDate} to ${dateRange.endDate}`)
+      console.log(`🔍 AI Assistant fetching orders${useStateEnrichment ? ' WITH STATE DATA' : ''}: ${requestedRange.startDate} to ${requestedRange.endDate}`)
       setIsLoading(true)
+      // Clear existing orders so we don't process with stale data
+      setOrders([])
+      setLastFetchedRange(null)
       
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
       
       // Use state-enriched endpoint only when explicitly requested
       const endpoint = useStateEnrichment ? '/api/orders-with-state' : '/api/orders'
-      const apiUrl = `${endpoint}?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
+      const apiUrl = `${endpoint}?startDate=${requestedRange.startDate}&endDate=${requestedRange.endDate}&t=${timestamp}&r=${randomId}`
       
       const response = await fetch(apiUrl)
       const data = await response.json()
@@ -60,6 +69,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
         
         // Set empty orders and show error message
         setOrders([])
+        setLastFetchedRange(null)
         
         // Add error message to chat if there are messages
         if (setMessages) {
@@ -77,7 +87,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
       }
       
       console.log(`✅ AI Assistant received ${data.data?.length || 0} orders${useStateEnrichment ? ' (state-enriched)' : ''}`)
-      console.log(`📅 Date range for fetched orders: ${dateRange.startDate} to ${dateRange.endDate}`)
+      console.log(`📅 Date range for fetched orders: ${requestedRange.startDate} to ${requestedRange.endDate}`)
       
       if (data.data && Array.isArray(data.data)) {
         // Log sample of order dates to verify they're in the right range
@@ -91,13 +101,16 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
           console.log(`✅ ${ordersInRange.length} orders are in the requested date range (${dateRange.startDate} to ${dateRange.endDate})`)
         }
         setOrders(data.data)
+        setLastFetchedRange(requestedRange)
       } else {
         console.log('⚠️ No orders data received from API')
         setOrders([])
+        setLastFetchedRange(null)
       }
     } catch (error) {
       console.error('Error fetching orders:', error)
       setOrders([])
+      setLastFetchedRange(null)
       
       // Show error message in chat
       if (setMessages) {
@@ -163,6 +176,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
           onDateRangeChange={setDateRange}
           onFetchOrders={fetchOrders}
           isLoadingData={isLoading}
+          lastFetchedRange={lastFetchedRange}
           messages={messages}
           setMessages={setMessages}
         />

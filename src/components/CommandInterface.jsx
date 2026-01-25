@@ -11,7 +11,8 @@ const CommandInterface = ({
   isLoadingData,
   messages: providedMessages,
   setMessages: providedSetMessages,
-  dateRange: currentDateRange // Add current dateRange from parent
+  dateRange: currentDateRange, // Add current dateRange from parent
+  lastFetchedRange
 }) => {
   const [input, setInput] = useState('')
   const [expandedOrders, setExpandedOrders] = useState({}) // Track which message's orders are expanded
@@ -275,6 +276,18 @@ const CommandInterface = ({
     console.log('🤖 GPT parsed data:', gptParsedData)
     console.log('🗺️  Using enriched orders:', !!enrichedOrdersOverride)
     const lower = command.toLowerCase()
+    const hasRevenueValuePattern =
+      lower.includes('total revenue') ||
+      lower.includes('revenue') ||
+      lower.includes('total value') ||
+      lower.includes('value')
+    const hasRetailerPattern =
+      lower.includes('from retailer') ||
+      lower.includes('from store') ||
+      lower.includes('retailer') ||
+      lower.includes('for retailer')
+    const isRevenueByRetailerQuery = hasRevenueValuePattern && hasRetailerPattern
+    const isBrandQuery = lower.includes('brand') || lower.includes('top') || lower.includes('sold') || lower.includes('selling')
     
     // Check if GPT identified this as an unknown/unrelated query
     // BUT first check if it's an AOV + retailer query (we have fallback detection for these)
@@ -298,9 +311,10 @@ const CommandInterface = ({
       isAOVQuery,
       hasRetailerMention,
       isAOVRetailerQuery,
-      willExitEarly: gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery
+      isBrandQuery,
+      willExitEarly: gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery && !isBrandQuery
     })
-    if (gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery) {
+    if (gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery && !isBrandQuery) {
       console.log('❌ GPT identified query as unrelated to orders (not AOV+retailer)')
       return {
         type: 'assistant',
@@ -1674,11 +1688,7 @@ const CommandInterface = ({
     // Revenue by retailer
     // Also handle "total value" as synonym for revenue
     // Check pattern even if GPT didn't identify it correctly
-    const hasRevenueValuePattern = lower.includes('total revenue') || lower.includes('revenue') || lower.includes('total value') || lower.includes('value')
-    const hasRetailerPattern = lower.includes('from retailer') || lower.includes('from store') || lower.includes('retailer') || lower.includes('for retailer')
-    const isRevenueByRetailerQuery = hasRevenueValuePattern && hasRetailerPattern
-    
-    if (gptParsedData?.intent === 'revenue_by_retailer' || isRevenueByRetailerQuery) {
+    else if (gptParsedData?.intent === 'revenue_by_retailer' || isRevenueByRetailerQuery) {
       console.log('✅ Revenue by retailer query detected:', {
         gptIntent: gptParsedData?.intent,
         hasRevenueValuePattern,
@@ -1792,7 +1802,7 @@ const CommandInterface = ({
         }
       }
     }
-    else {
+    else if (!response.content && !response.data) {
       console.log('⚠️ No matching intent handler found')
       console.log('⚠️ GPT intent:', gptParsedData?.intent)
       response.content = "Sorry, I don't know how to handle this request.\n\nI can help you with:\n• Revenue, tax, tips, service charges, delivery charges\n• Delayed, pending, or delivered orders\n• Orders by customer (Sendoso, OnGoody, Air Culinaire)\n• Date-based queries (MTD, YTD, specific months)\n\nTry rephrasing your question or use one of the examples above."
@@ -1816,7 +1826,8 @@ const CommandInterface = ({
       ordersCount: orders.length,
       pendingCommand: pendingCommandRef.current,
       pendingDateRange: pendingDateRange,
-      currentDateRange: currentDateRange // Add current date range from props
+      currentDateRange: currentDateRange, // Add current date range from props
+      lastFetchedRange
     })
     
     if (pendingCommandRef.current && !isLoadingData) {
@@ -1833,6 +1844,18 @@ const CommandInterface = ({
           console.log(`   Current: ${currentDateRange?.startDate} to ${currentDateRange?.endDate}`)
           console.log(`   Pending: ${pendingDateRange.startDate} to ${pendingDateRange.endDate}`)
           return // Don't process yet, wait for date range to match
+        }
+        
+        // Ensure the orders were fetched for the requested date range
+        const fetchedRangeMatches = lastFetchedRange &&
+          lastFetchedRange.startDate === pendingDateRange.startDate &&
+          lastFetchedRange.endDate === pendingDateRange.endDate
+        
+        if (!fetchedRangeMatches) {
+          console.log('⏳ Waiting for fresh orders to finish loading for requested range...')
+          console.log(`   Last fetched: ${lastFetchedRange?.startDate || 'none'} to ${lastFetchedRange?.endDate || 'none'}`)
+          console.log(`   Pending: ${pendingDateRange.startDate} to ${pendingDateRange.endDate}`)
+          return
         }
         
         // Verify that we have orders for the requested date range
@@ -1897,7 +1920,7 @@ const CommandInterface = ({
       }, 500) // Increased to 500ms to ensure orders state is updated
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, isLoadingData, currentDateRange]) // Add currentDateRange to dependencies
+  }, [orders, isLoadingData, currentDateRange, lastFetchedRange]) // Add currentDateRange to dependencies
   
   // Cleanup on unmount
   useEffect(() => {
@@ -2028,7 +2051,7 @@ const CommandInterface = ({
         }
         
         // Check if clarification is needed
-        // BUT: If it's an AOV + retailer query and we have a date range (from GPT or fallback), proceed anyway
+        // BUT: If it's an AOV + retailer query or brand breakdown query and we have a date range (from GPT or fallback), proceed anyway
         const lowerInputCheck = userInput.toLowerCase()
         const hasRetailerMentionInInput = 
           lowerInputCheck.includes('from retailer') || 
@@ -2038,10 +2061,30 @@ const CommandInterface = ({
         const isAOVQueryInInput = 
           lowerInputCheck.includes('aov') || 
           lowerInputCheck.includes('average')
-        const hasDateRange = parseData.parsed.startDate && parseData.parsed.endDate
+        const fallbackDateRange = parseDate(userInput)
+        if (!dateRange && fallbackDateRange) {
+          dateRange = fallbackDateRange
+        }
+        // Clamp future end dates to today (MTD behavior)
+        if (dateRange?.endDate) {
+          const todayStr = new Date().toISOString().split('T')[0]
+          if (dateRange.endDate > todayStr) {
+            dateRange = {
+              ...dateRange,
+              endDate: todayStr,
+              isMTD: true
+            }
+          }
+        }
+        const hasDateRange = dateRange?.startDate && dateRange?.endDate
         const isAOVRetailerWithDate = isAOVQueryInInput && hasRetailerMentionInInput && hasDateRange
+        const isBrandQueryInInput = lowerInputCheck.includes('brand') || lowerInputCheck.includes('top') || lowerInputCheck.includes('sold') || lowerInputCheck.includes('selling')
+        const isBrandWithDate = isBrandQueryInInput && hasDateRange
+        if (isBrandQueryInInput && (!parsedIntent || parsedIntent === 'unknown')) {
+          parsedIntent = 'revenue_by_brand'
+        }
         
-        if (parseData.parsed.needsClarification && !isAOVRetailerWithDate) {
+        if (parseData.parsed.needsClarification && !isAOVRetailerWithDate && !isBrandWithDate) {
           console.log('🤔 Clarification needed:', parseData.parsed.clarificationNeeded)
           console.log('🔍 AOV+retailer check:', {
             isAOVQueryInInput,
@@ -2049,6 +2092,11 @@ const CommandInterface = ({
             hasDateRange,
             isAOVRetailerWithDate,
             willBlock: true
+          })
+          console.log('🔍 Brand+date check:', {
+            isBrandQueryInInput,
+            hasDateRange,
+            isBrandWithDate
           })
           
           // Store the original query for later use
@@ -2096,7 +2144,7 @@ const CommandInterface = ({
           
           setMessages(prev => [...prev, clarificationResponse])
           return // Exit early - don't process further
-        } else if (parseData.parsed.needsClarification && isAOVRetailerWithDate) {
+        } else if (parseData.parsed.needsClarification && (isAOVRetailerWithDate || isBrandWithDate)) {
           console.log('✅ AOV+retailer query with date range - proceeding despite clarification flag')
         }
         
@@ -2115,10 +2163,14 @@ const CommandInterface = ({
       dateRange = parseDate(userInput)
     }
     
+    const lower = userInput.toLowerCase()
+    const needsBrandData = parsedIntent === 'revenue_by_brand' || 
+                           (lower.includes('brand') && (lower.includes('revenue') || lower.includes('sales') || lower.includes('top') || lower.includes('sold') || lower.includes('selling')))
+    
     // CRITICAL: If a date range is specified, ALWAYS fetch orders for that date range FIRST
     // before processing any command (including customer filters). This ensures we have the
     // correct data before filtering by customer.
-    if (dateRange && onDateRangeChange && onFetchOrders) {
+    if (dateRange && onDateRangeChange && onFetchOrders && !needsBrandData) {
       console.log('📅 Date range detected in query - will fetch orders FIRST, then process command')
       console.log(`   Requested date range: ${dateRange.startDate} to ${dateRange.endDate}`)
       console.log(`   Current date range: ${currentDateRange?.startDate} to ${currentDateRange?.endDate}`)
@@ -2165,12 +2217,9 @@ const CommandInterface = ({
     }
     
     // Check if this is a query with specific filters (customer, specific state) that should use existing data
-    const lower = userInput.toLowerCase()
     
     // Check if this query needs state data or brand data
     const needsStateData = parsedIntent === 'tax_by_state' || parsedIntent === 'sales_by_state'
-    const needsBrandData = parsedIntent === 'revenue_by_brand' || 
-                           (lower.includes('brand') && (lower.includes('revenue') || lower.includes('sales') || lower.includes('top')))
     const needsCustomersByBrand = parsedIntent === 'customers_by_brand' || 
                                   (lower.includes('customer') && (lower.includes('bought') || lower.includes('ordered') || lower.includes('purchased'))) ||
                                   (lower.includes('who') && (lower.includes('bought') || lower.includes('ordered') || lower.includes('purchased') || lower.includes('buy')))

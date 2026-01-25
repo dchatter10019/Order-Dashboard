@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { LogOut, Package, FileText, Sparkles, Store } from 'lucide-react'
+import { LogOut, Package, FileText, Sparkles, Store, Menu, X } from 'lucide-react'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
 import RetailerManagement from './RetailerManagement'
@@ -8,10 +8,19 @@ import Logo from './Logo'
 
 const MainDashboard = ({ onLogout }) => {
   const [activeTab, setActiveTab] = useState('orders')
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  
+  const tabs = [
+    { id: 'orders', label: 'Order Management', icon: FileText },
+    { id: 'products', label: 'Product Management', icon: Package },
+    { id: 'retailers', label: 'Retailers', icon: Store },
+    { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles }
+  ]
   
   // Persist AI Assistant state across tab switches
   const [aiAssistantState, setAIAssistantState] = useState({
     orders: [],
+    lastFetchedRange: null,
     dateRange: (() => {
       const today = new Date()
       const todayString = today.getFullYear() + '-' + 
@@ -40,6 +49,8 @@ const MainDashboard = ({ onLogout }) => {
     })
   }, [activeTab, aiAssistantState])
 
+
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -52,14 +63,23 @@ const MainDashboard = ({ onLogout }) => {
                 Bevvi Order Tracking System
               </h1>
             </div>
-            
-            <button
-              onClick={onLogout}
-              className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Logout
-            </button>
+
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={onLogout}
+                className="hidden md:flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Logout
+              </button>
+              <button
+                onClick={() => setIsMobileMenuOpen(prev => !prev)}
+                className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                aria-label="Toggle navigation menu"
+              >
+                {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -67,63 +87,69 @@ const MainDashboard = ({ onLogout }) => {
       {/* Navigation Tabs */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <nav className="flex space-x-8">
-            <button
-              onClick={() => setActiveTab('orders')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'orders'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <FileText className="w-5 h-5 mr-2" />
-                Order Management
-              </div>
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('products')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'products'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <Package className="w-5 h-5 mr-2" />
-                Product Management
-              </div>
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('retailers')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'retailers'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <Store className="w-5 h-5 mr-2" />
-                Retailers
-              </div>
-            </button>
-            
-            <button
-              onClick={() => setActiveTab('ai-assistant')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === 'ai-assistant'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              <div className="flex items-center">
-                <Sparkles className="w-5 h-5 mr-2" />
-                AI Assistant
-              </div>
-            </button>
+          <nav className="hidden md:flex space-x-8">
+            {tabs.map(tab => {
+              const Icon = tab.icon
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    activeTab === tab.id
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  <span className="inline-flex items-center">
+                    <Icon className="w-5 h-5 mr-2" />
+                    {tab.label}
+                  </span>
+                </button>
+              )
+            })}
           </nav>
+          {isMobileMenuOpen && (
+            <div className="md:hidden py-2 flex justify-end">
+              <div className="w-64">
+                {tabs.map(tab => {
+                  const Icon = tab.icon
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setActiveTab(tab.id)
+                        setIsMobileMenuOpen(false)
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium ${
+                        activeTab === tab.id
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="inline-flex items-center">
+                        <Icon className="w-4 h-4 mr-2" />
+                        {tab.label}
+                      </span>
+                    </button>
+                  )
+                })}
+                <div className="border-t border-gray-200 mt-2 pt-2">
+                  <button
+                    onClick={() => {
+                      setIsMobileMenuOpen(false)
+                      onLogout()
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    <span className="inline-flex items-center">
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Logout
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
