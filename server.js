@@ -2,12 +2,16 @@ const express = require('express')
 const cors = require('cors')
 const axios = require('axios')
 const path = require('path')
+const crypto = require('crypto')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 
 const app = express()
 const PORT = process.env.PORT || 3001
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL
+const AFTERSHIP_API_KEY = process.env.AFTERSHIP_API_KEY
+const AFTERSHIP_WEBHOOK_SECRET = process.env.AFTERSHIP_WEBHOOK_SECRET
+const AFTERSHIP_API_BASE = process.env.AFTERSHIP_API_BASE || 'https://api.aftership.com/tracking/2026-01'
 
 // Initialize OpenAI client only when configured
 let openai = null
@@ -18,6 +22,18 @@ if (process.env.OPENAI_API_KEY) {
 } else {
   console.warn('⚠️ OPENAI_API_KEY not set; AI parsing endpoint will be disabled.')
 }
+
+// Initialize AfterShip client only when configured
+const aftershipClient = AFTERSHIP_API_KEY
+  ? axios.create({
+      baseURL: AFTERSHIP_API_BASE,
+      headers: {
+        'Content-Type': 'application/json',
+        'as-api-key': AFTERSHIP_API_KEY
+      },
+      timeout: 10000
+    })
+  : null
 
 // Slack notifications state (in-memory)
 const slackNotificationState = new Map()
@@ -118,6 +134,7 @@ async function evaluateSlackNotifications(orders) {
         }
       }
     }
+
   }
 
   pruneSlackNotificationState(currentOrderIds)
@@ -139,7 +156,11 @@ app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3001'],
   credentials: true
 }))
-app.use(express.json())
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf
+  }
+}))
 
 // Add some debugging
 app.use((req, res, next) => {
@@ -441,7 +462,10 @@ function createOrderFromCSV(headers, values, orderDate) {
       shippingState: '',
       billingState: '',
       shippingCity: '',
-      shippingZip: ''
+      shippingZip: '',
+      trackingNumber: '',
+      trackingSlug: '',
+      trackingUrl: ''
     }
     
     // First pass: Look for ORDER datetime fields in ALL headers (before switch statement)
@@ -528,6 +552,31 @@ function createOrderFromCSV(headers, values, orderDate) {
           break
         case 'servicecharge':
           order.serviceCharge = parseFloat(value) || 0
+          break
+        case 'trackingnumber':
+        case 'tracking_number':
+        case 'trackingno':
+        case 'tracking_no':
+        case 'tracking id':
+        case 'trackingid':
+        case 'awb':
+        case 'waybill':
+        case 'waybillnumber':
+          order.trackingNumber = value || order.trackingNumber
+          break
+        case 'trackingurl':
+        case 'tracking_url':
+        case 'carriertrackingurl':
+        case 'carrier_tracking_url':
+          order.trackingUrl = value || order.trackingUrl
+          break
+        case 'carrierslug':
+        case 'carrier_slug':
+        case 'courierslug':
+        case 'courier_slug':
+        case 'carrier':
+        case 'courier':
+          order.trackingSlug = value || order.trackingSlug
           break
         case 'status':
           // Map status strings from the new store transactions API
@@ -840,6 +889,15 @@ function createOrderFromCSV(headers, values, orderDate) {
         case 'zipcode':
           order.shippingZip = value || ''
           break
+        default:
+          break
+      }
+
+      if (!order.trackingNumber && lowerHeader.includes('tracking') && value) {
+        order.trackingNumber = value
+      }
+      if (!order.trackingUrl && lowerHeader.includes('tracking') && lowerHeader.includes('url') && value) {
+        order.trackingUrl = value
       }
     })
     
@@ -1270,6 +1328,46 @@ async function fetchOrdersForDateRange(startDate, endDate) {
   return []
 }
 
+function attachTrackingStatusToOrders(orders) {
+  if (!aftershipClient || !Array.isArray(orders)) return orders
+  orders.forEach(order => {
+    const orderNumber = order.ordernum || order.id
+    if (order.trackingNumber) {
+      orderToTrackingMap.set(orderNumber, {
+        trackingNumber: order.trackingNumber,
+        slug: order.trackingSlug || null
+      })
+      trackingToOrderMap.set(order.trackingNumber, orderNumber)
+    } else if (orderNumber && orderToTrackingMap.has(orderNumber)) {
+      const mapped = orderToTrackingMap.get(orderNumber)
+      order.trackingNumber = mapped.trackingNumber
+      order.trackingSlug = mapped.slug
+    }
+
+    if (!order.trackingNumber) return
+
+    const cacheKey = buildTrackingCacheKey(order.trackingNumber, order.trackingSlug)
+    const cached = trackingStatusCache.get(cacheKey)
+    if (cached) {
+      order.shipmentStatus = normalizeAfterShipTag(cached.tag) || 'unknown'
+      order.shipmentSubstatus = cached.subtag || null
+      order.shipmentStatusUpdatedAt = cached.lastUpdated || null
+      order.trackingUrl = order.trackingUrl || cached.trackingUrl || null
+      const isShippingOrder = (parseFloat(order.shippingFee) || 0) > 0
+      if (isShippingOrder && cached.deliveryDateTime) {
+        order.deliveryDateTime = cached.deliveryDateTime
+        order.deliveryDate = cached.deliveryDate || order.deliveryDate
+      }
+    }
+
+    if (!cached || !isTrackingCacheFresh(cached)) {
+      ensureTrackingStatus(orderNumber, order.trackingNumber, order.trackingSlug, orderNumber).catch(() => {})
+    }
+  })
+
+  return orders
+}
+
 // API Routes
 app.get('/api/orders', async (req, res) => {
   try {
@@ -1369,6 +1467,7 @@ app.get('/api/orders', async (req, res) => {
         console.warn(`⚠️ WARNING: Only ${successfulChunks}/${chunks.length} chunks succeeded - data may be incomplete!`)
       }
       
+      allOrders = attachTrackingStatusToOrders(allOrders)
       return res.json({
         success: true,
         data: allOrders,
@@ -1490,6 +1589,7 @@ app.get('/api/orders', async (req, res) => {
           
           // Check if we got real orders from API
           if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
+            attachTrackingStatusToOrders(filteredOrders)
             // Real orders from API
             return res.json({
               success: true,
@@ -1798,6 +1898,12 @@ let slackCheckTimer = null
 // Store connected clients for real-time updates
 let connectedClients = []
 
+// AfterShip tracking cache (in-memory)
+const TRACKING_CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const trackingStatusCache = new Map() // key: `${slug || 'auto'}:${trackingNumber}`
+const orderToTrackingMap = new Map() // key: orderNumber -> { trackingNumber, slug }
+const trackingToOrderMap = new Map() // key: trackingNumber -> orderNumber
+
 // Orders cache removed - always fetch fresh from API
 
 // Products cache - loaded on server startup
@@ -1928,6 +2034,142 @@ function notifyClientsOfRefresh(ordersCount, refreshTime) {
   })
   
   console.log(`📡 Notified ${connectedClients.length} connected clients about data refresh`)
+}
+
+function notifyClientsOfTrackingUpdate(payload) {
+  const message = JSON.stringify({
+    type: 'tracking_update',
+    ...payload
+  })
+  connectedClients.forEach(client => {
+    if (client.res && !client.res.destroyed) {
+      client.res.write(`data: ${message}\n\n`)
+    }
+  })
+}
+
+function normalizeIsoDateTime(value) {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
+}
+
+function normalizeAfterShipTag(tag) {
+  if (!tag) return null
+  const normalized = tag
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/\s+/g, '_')
+    .toLowerCase()
+  return normalized
+}
+
+function buildTrackingCacheKey(trackingNumber, slug) {
+  return `${slug || 'auto'}:${trackingNumber}`
+}
+
+function isTrackingCacheFresh(entry) {
+  if (!entry) return false
+  return Date.now() - entry.updatedAt <= TRACKING_CACHE_TTL_MS
+}
+
+function extractTrackingInfoFromPayload(payload) {
+  if (!payload) return {}
+  const tracking = payload.tracking || payload.data?.tracking || payload.msg?.tracking || payload.msg || payload
+  const trackingNumber = tracking.tracking_number || tracking.trackingNumber || tracking.tracking_no || tracking.trackingNo || tracking.number
+  const slug = tracking.slug || tracking.courier_slug || tracking.courier || tracking.courier_code
+  return { tracking, trackingNumber, slug }
+}
+
+function updateTrackingCache(tracking, trackingNumber, slug, orderNumber = null) {
+  if (!trackingNumber) return null
+  const deliveryDateValue = tracking?.shipment_delivery_date || tracking?.delivered_at || tracking?.delivery_date || tracking?.shipmentDeliveryDate
+  const deliveryDateTime = normalizeIsoDateTime(deliveryDateValue)
+  const deliveryDate = deliveryDateTime ? deliveryDateTime.split('T')[0] : null
+  const tag = tracking?.tag || tracking?.status || tracking?.delivery_status
+  const cacheEntry = {
+    trackingNumber,
+    slug: slug || tracking?.slug || null,
+    tag: tag || null,
+    subtag: tracking?.subtag || null,
+    subtagMessage: tracking?.subtag_message || tracking?.subtagMessage || null,
+    trackingUrl: tracking?.aftership_tracking_url || tracking?.courier_tracking_link || tracking?.tracking_url || null,
+    deliveryDateTime,
+    deliveryDate,
+    lastUpdated: tracking?.updated_at || tracking?.updatedAt || null,
+    updatedAt: Date.now()
+  }
+  const key = buildTrackingCacheKey(trackingNumber, cacheEntry.slug)
+  trackingStatusCache.set(key, cacheEntry)
+  if (orderNumber) {
+    orderToTrackingMap.set(orderNumber, {
+      trackingNumber,
+      slug: cacheEntry.slug
+    })
+    trackingToOrderMap.set(trackingNumber, orderNumber)
+  }
+  return cacheEntry
+}
+
+async function createOrUpdateAfterShipTracking({ trackingNumber, slug, orderNumber, title }) {
+  if (!aftershipClient || !trackingNumber) return null
+  try {
+    const response = await aftershipClient.post('/trackings', {
+      tracking: {
+        tracking_number: trackingNumber,
+        slug: slug || undefined,
+        title: title || trackingNumber,
+        order_number: orderNumber || undefined
+      }
+    })
+    return response?.data?.data?.tracking || null
+  } catch (error) {
+    console.error('❌ AfterShip create tracking failed:', error.response?.data || error.message)
+    return null
+  }
+}
+
+async function fetchAfterShipTracking(trackingNumber, slug) {
+  if (!aftershipClient || !trackingNumber || !slug) return null
+  try {
+    const response = await aftershipClient.get(`/trackings/${encodeURIComponent(slug)}/${encodeURIComponent(trackingNumber)}`)
+    return response?.data?.data?.tracking || null
+  } catch (error) {
+    return null
+  }
+}
+
+async function ensureTrackingStatus(orderNumber, trackingNumber, slug, title) {
+  if (!aftershipClient || !trackingNumber) return null
+  const key = buildTrackingCacheKey(trackingNumber, slug)
+  const cached = trackingStatusCache.get(key)
+  if (isTrackingCacheFresh(cached)) {
+    return cached
+  }
+  let tracking = null
+  if (slug) {
+    tracking = await fetchAfterShipTracking(trackingNumber, slug)
+  }
+  if (!tracking) {
+    tracking = await createOrUpdateAfterShipTracking({ trackingNumber, slug, orderNumber, title })
+  }
+  if (!tracking) {
+    return null
+  }
+  const updated = updateTrackingCache(tracking, trackingNumber, tracking.slug || slug, orderNumber)
+  if (updated && orderNumber) {
+    notifyClientsOfTrackingUpdate({
+      orderNumber,
+      trackingNumber: updated.trackingNumber,
+      shipmentStatus: normalizeAfterShipTag(updated.tag) || 'unknown',
+      shipmentSubstatus: updated.subtag || null,
+      trackingUrl: updated.trackingUrl || null,
+      deliveryDateTime: updated.deliveryDateTime || null,
+      deliveryDate: updated.deliveryDate || null,
+      updatedAt: updated.lastUpdated || null
+    })
+  }
+  return updated
 }
 
 // Function to add a new client connection
@@ -2141,14 +2383,121 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
     
     console.log('📊 Order details response status:', response.status)
     console.log('📊 Order details response data:', response.data)
+
+    const { tracking, trackingNumber, slug } = extractTrackingInfoFromPayload(response.data || {})
+    let aftership = null
+    if (trackingNumber) {
+      const orderNumberKey = orderNumber
+      const cached = await ensureTrackingStatus(orderNumberKey, trackingNumber, slug, orderNumberKey)
+      aftership = {
+        trackingNumber,
+        slug: slug || cached?.slug || null,
+        shipmentStatus: normalizeAfterShipTag(cached?.tag || tracking?.tag) || 'unknown',
+        shipmentSubstatus: cached?.subtag || tracking?.subtag || null,
+        trackingUrl: cached?.trackingUrl || tracking?.aftership_tracking_url || tracking?.courier_tracking_link || null,
+        updatedAt: cached?.lastUpdated || tracking?.updated_at || null
+      }
+    }
     
-    res.json(response.data)
+    res.json({
+      ...response.data,
+      aftership
+    })
   } catch (error) {
     console.error('❌ Error proxying order details:', error.message)
     res.status(500).json({
       error: 'Failed to fetch order details',
       message: error.message
     })
+  }
+})
+
+// Proxy endpoint for GoPuff order status (timeline)
+app.get('/api/gopuff/order-status/:orderNumber', async (req, res) => {
+  try {
+    const { orderNumber } = req.params
+    const url = `https://api.getbevvi.com/api/gopuff/getCorpGopuffOrderStatus?corpOrderNum=${encodeURIComponent(orderNumber)}`
+    const response = await axios.get(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    })
+    res.json(response.data)
+  } catch (error) {
+    console.error('❌ Error fetching GoPuff order status:', error.message)
+    res.status(500).json({
+      error: 'Failed to fetch GoPuff order status',
+      message: error.message
+    })
+  }
+})
+
+// AfterShip webhook for real-time tracking updates
+app.post('/api/aftership/webhook', async (req, res) => {
+  try {
+    const signature = req.header('aftership-hmac-sha256')
+    if (AFTERSHIP_WEBHOOK_SECRET && signature) {
+      const computed = crypto
+        .createHmac('sha256', AFTERSHIP_WEBHOOK_SECRET)
+        .update(req.rawBody || '')
+        .digest('base64')
+      const sigBuffer = Buffer.from(signature)
+      const computedBuffer = Buffer.from(computed)
+      const isValid = sigBuffer.length === computedBuffer.length && crypto.timingSafeEqual(sigBuffer, computedBuffer)
+      if (!isValid) {
+        console.warn('⚠️ Invalid AfterShip webhook signature')
+        return res.status(401).json({ error: 'Invalid signature' })
+      }
+    } else if (AFTERSHIP_WEBHOOK_SECRET && !signature) {
+      console.warn('⚠️ AfterShip webhook signature missing')
+    }
+
+    const payload = req.body || {}
+    const { tracking, trackingNumber, slug } = extractTrackingInfoFromPayload(payload)
+    const orderNumber = tracking?.order_number || tracking?.orderNumber || trackingToOrderMap.get(trackingNumber) || null
+
+    const updated = updateTrackingCache(tracking || payload, trackingNumber, slug, orderNumber)
+    if (updated) {
+      notifyClientsOfTrackingUpdate({
+        orderNumber,
+        trackingNumber: updated.trackingNumber,
+        shipmentStatus: normalizeAfterShipTag(updated.tag) || 'unknown',
+        shipmentSubstatus: updated.subtag || null,
+        trackingUrl: updated.trackingUrl || null,
+        deliveryDateTime: updated.deliveryDateTime || null,
+        deliveryDate: updated.deliveryDate || null,
+        updatedAt: updated.lastUpdated || null
+      })
+    }
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('❌ AfterShip webhook error:', error.message)
+    res.status(500).json({ error: 'Webhook processing failed' })
+  }
+})
+
+// Manual tracking registration endpoint (optional)
+app.post('/api/aftership/trackings', async (req, res) => {
+  try {
+    const { orderNumber, trackingNumber, slug, title } = req.body || {}
+    if (!trackingNumber) {
+      return res.status(400).json({ error: 'trackingNumber is required' })
+    }
+    const result = await ensureTrackingStatus(orderNumber || null, trackingNumber, slug, title)
+    res.json({
+      success: true,
+      trackingNumber,
+      shipmentStatus: normalizeAfterShipTag(result?.tag) || 'unknown',
+      shipmentSubstatus: result?.subtag || null,
+      trackingUrl: result?.trackingUrl || null,
+      updatedAt: result?.lastUpdated || null
+    })
+  } catch (error) {
+    console.error('❌ AfterShip tracking registration failed:', error.message)
+    res.status(500).json({ error: 'Failed to register tracking' })
   }
 })
 

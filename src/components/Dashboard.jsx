@@ -128,6 +128,27 @@ const Dashboard = ({ onSwitchToAI }) => {
       : <ChevronDown className="h-4 w-4 text-blue-600" />
   }
 
+  const getShipmentStatusClass = (status) => {
+    switch ((status || '').toLowerCase()) {
+      case 'delivered':
+        return 'bg-green-100 text-green-800'
+      case 'in_transit':
+        return 'bg-blue-100 text-blue-800'
+      case 'out_for_delivery':
+        return 'bg-indigo-100 text-indigo-800'
+      case 'exception':
+      case 'attempt_fail':
+        return 'bg-red-100 text-red-800'
+      case 'available_for_pickup':
+        return 'bg-amber-100 text-amber-800'
+      case 'pending':
+      case 'info_received':
+        return 'bg-gray-100 text-gray-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
   // Calculate summary statistics
   const totalOrders = orders.length
   const revenueOrders = orders.filter(order => 
@@ -769,6 +790,22 @@ const Dashboard = ({ onSwitchToAI }) => {
                 // You can add a toast notification here if you want
                 console.log(`📊 Auto-refreshed: ${data.ordersCount} orders updated`)
               }
+            } else if (data.type === 'tracking_update') {
+              setOrders(prev => prev.map(order => {
+                const orderNumber = order.ordernum || order.id
+                if (orderNumber && data.orderNumber && orderNumber === data.orderNumber) {
+                  return {
+                    ...order,
+                    shipmentStatus: data.shipmentStatus || order.shipmentStatus,
+                    shipmentSubstatus: data.shipmentSubstatus || order.shipmentSubstatus,
+                    shipmentStatusUpdatedAt: data.updatedAt || order.shipmentStatusUpdatedAt,
+                    trackingUrl: data.trackingUrl || order.trackingUrl,
+                    deliveryDateTime: data.deliveryDateTime || order.deliveryDateTime,
+                    deliveryDate: data.deliveryDate || order.deliveryDate
+                  }
+                }
+                return order
+              }))
             } else if (data.type === 'connected') {
               console.log('✅ Real-time connection established')
             } else if (data.type === 'heartbeat') {
@@ -1362,12 +1399,30 @@ const Dashboard = ({ onSwitchToAI }) => {
               {filteredOrdersByStatusAndDelivery.length > 0 ? (
                 <>
                   {/* Desktop Table View - Hidden on mobile */}
-                  <div className="hidden md:block overflow-auto shadow ring-1 ring-black ring-opacity-5 rounded-lg max-w-full max-h-96">
-                    <table className="w-full table-auto divide-y divide-gray-200 min-w-0">
-                    <thead className="bg-gray-50">
-                  <tr>
+                  <div className="hidden md:block max-w-full">
+                    <div className="shadow ring-1 ring-black ring-opacity-5 rounded-lg">
+                      <div className="max-h-96 overflow-auto">
+                        <div className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200">
+                          <table className="w-full table-fixed min-w-0">
+                            <colgroup>
+                              <col className="w-48" />
+                              <col className="w-40" />
+                              <col className="w-28" />
+                              <col className="w-24" />
+                              <col className="w-28" />
+                              <col className="w-24" />
+                              <col className="w-24" />
+                              <col className="w-28" />
+                              <col className="w-24" />
+                              <col className="w-28" />
+                              <col className="w-24" />
+                              <col className="w-24" />
+                              <col className="w-20" />
+                            </colgroup>
+                            <thead className="bg-gray-50">
+                              <tr>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-48"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('ordernum')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1378,7 +1433,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-40"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('customerName')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1389,7 +1444,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('orderDate')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1400,7 +1455,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('orderTime')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1411,7 +1466,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                                         <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                           onClick={() => handleSort('deliveryDate')}
                         >
                           <div className="flex items-center space-x-1">
@@ -1422,7 +1477,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                           </div>
                         </th>
                         <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                           onClick={() => handleSort('deliveryTime')}
                         >
                           <div className="flex items-center space-x-1">
@@ -1433,7 +1488,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                           </div>
                         </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('status')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1444,7 +1499,18 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                      onClick={() => handleSort('shipmentStatus')}
+                    >
+                          <div className="flex items-center space-x-1">
+                            <span>Shipment Status</span>
+                            {sortConfig.key === 'shipmentStatus' && (
+                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
+                            )}
+                      </div>
+                    </th>
+                    <th 
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('orderType')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1455,7 +1521,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-28"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('deliveryStatus')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1466,17 +1532,17 @@ const Dashboard = ({ onSwitchToAI }) => {
                       </div>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
                           <span>Service Fee</span>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
                           <span>Retailer Fee</span>
                     </th>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-20"
+                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                           onClick={() => handleSort('total')}
                         >
                           <div className="flex items-center space-x-1">
@@ -1489,9 +1555,27 @@ const Dashboard = ({ onSwitchToAI }) => {
 
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                      {sortedOrders.map((order) => (
-                        <tr key={order.id} className="hover:bg-gray-50">
+              </table>
+                        </div>
+                        <table className="w-full table-fixed min-w-0">
+                          <colgroup>
+                            <col className="w-48" />
+                            <col className="w-40" />
+                            <col className="w-28" />
+                            <col className="w-24" />
+                            <col className="w-28" />
+                            <col className="w-24" />
+                            <col className="w-24" />
+                            <col className="w-28" />
+                            <col className="w-24" />
+                            <col className="w-28" />
+                            <col className="w-24" />
+                            <col className="w-24" />
+                            <col className="w-20" />
+                          </colgroup>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                        {sortedOrders.map((order) => (
+                          <tr key={order.id} className="hover:bg-gray-50">
                           <td className="px-3 py-4 text-sm font-medium text-gray-900">
                             <button
                               onClick={() => {
@@ -1585,6 +1669,11 @@ const Dashboard = ({ onSwitchToAI }) => {
                         </span>
                       </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus)}`}>
+                              {(order.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                            </span>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
                             }`}>
@@ -1616,11 +1705,13 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
 
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                     </div>
+                  </div>
 
                   {/* Mobile Card View - Hidden on desktop */}
                   <div className="md:hidden space-y-3">
@@ -1752,6 +1843,9 @@ const Dashboard = ({ onSwitchToAI }) => {
                             }`}>
                               {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
                             </span>
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus)}`}>
+                              {(order.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                            </span>
                             {order.deliveryStatus && (
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
                                 order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
@@ -1839,7 +1933,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.3.0
+                    v2.4.0
                   </>
                 )}
               </div>
@@ -1880,7 +1974,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(orders.length)} | 
                     Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.3.0
+                    v2.4.0
                   </>
                 )}
               </div>

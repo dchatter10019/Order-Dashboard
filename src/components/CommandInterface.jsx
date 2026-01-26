@@ -287,40 +287,12 @@ const CommandInterface = ({
       lower.includes('retailer') ||
       lower.includes('for retailer')
     const isRevenueByRetailerQuery = hasRevenueValuePattern && hasRetailerPattern
-    const isBrandQuery = lower.includes('brand') || lower.includes('top') || lower.includes('sold') || lower.includes('selling')
     
-    // Check if GPT identified this as an unknown/unrelated query
-    // BUT first check if it's an AOV + retailer query (we have fallback detection for these)
-    const hasRetailerMention = 
-      lower.includes('from retailer') || 
-      lower.includes('for retailer') ||
-      lower.includes('from store') || 
-      lower.includes('retailer') || 
-      !!gptParsedData?.retailer ||
-      /retailer\s+[A-Z][a-zA-Z\s]+/i.test(command)
-    const isAOVQuery = 
-      lower.includes('aov') || 
-      lower.includes('average') || 
-      gptParsedData?.intent === 'average_order_value' || 
-      gptParsedData?.intent === 'aov_by_retailer'
     
-    // Don't exit early if it's an AOV + retailer query (we can handle it with fallback detection)
-    const isAOVRetailerQuery = isAOVQuery && hasRetailerMention
-    console.log('🔍 Early unknown check:', {
-      gptIntent: gptParsedData?.intent,
-      isAOVQuery,
-      hasRetailerMention,
-      isAOVRetailerQuery,
-      isBrandQuery,
-      willExitEarly: gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery && !isBrandQuery
-    })
-    if (gptParsedData?.intent === 'unknown' && !isAOVRetailerQuery && !isBrandQuery) {
-      console.log('❌ GPT identified query as unrelated to orders (not AOV+retailer)')
-      return {
-        type: 'assistant',
-        content: "Sorry, I don't know how to handle this request.\n\nI'm designed to help with order data queries like:\n• Revenue, tax, tips, service charges, delivery charges\n• Delayed, pending, or delivered orders\n• Orders by customer (Sendoso, OnGoody, Air Culinaire)\n• Date-based queries (MTD, YTD, specific months)\n\nPlease ask a question about your orders.",
-        data: null
-      }
+    // If GPT is missing or unclear, fall back to rule-based parsing instead of blocking
+    if (!gptParsedData?.intent || gptParsedData?.intent === 'unknown') {
+      console.log('⚠️ GPT intent missing/unknown - falling back to rule-based parsing')
+      gptParsedData = null
     }
     
     // Use GPT-parsed date range if available, otherwise fall back to rule-based

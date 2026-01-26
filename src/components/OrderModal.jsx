@@ -13,8 +13,16 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
   const [comments, setComments] = useState([])
   const [isLoadingComments, setIsLoadingComments] = useState(false)
   const [commentsError, setCommentsError] = useState(null)
+  const [timelineEvents, setTimelineEvents] = useState([])
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(false)
+  const [timelineError, setTimelineError] = useState(null)
 
   if (!isOpen || !order) return null
+
+  const isTimelineRetailer = () => {
+    const name = order?.establishment || ''
+    return name.includes('SAN_Point-Loma_446') || name.includes('SEA_SouthCenter_596')
+  }
 
   const parseLocalDateTime = (dateTimeValue) => {
     if (!dateTimeValue) return null
@@ -119,6 +127,30 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
           setIsLoadingTaskUrl(false)
         })
     }
+  }, [isOpen, order])
+
+  // Load GoPuff timeline for specific retailers
+  useEffect(() => {
+    if (!isOpen || !order || !isTimelineRetailer()) return
+    const orderNumber = order.ordernum || order.id
+    if (!orderNumber) return
+    setIsLoadingTimeline(true)
+    setTimelineError(null)
+    fetch(`/api/gopuff/order-status/${encodeURIComponent(orderNumber)}`)
+      .then(response => response.json())
+      .then(data => {
+        const events = data?.result?.order?.timelineEvents || []
+        const sortedEvents = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        setTimelineEvents(sortedEvents)
+      })
+      .catch(error => {
+        console.error('Error loading timeline:', error)
+        setTimelineError('Failed to load timeline')
+        setTimelineEvents([])
+      })
+      .finally(() => {
+        setIsLoadingTimeline(false)
+      })
   }, [isOpen, order])
 
   // Handle saving notes
@@ -226,6 +258,27 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
         return 'bg-red-100 text-red-800'
       case 'rejected':
         return 'bg-red-100 text-red-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getShipmentStatusClass = (status) => {
+    switch ((status || '').toLowerCase()) {
+      case 'delivered':
+        return 'bg-green-100 text-green-800'
+      case 'in_transit':
+        return 'bg-blue-100 text-blue-800'
+      case 'out_for_delivery':
+        return 'bg-indigo-100 text-indigo-800'
+      case 'exception':
+      case 'attempt_fail':
+        return 'bg-red-100 text-red-800'
+      case 'available_for_pickup':
+        return 'bg-amber-100 text-amber-800'
+      case 'pending':
+      case 'info_received':
+        return 'bg-gray-100 text-gray-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -635,12 +688,70 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
                       {order.deliveryStatus || 'N/A'}
                     </span>
                   </div>
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-sm font-medium text-amber-700">Shipment Status</span>
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus || orderDetails?.aftership?.shipmentStatus)}`}>
+                      {(order.shipmentStatus || orderDetails?.aftership?.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                    </span>
+                  </div>
+                  {(order.trackingNumber || orderDetails?.aftership?.trackingNumber) && (
+                    <div className="flex justify-between items-center py-2">
+                      <span className="text-sm font-medium text-amber-700">Tracking</span>
+                      {order.trackingUrl || orderDetails?.aftership?.trackingUrl ? (
+                        <a
+                          href={order.trackingUrl || orderDetails.aftership?.trackingUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:underline"
+                        >
+                          {order.trackingNumber || orderDetails?.aftership?.trackingNumber}
+                        </a>
+                      ) : (
+                        <span className="text-sm font-medium text-amber-900">
+                          {order.trackingNumber || orderDetails?.aftership?.trackingNumber}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
 
-
+          {isTimelineRetailer() && (
+            <div className="bg-white rounded-xl border border-gray-200 p-4">
+              <h4 className="text-base font-semibold text-gray-900 mb-3">Order Timeline</h4>
+              {isLoadingTimeline && (
+                <div className="text-sm text-gray-600">Loading timeline...</div>
+              )}
+              {timelineError && !isLoadingTimeline && (
+                <div className="text-sm text-red-600">{timelineError}</div>
+              )}
+              {!isLoadingTimeline && !timelineError && timelineEvents.length === 0 && (
+                <div className="text-sm text-gray-600">No timeline events available.</div>
+              )}
+              {!isLoadingTimeline && !timelineError && timelineEvents.length > 0 && (
+                <div className="space-y-3">
+                  {timelineEvents.map((event, index) => (
+                    <div key={`${event.type}-${event.timestamp}-${index}`} className="flex items-start gap-3">
+                      <div className="flex flex-col items-center">
+                        <div className="h-3 w-3 rounded-full bg-blue-600 mt-1" />
+                        {index < timelineEvents.length - 1 && (
+                          <div className="w-px flex-1 bg-blue-200 mt-1" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-sm font-medium text-gray-900">{event.type}</div>
+                        <div className="text-xs text-gray-500">
+                          {event.timestamp ? new Date(event.timestamp).toLocaleString() : 'Unknown time'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Notes Section */}
           <div className="space-y-4">

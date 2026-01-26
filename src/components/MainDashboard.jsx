@@ -49,6 +49,13 @@ const MainDashboard = ({ onLogout }) => {
     })
   }, [activeTab, aiAssistantState])
 
+  useEffect(() => {
+    document.body.style.overflow = isMobileMenuOpen ? 'hidden' : ''
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [isMobileMenuOpen])
+
 
 
   return (
@@ -84,6 +91,69 @@ const MainDashboard = ({ onLogout }) => {
         </div>
       </header>
 
+      {/* Mobile Drawer */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden">
+          <div
+            className="fixed inset-0 bg-black/30 z-40"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="fixed inset-y-0 left-0 w-72 bg-white shadow-xl z-50 flex flex-col">
+            <div className="flex items-center justify-between px-4 py-4 border-b">
+              <span className="text-base font-semibold text-gray-900">Navigation</span>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                aria-label="Close navigation menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <nav className="px-2 py-4 space-y-1">
+                {tabs.map(tab => {
+                  const Icon = tab.icon
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setActiveTab(tab.id)
+                        setIsMobileMenuOpen(false)
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium ${
+                        activeTab === tab.id
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="inline-flex items-center">
+                        <Icon className="w-4 h-4 mr-2" />
+                        {tab.label}
+                      </span>
+                    </button>
+                  )
+                })}
+              </nav>
+            </div>
+            <div className="border-t px-2 py-3">
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false)
+                  onLogout()
+                }}
+                className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <span className="inline-flex items-center">
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Navigation Tabs */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -108,48 +178,6 @@ const MainDashboard = ({ onLogout }) => {
               )
             })}
           </nav>
-          {isMobileMenuOpen && (
-            <div className="md:hidden py-2 flex justify-end">
-              <div className="w-64">
-                {tabs.map(tab => {
-                  const Icon = tab.icon
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => {
-                        setActiveTab(tab.id)
-                        setIsMobileMenuOpen(false)
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium ${
-                        activeTab === tab.id
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-700 hover:bg-gray-50'
-                      }`}
-                    >
-                      <span className="inline-flex items-center">
-                        <Icon className="w-4 h-4 mr-2" />
-                        {tab.label}
-                      </span>
-                    </button>
-                  )
-                })}
-                <div className="border-t border-gray-200 mt-2 pt-2">
-                  <button
-                    onClick={() => {
-                      setIsMobileMenuOpen(false)
-                      onLogout()
-                    }}
-                    className="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    <span className="inline-flex items-center">
-                      <LogOut className="w-4 h-4 mr-2" />
-                      Logout
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
