@@ -1,0 +1,918 @@
+import React, { useEffect, useState } from 'react'
+import { Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle, FileText, Save, ExternalLink, MessageSquare } from 'lucide-react'
+import { formatDollarAmount } from '../utils/formatCurrency'
+
+const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, detailsError, setOrderDetails, autoFetch = true }) => {
+  const [notes, setNotes] = useState('')
+  const [isLoadingNotes, setIsLoadingNotes] = useState(false)
+  const [isSavingNotes, setIsSavingNotes] = useState(false)
+  const [notesError, setNotesError] = useState(null)
+  const [notesSuccess, setNotesSuccess] = useState(false)
+  const [asanaTaskUrl, setAsanaTaskUrl] = useState(null)
+  const [isLoadingTaskUrl, setIsLoadingTaskUrl] = useState(false)
+  const [comments, setComments] = useState([])
+  const [isLoadingComments, setIsLoadingComments] = useState(false)
+  const [commentsError, setCommentsError] = useState(null)
+  const [timelineEvents, setTimelineEvents] = useState([])
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(false)
+  const [timelineError, setTimelineError] = useState(null)
+
+  if (!isActive || !order) return null
+
+  const isTimelineRetailer = () => {
+    const name = order?.establishment || ''
+    return name.includes('SAN_Point-Loma_446') || name.includes('SEA_SouthCenter_596')
+  }
+
+  const parseLocalDateTime = (dateTimeValue) => {
+    if (!dateTimeValue) return null
+    const parsed = new Date(dateTimeValue)
+    return isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const orderNumber = order?.ordernum || order?.id
+
+  // Auto-trigger API call when panel opens
+  useEffect(() => {
+    if (isActive && order && !orderDetails && !isLoadingDetails) {
+      fetch(`/api/order-details/${orderNumber}`)
+        .then(response => response.json())
+        .then(data => {
+          setOrderDetails(data)
+        })
+        .catch(error => {
+          console.error('Error loading order details:', error)
+        })
+    }
+  }, [isActive, order, orderDetails, isLoadingDetails, setOrderDetails, orderNumber])
+
+  // Load notes from Asana when panel opens
+  useEffect(() => {
+    if (isActive && order) {
+      setIsLoadingNotes(true)
+      setNotesError(null)
+      setIsLoadingTaskUrl(true)
+      
+      // Load notes, comments, and task URL (include customer name for project-specific search)
+      const customerName = order.customerName ? encodeURIComponent(order.customerName) : ''
+      const customerParam = customerName ? `?customerName=${customerName}` : ''
+      setIsLoadingComments(true)
+      Promise.all([
+        fetch(`/api/orders/${orderNumber}/notes${customerParam}`),
+        fetch(`/api/orders/${orderNumber}/asana-task${customerParam}`).catch(() => null), // Don't fail if this endpoint doesn't exist
+        fetch(`/api/orders/${orderNumber}/comments${customerParam}`).catch(() => null) // Don't fail if comments endpoint doesn't exist
+      ])
+        .then(([notesResponse, taskResponse, commentsResponse]) => {
+          // Handle notes
+          return notesResponse.json().then(data => {
+            if (data.success) {
+              setNotes(data.notes || '')
+              // Only set task URL if task exists
+              if (data.taskExists && data.taskUrl) {
+                setAsanaTaskUrl(data.taskUrl)
+              } else {
+                setAsanaTaskUrl(null) // Clear URL if no task exists
+              }
+            } else {
+              // Only show error if it's not a configuration issue (user-friendly)
+              if (data.error === 'Asana not configured') {
+                setNotesError('Asana is not configured. Please set up Asana credentials in the server configuration.')
+              } else {
+                setNotesError(data.message || 'Failed to load notes')
+              }
+              setNotes('')
+            }
+            return { taskResponse, commentsResponse }
+          })
+        })
+        .then(({ taskResponse, commentsResponse }) => {
+          // Handle task URL if separate endpoint exists
+          if (taskResponse) {
+            taskResponse.json().then(data => {
+              if (data.success && data.taskExists && data.taskUrl) {
+                setAsanaTaskUrl(data.taskUrl)
+              } else {
+                setAsanaTaskUrl(null) // Clear URL if no task exists
+              }
+            }).catch(() => {}) // Ignore errors for task URL
+          }
+          
+          // Handle comments
+          if (commentsResponse) {
+            commentsResponse.json().then(data => {
+              if (data.success) {
+                setComments(data.comments || [])
+              } else {
+                setCommentsError(data.message || 'Failed to load comments')
+                setComments([])
+              }
+            }).catch(error => {
+              console.error('Error loading comments:', error)
+              setComments([])
+            }).finally(() => {
+              setIsLoadingComments(false)
+            })
+          } else {
+            setIsLoadingComments(false)
+          }
+        })
+        .catch(error => {
+          console.error('Error loading notes:', error)
+          setNotesError('Failed to load notes from Asana')
+          setNotes('')
+        })
+        .finally(() => {
+          setIsLoadingNotes(false)
+          setIsLoadingTaskUrl(false)
+        })
+    }
+  }, [isActive, order, orderNumber])
+
+  // Load GoPuff timeline for specific retailers
+  useEffect(() => {
+    if (!isActive || !order || !isTimelineRetailer()) return
+    if (!orderNumber) return
+    setIsLoadingTimeline(true)
+    setTimelineError(null)
+    fetch(`/api/gopuff/order-status/${encodeURIComponent(orderNumber)}`)
+      .then(response => response.json())
+      .then(data => {
+        const events = data?.result?.order?.timelineEvents || []
+        const sortedEvents = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        setTimelineEvents(sortedEvents)
+      })
+      .catch(error => {
+        console.error('Error loading timeline:', error)
+        setTimelineError('Failed to load timeline')
+        setTimelineEvents([])
+      })
+      .finally(() => {
+        setIsLoadingTimeline(false)
+      })
+  }, [isActive, order, orderNumber])
+
+  // Handle saving notes
+  const handleSaveNotes = async () => {
+    const orderNumber = order.ordernum || order.id
+    setIsSavingNotes(true)
+    setNotesError(null)
+    setNotesSuccess(false)
+
+    try {
+      const response = await fetch(`/api/orders/${orderNumber}/notes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          notes: notes,
+          orderData: {
+            customerName: order.customerName,
+            status: order.status,
+            total: order.total,
+            orderDate: order.orderDate,
+            deliveryDate: order.deliveryDate,
+            establishment: order.establishment,
+            address: order.address
+          }
+        })
+      })
+
+      const data = await response.json()
+      
+      if (data.success) {
+        setNotesSuccess(true)
+        if (data.taskUrl) {
+          setAsanaTaskUrl(data.taskUrl)
+        }
+        // Reload notes and comments from Asana to show updated content
+        setTimeout(async () => {
+          try {
+            const orderNumber = order.ordernum || order.id
+            const customerName = order.customerName ? encodeURIComponent(order.customerName) : ''
+            const customerParam = customerName ? `?customerName=${customerName}` : ''
+            const [notesRes, commentsRes] = await Promise.all([
+              fetch(`/api/orders/${orderNumber}/notes${customerParam}`),
+              fetch(`/api/orders/${orderNumber}/comments${customerParam}`).catch(() => null)
+            ])
+            const notesData = await notesRes.json()
+            if (notesData.success) {
+              setNotes(notesData.notes || '')
+            }
+            if (commentsRes) {
+              const commentsData = await commentsRes.json()
+              if (commentsData.success) {
+                setComments(commentsData.comments || [])
+              }
+            }
+          } catch (error) {
+            console.error('Error reloading notes/comments:', error)
+          }
+          setNotesSuccess(false)
+        }, 1000) // Reload after 1 second, then hide success message after 3 seconds total
+      } else {
+        setNotesError(data.message || 'Failed to save notes')
+      }
+    } catch (error) {
+      console.error('Error saving notes:', error)
+      setNotesError('Failed to save notes to Asana')
+    } finally {
+      setIsSavingNotes(false)
+    }
+  }
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'delivered':
+        return <CheckCircle className="h-5 w-5 text-green-500" />
+      case 'in_transit':
+        return <Clock className="h-5 w-5 text-blue-500" />
+      case 'accepted':
+        return <CheckCircle className="h-5 w-5 text-green-500" />
+
+      case 'pending':
+        return <AlertCircle className="h-5 w-5 text-yellow-500" />
+      case 'canceled':
+        return <XCircle className="h-5 w-5 text-red-500" />
+      case 'rejected':
+        return <XCircle className="h-5 w-5 text-red-500" />
+      default:
+        return <Package className="h-5 w-5 text-gray-500" />
+    }
+  }
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'delivered':
+        return 'bg-green-100 text-green-800'
+      case 'in_transit':
+        return 'bg-blue-100 text-blue-800'
+      case 'accepted':
+        return 'bg-green-100 text-green-800'
+
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800'
+      case 'canceled':
+        return 'bg-red-100 text-red-800'
+      case 'rejected':
+        return 'bg-red-100 text-red-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  const getShipmentStatusClass = (status) => {
+    switch ((status || '').toLowerCase()) {
+      case 'delivered':
+        return 'bg-green-100 text-green-800'
+      case 'in_transit':
+        return 'bg-blue-100 text-blue-800'
+      case 'out_for_delivery':
+        return 'bg-indigo-100 text-indigo-800'
+      case 'exception':
+      case 'attempt_fail':
+        return 'bg-red-100 text-red-800'
+      case 'available_for_pickup':
+        return 'bg-amber-100 text-amber-800'
+      case 'pending':
+      case 'info_received':
+        return 'bg-gray-100 text-gray-800'
+      default:
+        return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Loading State for Order Details */}
+      {isLoadingDetails && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
+            <span className="text-blue-700 font-medium">Loading detailed order information...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error State for Order Details */}
+      {detailsError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-center">
+            <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
+            <div>
+              <span className="text-red-700 font-medium">{detailsError.message}</span>
+              <p className="text-red-600 text-sm mt-1">{detailsError.details}</p>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Order Header */}
+      <div className="flex justify-between items-start">
+        <div>
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">
+            {order.id}
+          </h3>
+          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(order.status)}`}>
+            {getStatusIcon(order.status)}
+            <span className="ml-2 capitalize">{order.status.replace('_', ' ')}</span>
+          </span>
+        </div>
+        <div className="text-right">
+          <p className="text-3xl font-bold text-blue-600">
+            {formatDollarAmount(order.total)}
+          </p>
+          <p className="text-sm text-gray-500">Total Amount</p>
+        </div>
+      </div>
+
+      {/* Customer Information */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="space-y-4">
+          <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+            <User className="h-5 w-5 text-blue-600 mr-2" />
+            Customer Information
+          </h4>
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Name</p>
+              <p className="text-gray-900">{order.customerName}</p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Phone</p>
+              <p className="text-gray-900 flex items-center">
+                <Phone className="h-4 w-4 text-gray-400 mr-2" />
+                {order.phone}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Address</p>
+              <p className="text-gray-900 flex items-start">
+                <MapPin className="h-4 w-4 text-gray-400 mr-2 mt-0.5 flex-shrink-0" />
+                {order.address}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+            <Calendar className="h-5 w-5 text-blue-600 mr-2" />
+            Order Timeline
+          </h4>
+          <div className="space-y-3">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Order Date</p>
+              <p className="text-gray-900">
+                {order.orderDate ? (() => {
+                  let displayDate = order.orderDate
+                  if (order.orderDateTime) {
+                    const localDateTime = parseLocalDateTime(order.orderDateTime)
+                    displayDate = localDateTime.getFullYear() + '-' + 
+                                  String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                  String(localDateTime.getDate()).padStart(2, '0')
+                  }
+                  return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                  })
+                })() : 'N/A'}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm font-medium text-gray-600">Expected Delivery</p>
+              <p className="text-gray-900">
+                {order.deliveryDate === 'N/A' ? 'N/A' : (() => {
+                  // Convert UTC delivery date to local date for display
+                  let displayDate = order.deliveryDate
+                  if (order.deliveryDateTime) {
+                    const localDateTime = parseLocalDateTime(order.deliveryDateTime)
+                    displayDate = localDateTime.getFullYear() + '-' + 
+                                 String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                 String(localDateTime.getDate()).padStart(2, '0')
+                  }
+                  return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  })
+                })()}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Product Details - Show API data if available, otherwise show basic order items */}
+      <div className="space-y-4">
+        <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+          <Package className="h-5 w-5 text-blue-600 mr-2" />
+          Product Details
+        </h4>
+        
+        {/* Show detailed product information from API if available */}
+        {orderDetails && orderDetails.products && orderDetails.products.length > 0 ? (
+          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6 border border-green-200">
+            <div className="space-y-4">
+              {orderDetails.products.map((product, index) => (
+                <div key={index} className="bg-white rounded-lg p-4 shadow-sm border border-green-100">
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-start space-x-4 flex-1">
+                      <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Package className="h-6 w-6 text-green-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h6 className="text-lg font-semibold text-gray-900 mb-2">{product.name}</h6>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                          <div className="flex items-center">
+                            <span className="font-medium text-gray-600 w-16">UPC:</span>
+                            <span className="font-mono text-gray-900">{product.upc}</span>
+                          </div>
+                          <div className="flex items-center">
+                            <span className="font-medium text-gray-600 w-16">Size:</span>
+                            <span className="text-gray-900">{product.size} {product.units}</span>
+                          </div>
+                          <div className="flex items-center">
+                            <span className="font-medium text-gray-600 w-16">SKU:</span>
+                            <span className="text-gray-900">{product.bevviSku || 'N/A'}</span>
+                          </div>
+                          <div className="flex items-center">
+                            <span className="font-medium text-gray-600 w-16">Rack:</span>
+                            <span className="text-gray-900">{product.rack || 'N/A'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right ml-4">
+                      <div className="bg-green-50 rounded-lg p-3 min-w-[120px]">
+                        <div className="text-sm text-gray-600 mb-1">Unit Price</div>
+                        <div className="text-xl font-bold text-green-800">{formatDollarAmount(product.price || 0)}</div>
+                        <div className="text-sm text-gray-600 mt-2 mb-1">Quantity</div>
+                        <div className="text-lg font-semibold text-gray-900">{product.quantity}</div>
+                        <div className="border-t border-green-200 mt-2 pt-2">
+                          <div className="text-sm text-gray-600 mb-1">Item Total</div>
+                          <div className="text-xl font-bold text-green-900">
+                            {formatDollarAmount((product.price || 0) * (product.quantity || 0))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              
+              {/* Products Summary */}
+              <div className="bg-white rounded-lg p-4 border-2 border-green-200">
+                <div className="flex justify-between items-center">
+                  <span className="text-lg font-semibold text-gray-900">Total Products:</span>
+                  <span className="text-lg font-bold text-green-800">
+                    {orderDetails.products.reduce((sum, product) => sum + (product.quantity || 0), 0)} items
+                  </span>
+                </div>
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-lg font-semibold text-gray-900">Subtotal:</span>
+                  <span className="text-xl font-bold text-green-900">
+                    {formatDollarAmount(orderDetails.products.reduce((sum, product) => sum + ((product.price || 0) * (product.quantity || 0)), 0))}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Fallback to basic order items if API data not available */
+          <div className="bg-gray-50 rounded-lg p-4">
+            <div className="space-y-3">
+              {order.items && order.items.map((item, index) => (
+                <div key={index} className="flex justify-between items-center py-2 border-b border-gray-200 last:border-b-0">
+                  <div className="flex items-center">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+                      <Package className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">{item.name}</p>
+                      <p className="text-sm text-gray-500">Qty: {item.quantity}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-gray-900">${item.price.toFixed(2)}</p>
+                    <p className="text-sm text-gray-500">
+                      Total: ${(item.price * item.quantity).toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Financial Breakdown */}
+      <div className="space-y-4">
+        <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+                          <DollarSign className="h-5 w-5 text-blue-600 mr-2" />
+          Financial Breakdown
+        </h4>
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-50 rounded-lg p-6 border border-blue-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Revenue & Base Costs */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Base Revenue</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.revenue || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Gift Note Charge</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.giftNoteCharge || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Promo Discount</span>
+                <span className="font-semibold text-red-600">-{formatDollarAmount(order.promoDiscAmt || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Tax</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.tax || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Tip</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.tip || 0)}</span>
+              </div>
+            </div>
+
+            {/* Fees & Charges */}
+            <div className="space-y-3">
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Shipping Fee</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.shippingFee || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Delivery Fee</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.deliveryFee || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Service Charge</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceCharge || 0)}</span>
+                </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Service Charge Tax</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">Service Charge Tax</span>
+                <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200">
+                <span className="text-sm font-medium text-blue-700">API Total Amount</span>
+                <span className="font-semibold text-blue-900">${(order.totalAmount || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center py-2 border-b border-blue-200 bg-blue-100 p-2 rounded">
+                <span className="text-sm font-medium text-blue-700">Calculated Total</span>
+                <span className="text-lg font-bold text-blue-900">${order.total.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Additional Metadata */}
+      <div className="space-y-4">
+        <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+          <Package className="h-5 w-5 text-blue-600 mr-2" />
+          Additional Order Metadata
+        </h4>
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg p-6 border border-amber-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Order ID</span>
+                <span className="font-mono text-xs text-amber-900 break-all">{order.id}</span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Customer Name</span>
+                <span className="font-semibold text-amber-900">{order.customerName}</span>
+              </div>
+              <div className="flex justify-between items-start py-2">
+                <span className="text-sm font-medium text-amber-700 mr-4">Establishment</span>
+                <span className="font-semibold text-amber-900 text-right break-words">{order.establishment || 'Not specified'}</span>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Order Date</span>
+                <span className="font-semibold text-amber-900">
+                  {order.orderDate ? (() => {
+                    let displayDate = order.orderDate
+                    if (order.orderDateTime) {
+                      const localDateTime = parseLocalDateTime(order.orderDateTime)
+                      displayDate = localDateTime.getFullYear() + '-' + 
+                                    String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                    String(localDateTime.getDate()).padStart(2, '0')
+                    }
+                    return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
+                    })
+                  })() : 'N/A'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Delivery Date</span>
+                <span className="font-semibold text-amber-900">
+                  {order.deliveryDate === 'N/A' ? 'N/A' : (() => {
+                    // Convert UTC delivery date to local date for display
+                    let displayDate = order.deliveryDate
+                    if (order.deliveryDateTime) {
+                      const localDateTime = parseLocalDateTime(order.deliveryDateTime)
+                      displayDate = localDateTime.getFullYear() + '-' + 
+                                   String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                                   String(localDateTime.getDate()).padStart(2, '0')
+                    }
+                    return new Date(displayDate + 'T00:00:00').toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric'
+                    })
+                  })()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Status</span>
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}>
+                  {getStatusIcon(order.status)}
+                  <span className="ml-1 capitalize">{order.status.replace('_', ' ')}</span>
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Order Type</span>
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                  (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Delivery Status</span>
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                  order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
+                  order.deliveryStatus === 'On Time' ? 'bg-green-100 text-green-800' :
+                  'bg-gray-100 text-gray-800'
+                }`}>
+                  {order.deliveryStatus || 'N/A'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-2">
+                <span className="text-sm font-medium text-amber-700">Shipment Status</span>
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus || orderDetails?.aftership?.shipmentStatus)}`}>
+                  {(order.shipmentStatus || orderDetails?.aftership?.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
+                </span>
+              </div>
+              {(order.trackingNumber || orderDetails?.aftership?.trackingNumber) && (
+                <div className="flex justify-between items-center py-2">
+                  <span className="text-sm font-medium text-amber-700">Tracking</span>
+                  {order.trackingUrl || orderDetails?.aftership?.trackingUrl ? (
+                    <a
+                      href={order.trackingUrl || orderDetails.aftership?.trackingUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      {order.trackingNumber || orderDetails?.aftership?.trackingNumber}
+                    </a>
+                  ) : (
+                    <span className="text-sm font-medium text-amber-900">
+                      {order.trackingNumber || orderDetails?.aftership?.trackingNumber}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isTimelineRetailer() && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <h4 className="text-base font-semibold text-gray-900 mb-3">Order Timeline</h4>
+          {isLoadingTimeline && (
+            <div className="text-sm text-gray-600">Loading timeline...</div>
+          )}
+          {timelineError && !isLoadingTimeline && (
+            <div className="text-sm text-red-600">{timelineError}</div>
+          )}
+          {!isLoadingTimeline && !timelineError && timelineEvents.length === 0 && (
+            <div className="text-sm text-gray-600">No timeline events available.</div>
+          )}
+          {!isLoadingTimeline && !timelineError && timelineEvents.length > 0 && (
+            <div className="space-y-3">
+              {timelineEvents.map((event, index) => (
+                <div key={`${event.type}-${event.timestamp}-${index}`} className="flex items-start gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className="h-3 w-3 rounded-full bg-blue-600 mt-1" />
+                    {index < timelineEvents.length - 1 && (
+                      <div className="w-px flex-1 bg-blue-200 mt-1" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-gray-900">{event.type}</div>
+                    <div className="text-xs text-gray-500">
+                      {event.timestamp ? new Date(event.timestamp).toLocaleString() : 'Unknown time'}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Notes Section */}
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+            <FileText className="h-5 w-5 text-blue-600 mr-2" />
+            Order Notes
+          </h4>
+          {asanaTaskUrl && (
+            <a
+              href={asanaTaskUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-medium rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            >
+              <ExternalLink className="h-4 w-4 mr-1.5" />
+              Open in Asana
+            </a>
+          )}
+        </div>
+        <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 border border-purple-200">
+          {/* Loading State */}
+          {isLoadingNotes && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
+                <span className="text-blue-700 font-medium">Loading notes from Asana...</span>
+              </div>
+            </div>
+          )}
+
+          {/* Error State */}
+          {notesError && !isLoadingNotes && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center">
+                <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
+                <div>
+                  <span className="text-red-700 font-medium text-sm">{notesError}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Success State */}
+          {notesSuccess && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+              <div className="flex items-center">
+                <CheckCircle className="h-5 w-5 text-green-600 mr-3" />
+                <span className="text-green-700 font-medium text-sm">Notes saved to Asana successfully!</span>
+              </div>
+            </div>
+          )}
+
+          {/* Notes Textarea */}
+          <div className="space-y-3">
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Add notes about this order... These notes will be saved to Asana."
+              className="w-full min-h-[120px] p-4 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-y bg-white text-gray-900 placeholder-gray-400"
+              disabled={isLoadingNotes || isSavingNotes}
+            />
+            <div className="flex justify-end">
+              <button
+                onClick={handleSaveNotes}
+                disabled={isLoadingNotes || isSavingNotes}
+                className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+              >
+                {isSavingNotes ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4 mr-2" />
+                    Save to Asana
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Notes are automatically synced with Asana. Changes are saved when you click "Save to Asana".
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Comments Section */}
+      {asanaTaskUrl && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h4 className="text-lg font-semibold text-gray-900 flex items-center">
+              <MessageSquare className="h-5 w-5 text-green-600 mr-2" />
+              Asana Comments
+            </h4>
+          </div>
+          <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6 border border-green-200">
+            {/* Loading State */}
+            {isLoadingComments && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
+                  <span className="text-blue-700 font-medium">Loading comments...</span>
+                </div>
+              </div>
+            )}
+
+            {/* Error State */}
+            {commentsError && !isLoadingComments && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center">
+                  <AlertCircle className="h-5 w-5 text-red-600 mr-3" />
+                  <span className="text-red-700 font-medium text-sm">{commentsError}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Comments List */}
+            {!isLoadingComments && !commentsError && (
+              <>
+                {comments.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <MessageSquare className="h-12 w-12 mx-auto mb-3 text-gray-400" />
+                    <p className="text-sm">No comments yet. Add comments in Asana.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {comments.map((comment) => {
+                      const commentDate = new Date(comment.createdAt)
+                      const formattedDate = commentDate.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })
+                      
+                      return (
+                        <div
+                          key={comment.id}
+                          className="bg-white rounded-lg p-4 border border-green-200 shadow-sm"
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center">
+                              <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center mr-2">
+                                <User className="h-4 w-4 text-green-600" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">
+                                  {comment.createdBy}
+                                </p>
+                                <p className="text-xs text-gray-500">{formattedDate}</p>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="ml-10">
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                              {comment.text}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Order Summary */}
+      <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-lg p-6 border border-blue-200">
+        <div className="flex justify-between items-center">
+          <span className="text-lg font-semibold text-blue-900">Final Order Total</span>
+          <span className="text-3xl font-bold text-blue-900">${order.total.toFixed(2)}</span>
+        </div>
+        <div className="mt-2 text-sm text-blue-700">
+          {order.status === 'delivered' ? '✅ Order has been delivered' : 
+           order.status === 'in_transit' ? '🚚 Order is in transit' : 
+           order.status === 'accepted' ? '✅ Order has been accepted' :
+           '⏳ Order is pending'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default OrderDetailsContent

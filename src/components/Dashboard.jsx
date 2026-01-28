@@ -26,10 +26,10 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [deliveryFilter, setDeliveryFilter] = useState([])
   
   const [selectedOrder, setSelectedOrder] = useState(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [orderDetails, setOrderDetails] = useState(null)
-  const [isLoadingDetails, setIsLoadingDetails] = useState(false)
-  const [detailsError, setDetailsError] = useState(null)
+  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
+  const [orderDetailsById, setOrderDetailsById] = useState({})
+  const [detailsLoadingById, setDetailsLoadingById] = useState({})
+  const [detailsErrorById, setDetailsErrorById] = useState({})
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(null)
   const [sortConfig, setSortConfig] = useState({
@@ -57,6 +57,30 @@ const Dashboard = ({ onSwitchToAI }) => {
     const parsed = new Date(dateTimeValue)
     return isNaN(parsed.getTime()) ? null : parsed
   }, [])
+
+  const getLocalDateString = useCallback((dateTimeValue, dateValue) => {
+    if (dateTimeValue) {
+      const localDateTime = parseLocalDateTime(dateTimeValue)
+      if (localDateTime) {
+        return localDateTime.getFullYear() + '-' +
+               String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' +
+               String(localDateTime.getDate()).padStart(2, '0')
+      }
+    }
+    return dateValue || null
+  }, [parseLocalDateTime])
+
+  const filterOrdersByDateRange = useCallback((ordersToFilter, startDate, endDate) => {
+    if (!startDate || !endDate) return ordersToFilter
+
+    return ordersToFilter.filter(order => {
+      const orderLocalDate = getLocalDateString(order.orderDateTime, order.orderDate)
+      const deliveryLocalDate = getLocalDateString(order.deliveryDateTime, order.deliveryDate)
+      const dateToCheck = orderLocalDate || deliveryLocalDate
+
+      return dateToCheck && dateToCheck >= startDate && dateToCheck <= endDate
+    })
+  }, [getLocalDateString])
 
   // Helper function to check if date is this week
   const isThisWeek = (dateString) => {
@@ -149,9 +173,13 @@ const Dashboard = ({ onSwitchToAI }) => {
     }
   }
 
+  const ordersInDateRange = useMemo(() => {
+    return filterOrdersByDateRange(orders, dateRange.startDate, dateRange.endDate)
+  }, [orders, dateRange, filterOrdersByDateRange])
+
   // Calculate summary statistics
-  const totalOrders = orders.length
-  const revenueOrders = orders.filter(order => 
+  const totalOrders = ordersInDateRange.length
+  const revenueOrders = ordersInDateRange.filter(order => 
     !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
   )
   const totalRevenue = revenueOrders
@@ -160,10 +188,10 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   // Filter orders based on search term
   const filteredOrders = useMemo(() => {
-    if (!searchTerm.trim()) return orders
+    if (!searchTerm.trim()) return ordersInDateRange
     
     const searchLower = searchTerm.toLowerCase()
-    const results = orders.filter(order => 
+    const results = ordersInDateRange.filter(order => 
       order.id?.toLowerCase().includes(searchLower) ||
       order.customerName?.toLowerCase().includes(searchLower) ||
       order.ordernum?.toLowerCase().includes(searchLower) ||
@@ -172,7 +200,7 @@ const Dashboard = ({ onSwitchToAI }) => {
     )
     
     return results
-  }, [orders, searchTerm])
+  }, [ordersInDateRange, searchTerm])
 
   // Filter orders based on status and delivery filters
   const filteredOrdersByStatusAndDelivery = useMemo(() => {
@@ -633,11 +661,21 @@ const Dashboard = ({ onSwitchToAI }) => {
 
 
 
+  const getOrderKey = useCallback((order) => order.ordernum || order.id, [])
+
+  const setOrderDetailsFor = useCallback((orderNumber, details) => {
+    setOrderDetailsById(prev => ({
+      ...prev,
+      [orderNumber]: details
+    }))
+  }, [])
+
   // Fetch detailed order information from Bevvi API
   const fetchOrderDetails = async (orderNumber) => {
     try {
-      setIsLoadingDetails(true)
-      setDetailsError(null)
+      if (!orderNumber) return
+      setDetailsLoadingById(prev => ({ ...prev, [orderNumber]: true }))
+      setDetailsErrorById(prev => ({ ...prev, [orderNumber]: null }))
       
       const response = await fetch(`/api/order-details/${orderNumber}`, {
         method: 'GET',
@@ -652,23 +690,37 @@ const Dashboard = ({ onSwitchToAI }) => {
       }
       
       const data = await response.json()
-      setOrderDetails(data)
+      setOrderDetailsById(prev => ({
+        ...prev,
+        [orderNumber]: data
+      }))
     } catch (error) {
       console.error('❌ Error fetching order details:', error.message)
-      setDetailsError({
-        message: 'Failed to fetch order details',
-        details: error.message
-      })
+      setDetailsErrorById(prev => ({
+        ...prev,
+        [orderNumber]: {
+          message: 'Failed to fetch order details',
+          details: error.message
+        }
+      }))
     } finally {
-      setIsLoadingDetails(false)
+      setDetailsLoadingById(prev => ({ ...prev, [orderNumber]: false }))
+    }
+  }
+  
+  const openOrderModal = (order) => {
+    const orderKey = getOrderKey(order)
+    if (!orderKey) return
+    setSelectedOrder(order)
+    setIsOrderModalOpen(true)
+    if (!orderDetailsById[orderKey] && !detailsLoadingById[orderKey]) {
+      fetchOrderDetails(orderKey)
     }
   }
 
-  const closeModal = () => {
-    setIsModalOpen(false)
+  const closeOrderModal = () => {
+    setIsOrderModalOpen(false)
     setSelectedOrder(null)
-    setOrderDetails(null)
-    setDetailsError(null)
   }
 
   useEffect(() => {
@@ -933,6 +985,8 @@ const Dashboard = ({ onSwitchToAI }) => {
       [filterKey]: !prev[filterKey]
     }))
   }
+
+  const selectedOrderKey = selectedOrder ? getOrderKey(selectedOrder) : null
 
   return (
     <div className="bg-gray-50 pb-20 sm:pb-16">
@@ -1422,7 +1476,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             <thead className="bg-gray-50">
                               <tr>
                     <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                          className="pl-2 pr-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('ordernum')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1574,25 +1628,21 @@ const Dashboard = ({ onSwitchToAI }) => {
                             <col className="w-20" />
                           </colgroup>
                           <tbody className="bg-white divide-y divide-gray-200">
-                        {sortedOrders.map((order) => (
-                          <tr key={order.id} className="hover:bg-gray-50">
-                          <td className="px-3 py-4 text-sm font-medium text-gray-900">
-                            <button
-                              onClick={() => {
-                                setSelectedOrder(order)
-                                setIsModalOpen(true)
-                                // Fetch detailed order information
-                                const orderNumber = order.ordernum || order.id
-                                if (orderNumber) {
-                                  fetchOrderDetails(orderNumber)
-                                }
-                              }}
-                              className="text-blue-600 hover:text-blue-800 hover:underline font-medium cursor-pointer truncate block w-full text-left"
-                              title={order.ordernum || order.id}
-                            >
-                              {order.ordernum || order.id}
-                            </button>
-                          </td>
+                        {sortedOrders.map((order) => {
+                          return (
+                            <React.Fragment key={order.id}>
+                              <tr className="hover:bg-gray-50">
+                                <td className="pl-2 pr-3 py-4 text-sm font-medium text-gray-900">
+                                  <button
+                                    type="button"
+                                    onClick={() => openOrderModal(order)}
+                                    className="truncate block w-full text-left text-blue-600 hover:text-blue-700 hover:underline"
+                                    title={order.ordernum || order.id}
+                                    aria-label="Open order details"
+                                  >
+                                    {order.ordernum || order.id}
+                                  </button>
+                                </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={order.customerName}>
                               {order.customerName}
@@ -1705,8 +1755,10 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
 
-                        </tr>
-                      ))}
+                              </tr>
+                            </React.Fragment>
+                          )
+                        })}
                     </tbody>
                   </table>
                 </div>
@@ -1745,35 +1797,21 @@ const Dashboard = ({ onSwitchToAI }) => {
                         <div 
                           key={order.id} 
                           className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
-                          onClick={() => {
-                            setSelectedOrder(order)
-                            setIsModalOpen(true)
-                            const orderNumber = order.ordernum || order.id
-                            if (orderNumber) {
-                              fetchOrderDetails(orderNumber)
-                            }
-                          }}
                         >
                           {/* Header Row */}
                           <div className="flex items-start justify-between mb-3 pb-3 border-b border-gray-100">
                             <div className="flex-1 min-w-0">
                               <button
-                                className="text-blue-600 hover:text-blue-800 font-semibold text-base mb-1 block truncate w-full text-left"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setSelectedOrder(order)
-                                  setIsModalOpen(true)
-                                  const orderNumber = order.ordernum || order.id
-                                  if (orderNumber) {
-                                    fetchOrderDetails(orderNumber)
-                                  }
-                                }}
+                                type="button"
+                                onClick={() => openOrderModal(order)}
+                                className="text-blue-600 hover:text-blue-700 hover:underline font-semibold text-base mb-1 block truncate w-full text-left"
+                                aria-label="Open order details"
                               >
                                 {order.ordernum || order.id}
                               </button>
                               <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
                             </div>
-                            <div className="ml-2 flex-shrink-0">
+                            <div className="ml-2 flex-shrink-0 flex items-center gap-2">
                               <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                 order.status === 'delivered' ? 'bg-green-100 text-green-800' :
                                 order.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
@@ -1856,6 +1894,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                               </span>
                             )}
                           </div>
+
                         </div>
                       )
                     })}
@@ -1896,6 +1935,20 @@ const Dashboard = ({ onSwitchToAI }) => {
         )}
       </div>
 
+      <OrderModal
+        order={selectedOrder}
+        orderDetails={selectedOrderKey ? orderDetailsById[selectedOrderKey] : null}
+        isOpen={isOrderModalOpen}
+        onClose={closeOrderModal}
+        isLoadingDetails={selectedOrderKey ? !!detailsLoadingById[selectedOrderKey] : false}
+        detailsError={selectedOrderKey ? detailsErrorById[selectedOrderKey] : null}
+        setOrderDetails={(details) => {
+          if (selectedOrderKey) {
+            setOrderDetailsFor(selectedOrderKey, details)
+          }
+        }}
+      />
+
       {/* Status Band */}
       <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-gray-700 z-40">
         <div className="max-w-7xl mx-auto">
@@ -1931,8 +1984,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                   'Loading...'
                 ) : (
                   <>
-                    Orders: {formatNumber(orders.length)} | 
-                    Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
+                    Orders: {formatNumber(ordersInDateRange.length)} | 
+                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
                     v2.4.0
                   </>
                 )}
@@ -1972,8 +2025,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                   'Loading...'
                 ) : (
                   <>
-                    Orders: {formatNumber(orders.length)} | 
-                    Total: {formatDollarAmount(orders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
+                    Orders: {formatNumber(ordersInDateRange.length)} | 
+                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
                     v2.4.0
                   </>
                 )}
@@ -1983,18 +2036,6 @@ const Dashboard = ({ onSwitchToAI }) => {
         </div>
       </div>
 
-      {/* Order Modal */}
-      {isModalOpen && selectedOrder && (
-        <OrderModal
-          order={selectedOrder}
-          orderDetails={orderDetails}
-          isOpen={isModalOpen}
-          onClose={closeModal}
-          isLoadingDetails={isLoadingDetails}
-          detailsError={detailsError}
-          setOrderDetails={setOrderDetails}
-        />
-      )}
     </div>
   )
 }

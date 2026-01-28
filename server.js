@@ -1308,18 +1308,12 @@ async function fetchOrdersForDateRange(startDate, endDate) {
     // Filter orders by date range - convert to local time before comparing
     const filteredOrders = allOrders.filter(order => {
       const orderLocalDate = getOrderLocalDate(order)
-      const deliveryLocalDate = getDeliveryLocalDate(order)
-      
-      if (!deliveryLocalDate) {
-        // If no delivery date, include based on order date (in local time)
+      if (orderLocalDate) {
         return orderLocalDate >= startDate && orderLocalDate <= endDate
       }
-      
-      // Filter by delivery date (primary) and order date (fallback) - both in local time
-      const deliveryInRange = deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
-      const orderInRange = orderLocalDate >= startDate && orderLocalDate <= endDate
-      
-      return deliveryInRange || orderInRange
+
+      const deliveryLocalDate = getDeliveryLocalDate(order)
+      return deliveryLocalDate && deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
     })
     
     return filteredOrders
@@ -1557,18 +1551,12 @@ app.get('/api/orders', async (req, res) => {
           // Convert order dates to local time before comparing
           const filteredOrders = allOrders.filter(order => {
             const orderLocalDate = getOrderLocalDate(order)
-            const deliveryLocalDate = getDeliveryLocalDate(order)
-            
-            if (!deliveryLocalDate) {
-              // If no delivery date, include based on order date (in local time)
+            if (orderLocalDate) {
               return orderLocalDate >= startDate && orderLocalDate <= endDate
             }
-            
-            // Filter by delivery date (primary) and order date (fallback) - both in local time
-            const deliveryInRange = deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
-            const orderInRange = orderLocalDate >= startDate && orderLocalDate <= endDate
-            
-            return deliveryInRange || orderInRange
+
+            const deliveryLocalDate = getDeliveryLocalDate(order)
+            return deliveryLocalDate && deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
           })
           
           console.log(`📊 Filtered orders: ${filteredOrders.length} out of ${allOrders.length} total orders`)
@@ -1584,8 +1572,7 @@ app.get('/api/orders', async (req, res) => {
             console.log('⚠️  WARNING: CSV parsing returned 0 orders - API may have no data for this range')
           }
           
-          console.log(`🔍 Orders with delivery dates in range: ${filteredOrders.filter(o => o.deliveryDate && o.deliveryDate !== 'N/A' && o.deliveryDate >= startDate && o.deliveryDate <= endDate).length}`)
-          console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate >= startDate && o.orderDate <= endDate).length}`)
+          console.log(`📋 Orders with order dates in range: ${filteredOrders.filter(o => o.orderDate && o.orderDate >= startDate && o.orderDate <= endDate).length}`)
           
           // Check if we got real orders from API
           if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
