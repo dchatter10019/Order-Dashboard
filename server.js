@@ -733,7 +733,11 @@ async function sendSlackMessage(text) {
 }
 
 async function evaluateSlackNotifications(orders) {
-  if (!SLACK_WEBHOOK_URL || !Array.isArray(orders) || orders.length === 0) {
+  if (!SLACK_WEBHOOK_URL || !Array.isArray(orders)) {
+    return
+  }
+  if (orders.length === 0) {
+    pruneSlackNotificationState(new Set())
     return
   }
 
@@ -794,6 +798,22 @@ async function evaluateSlackNotifications(orders) {
   }
 
   pruneSlackNotificationState(currentOrderIds)
+}
+
+/** Update in-memory orders used for Slack checks and re-run time-based Slack alerts. */
+async function refreshOrdersForAlerts(orders, dateRange = null) {
+  const list = Array.isArray(orders) ? orders : []
+  const range = dateRange || lastAutoRefreshRange || (global.lastRefreshedOrders && global.lastRefreshedOrders.dateRange) || null
+  global.lastRefreshedOrders = {
+    orders: list,
+    timestamp: new Date(),
+    dateRange: range
+  }
+  try {
+    await evaluateSlackNotifications(list)
+  } catch (err) {
+    console.error('Slack notification evaluation failed:', err.message)
+  }
 }
 
 // CRITICAL: Set API route headers FIRST, before any other middleware
@@ -2049,6 +2069,8 @@ app.get('/api/orders', async (req, res) => {
         console.warn(`⚠️ WARNING: Only ${successfulChunks}/${chunks.length} chunks succeeded - data may be incomplete!`)
       }
       
+      await refreshOrdersForAlerts(allOrders, { startDate, endDate, timeZone: orderTimeZone })
+      
       return res.json({
         success: true,
         data: allOrders,
@@ -2150,7 +2172,7 @@ app.get('/api/orders', async (req, res) => {
           
           // Check if we got real orders from API
           if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
-            // Real orders from API
+            await refreshOrdersForAlerts(filteredOrders, { startDate, endDate, timeZone: orderTimeZone })
             return res.json({
               success: true,
               data: filteredOrders,
@@ -2161,7 +2183,7 @@ app.get('/api/orders', async (req, res) => {
               cached: false
             })
           } else {
-            // No real orders found - return empty array instead of mock data
+            await refreshOrdersForAlerts([], { startDate, endDate, timeZone: orderTimeZone })
             return res.json({
               success: true,
               data: [],
@@ -2540,15 +2562,7 @@ function startAutoRefresh() {
           console.log(`✅ Auto-refresh successful: ${orders.length} orders updated`)
           lastAutoRefreshDate = new Date()
           
-          // Store the refreshed data in memory for quick access
-          global.lastRefreshedOrders = {
-            orders: orders,
-            timestamp: lastAutoRefreshDate,
-            dateRange: lastAutoRefreshRange
-          }
-
-          // Send Slack alerts for time-sensitive status checks
-          await evaluateSlackNotifications(orders)
+          await refreshOrdersForAlerts(orders, lastAutoRefreshRange)
           
           // Notify all connected clients about the data refresh
           notifyClientsOfRefresh(orders.length, lastAutoRefreshDate)

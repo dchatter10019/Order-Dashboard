@@ -58,7 +58,22 @@ export default {
       },
       fontFamily: {
         'sans': ['Inter', 'system-ui', 'sans-serif'],
-      }
+      },
+      keyframes: {
+        'alert-flash': {
+          '0%, 100%': {
+            boxShadow: '0 0 0 0 rgba(217, 119, 6, 0.35)',
+            backgroundColor: 'rgb(255 251 235)',
+          },
+          '50%': {
+            boxShadow: '0 0 0 8px rgba(217, 119, 6, 0.15)',
+            backgroundColor: 'rgb(254 243 199)',
+          },
+        },
+      },
+      animation: {
+        'alert-flash': 'alert-flash 2s ease-in-out infinite',
+      },
     },
   },
   plugins: [],
