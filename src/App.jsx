@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Login from './components/Login'
 import MainDashboard from './components/MainDashboard'
+import OrderDetailsPage from './components/OrderDetailsPage'
 import './App.css'
 
 function App() {
@@ -29,10 +30,10 @@ function App() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-blue-50">
+      <div className="min-h-screen flex items-center justify-center bg-bevvi-primary-50">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-blue-600">Loading...</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-bevvi-primary-600 mx-auto mb-4"></div>
+          <p className="text-bevvi-primary-600">Loading...</p>
         </div>
       </div>
     )
@@ -57,6 +58,14 @@ function App() {
               <MainDashboard onLogout={handleLogout} /> : 
               <Navigate to="/login" replace />
             } 
+          />
+          <Route
+            path="/orders/:orderNumber"
+            element={
+              isAuthenticated ?
+              <OrderDetailsPage /> :
+              <Navigate to="/login" replace />
+            }
           />
           <Route 
             path="/" 

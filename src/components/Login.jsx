@@ -38,7 +38,7 @@ const Login = ({ onLogin }) => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-cyan-50 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-bevvi-primary-50 to-bevvi-primary-100 px-4">
       <div className="max-w-md w-full space-y-8">
         {/* Logo and Header */}
         <div className="text-center">
@@ -71,7 +71,7 @@ const Login = ({ onLogin }) => {
                 name="username"
                 type="text"
                 required
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all duration-200 bg-gray-50"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-bevvi-primary-300 transition-all duration-200 bg-gray-50"
                 placeholder="Enter your username"
                 value={credentials.username}
                 onChange={handleInputChange}
@@ -88,7 +88,7 @@ const Login = ({ onLogin }) => {
                   name="password"
                   type={showPassword ? 'text' : 'password'}
                   required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all duration-200 bg-gray-50 pr-10"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-bevvi-primary-300 transition-all duration-200 bg-gray-50 pr-10"
                   placeholder="Enter your password"
                   value={credentials.password}
                   onChange={handleInputChange}
@@ -107,18 +107,18 @@ const Login = ({ onLogin }) => {
               </div>
             </div>
 
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <p className="text-sm text-blue-800">
+                    <div className="bg-bevvi-primary-50 border border-bevvi-primary-200 rounded-xl p-4">
+          <p className="text-sm text-bevvi-primary-800">
             <strong>Demo Credentials:</strong><br />
-            Username: <code className="bg-blue-100 px-2 py-1 rounded-lg font-mono">Bevvi_User</code><br />
-            Password: <code className="bg-blue-100 px-2 py-1 rounded-lg font-mono">Bevvi_123#</code>
+            Username: <code className="bg-bevvi-primary-100 px-2 py-1 rounded-lg font-mono">Bevvi_User</code><br />
+            Password: <code className="bg-bevvi-primary-100 px-2 py-1 rounded-lg font-mono">Bevvi_123#</code>
           </p>
         </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              className="w-full bg-bevvi-primary-600 hover:bg-bevvi-primary-700 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               {isLoading ? (
                 <>

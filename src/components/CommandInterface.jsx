@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2, Download } from 'lucide-react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2, Download, Plus } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch } from '../utils/api'
 
@@ -16,11 +16,17 @@ const CommandInterface = ({
 }) => {
   const [input, setInput] = useState('')
   const [expandedOrders, setExpandedOrders] = useState({}) // Track which message's orders are expanded
+  const [pendingProducts, setPendingProducts] = useState(null)
+  const [pendingMissingFields, setPendingMissingFields] = useState([])
+  const [isProductSearching, setIsProductSearching] = useState(false)
+  const [isProductSaving, setIsProductSaving] = useState(false)
   const messagesEndRef = useRef(null)
   const pendingCommandRef = useRef(null)
   const pendingGPTDataRef = useRef(null) // Store GPT-parsed data for pending command
   const loadingTimeoutRef = useRef(null)
   const originalQueryRef = useRef(null) // Store original query when clarification is requested
+  const pendingAddProductsRef = useRef(null)
+  const pendingMissingProductsRef = useRef(null)
   const conversationContextRef = useRef({
     lastCustomer: null,
     lastDateRange: null,
@@ -265,6 +271,329 @@ const CommandInterface = ({
     }
     
     return null
+  }
+
+  const parseAddProductRequest = (command, gptParsedData = null) => {
+    const normalizedProducts = []
+    const gptProducts = Array.isArray(gptParsedData?.products) ? gptParsedData.products : []
+
+    if (gptProducts.length > 0) {
+      gptProducts.forEach(product => {
+        const rawUpc = `${product.upc || ''}`.replace(/\D/g, '')
+        const name = product.name || product.productName || null
+        if (rawUpc) {
+          normalizedProducts.push({ ...product, upc: rawUpc, name })
+        }
+      })
+    }
+
+    if (normalizedProducts.length === 0) {
+      const upcMatches = command.match(/\b\d{8,14}\b/g) || []
+      const upcs = upcMatches.map(upc => upc.replace(/\D/g, '')).filter(Boolean)
+
+      let inferredName = null
+      const quotedNameMatch = command.match(/"([^"]+)"/) || command.match(/'([^']+)'/)
+      if (quotedNameMatch) {
+        inferredName = quotedNameMatch[1]?.trim()
+      }
+
+      if (!inferredName) {
+        const namedMatch = command.match(/(?:named|name|called)\s+(.+)$/i)
+        if (namedMatch) {
+          inferredName = namedMatch[1]?.trim()
+        }
+      }
+
+      if (!inferredName && upcs.length === 1) {
+        inferredName = command
+          .replace(/add product[s]?/i, '')
+          .replace(/upc/ig, '')
+          .replace(upcs[0], '')
+          .trim()
+      }
+
+      if (!inferredName && upcs.length === 0) {
+        inferredName = command
+          .replace(/add product[s]?/i, '')
+          .replace(/upc/ig, '')
+          .trim()
+      }
+
+      const extraFields = {}
+      const fieldPatterns = {
+        description: /description[:=]\s*([^,]+)(?:,|$)/i,
+        category: /category[:=]\s*([^,]+)(?:,|$)/i,
+        subcategory: /subcategory[:=]\s*([^,]+)(?:,|$)/i,
+        varietal: /varietal[:=]\s*([^,]+)(?:,|$)/i,
+        region: /region[:=]\s*([^,]+)(?:,|$)/i,
+        appellation: /appellation[:=]\s*([^,]+)(?:,|$)/i,
+        country: /country[:=]\s*([^,]+)(?:,|$)/i,
+        abv: /abv[:=]\s*([^,]+)(?:,|$)/i,
+        color: /color[:=]\s*([^,]+)(?:,|$)/i,
+        body: /body[:=]\s*([^,]+)(?:,|$)/i,
+        aroma: /aroma[:=]\s*([^,]+)(?:,|$)/i,
+        flavor: /flavor[:=]\s*([^,]+)(?:,|$)/i,
+        pairings: /pairings?[:=]\s*([^,]+)(?:,|$)/i,
+        industryRatings: /industry\s*ratings?[:=]\s*([^,]+)(?:,|$)/i,
+        brandName: /brand\s*name[:=]\s*([^,]+)(?:,|$)/i,
+        parentBrand: /parent\s*brand[:=]\s*([^,]+)(?:,|$)/i,
+        productNotes: /product\s*notes?[:=]\s*([^,]+)(?:,|$)/i,
+        imageFileName: /image\s*file\s*name[:=]\s*([^,]+)(?:,|$)/i,
+        brandLogo: /brand\s*logo[:=]\s*([^,]+)(?:,|$)/i,
+        year: /year[:=]\s*([^,]+)(?:,|$)/i,
+        size: /size[:=]\s*([^,]+)(?:,|$)/i,
+        units: /units[:=]\s*([^,]+)(?:,|$)/i,
+        companyName: /company\s*name[:=]\s*([^,]+)(?:,|$)/i,
+        lowestPrice: /lowest\s*price[:=]\s*([^,]+)(?:,|$)/i,
+        containerType: /container\s*type[:=]\s*([^,]+)(?:,|$)/i,
+        containerCount: /container\s*count[:=]\s*([^,]+)(?:,|$)/i,
+        averagePrice: /average\s*price[:=]\s*([^,]+)(?:,|$)/i,
+        sku: /sku[:=]\s*([^,]+)(?:,|$)/i,
+        slug: /slug[:=]\s*([^,]+)(?:,|$)/i
+      }
+
+      Object.entries(fieldPatterns).forEach(([key, pattern]) => {
+        const match = command.match(pattern)
+        if (match?.[1]) {
+          extraFields[key] = match[1].trim()
+        }
+      })
+
+      if (upcs.length > 0) {
+        upcs.forEach(upc => {
+          normalizedProducts.push({ upc, name: inferredName || null, ...extraFields })
+        })
+      } else if (inferredName) {
+        normalizedProducts.push({ upc: null, name: inferredName, ...extraFields })
+      }
+    }
+
+    return {
+      products: normalizedProducts,
+      missingUpc: normalizedProducts.length === 0 || normalizedProducts.every(product => !product.upc),
+      missingName: normalizedProducts.some(product => !product.name)
+    }
+  }
+
+  const optionalAddProductFields = [
+    'imageFileName',
+    'brandLogo'
+  ]
+
+  const requiredAddProductFields = [
+    'upc',
+    'name',
+    'description',
+    'category',
+    'subcategory',
+    'varietal',
+    'region',
+    'appellation',
+    'country',
+    'abv',
+    'color',
+    'body',
+    'aroma',
+    'flavor',
+    'pairings',
+    'industryRatings',
+    'brandName',
+    'parentBrand',
+    'productNotes',
+    'year',
+    'size',
+    'units',
+    'companyName',
+    'lowestPrice',
+    'containerType',
+    'containerCount',
+    'averagePrice',
+    'sku',
+    'slug'
+  ]
+
+  const allowedAddProductFields = [
+    ...requiredAddProductFields,
+    ...optionalAddProductFields
+  ]
+
+  const buildProductPreview = (products) => {
+    return products.map((product, index) => {
+      const lines = [...requiredAddProductFields, ...optionalAddProductFields].map(field => {
+        const value = product?.[field]
+        return `${field}: ${value === null || value === undefined || value === '' ? '(missing)' : value}`
+      })
+      return [
+        `Product ${index + 1}:`,
+        ...lines
+      ].join('\n')
+    }).join('\n\n')
+  }
+
+  const applyFieldUpdate = (inputText, products) => {
+    const match = inputText.match(/^\s*([a-zA-Z][a-zA-Z0-9]*)\s*[:=]\s*(.+)$/)
+    if (!match) {
+      return { updated: false, products }
+    }
+    const field = match[1]
+    const value = match[2]?.trim()
+    if (!field || value === undefined) {
+      return { updated: false, products }
+    }
+    const normalizedField = allowedAddProductFields.find(reqField => reqField.toLowerCase() === field.toLowerCase())
+    if (!normalizedField) {
+      return { updated: false, products }
+    }
+    const updatedProducts = products.map(product => ({
+      ...product,
+      [normalizedField]: normalizedField === 'units' && typeof value === 'string' ? value.toUpperCase() : value
+    }))
+    return { updated: true, products: updatedProducts, field: normalizedField, value }
+  }
+
+  const updatePendingProducts = (nextProducts) => {
+    setPendingProducts(nextProducts)
+    pendingAddProductsRef.current = nextProducts
+    pendingMissingProductsRef.current = nextProducts
+    const missing = nextProducts
+      ? nextProducts.flatMap(product => {
+          const missingFields = requiredAddProductFields.filter(field => {
+            const value = product?.[field]
+            return value === null || value === undefined || value === ''
+          })
+          return missingFields
+        })
+      : []
+    setPendingMissingFields(Array.from(new Set(missing)))
+  }
+
+  const getMissingRequiredFields = (product) => {
+    return requiredAddProductFields.filter(field => {
+      const value = product?.[field]
+      return value === null || value === undefined || value === ''
+    })
+  }
+
+  const handlePendingProductFieldChange = (messageIndex, productIndex, field, value) => {
+    setMessages(prev => {
+      const next = [...prev]
+      const target = next[messageIndex]
+      if (!target?.pendingProducts) return prev
+      const updatedProducts = target.pendingProducts.map((product, idx) => {
+        if (idx !== productIndex) return product
+        return {
+          ...product,
+          [field]: field === 'units' && typeof value === 'string' ? value.toUpperCase() : value
+        }
+      })
+      next[messageIndex] = {
+        ...target,
+        pendingProducts: updatedProducts
+      }
+      pendingAddProductsRef.current = updatedProducts
+      pendingMissingProductsRef.current = updatedProducts
+      return next
+    })
+  }
+
+  const handleAddProductClick = useCallback(async (products) => {
+    if (!products || products.length === 0) return
+    setIsProductSaving(true)
+    setMessages(prev => [...prev, { type: 'assistant', content: '🚀 Adding product to Bevvi API...', loading: true }])
+    try {
+      const response = await apiFetch('/api/products/add-from-upc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products })
+      })
+      const data = await response.json()
+      const results = Array.isArray(data.results) ? data.results : []
+      const successCount = results.filter(r => r.success).length
+      const failureCount = results.length - successCount
+      const summary = [
+        `✅ Added ${successCount} product${successCount === 1 ? '' : 's'} to Bevvi.`,
+        failureCount > 0 ? `⚠️ ${failureCount} failed.` : null
+      ].filter(Boolean).join(' ')
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.loading)
+        const cleared = filtered.map(m => (m.pendingProducts ? { ...m, pendingProducts: undefined } : m))
+        return [...cleared, { type: 'assistant', content: summary }]
+      })
+      pendingAddProductsRef.current = null
+    } catch (error) {
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.loading)
+        return [...filtered, { type: 'assistant', content: 'Error adding product. Please try again.' }]
+      })
+    } finally {
+      setIsProductSaving(false)
+    }
+  }, [setMessages])
+
+  const runWebSearchForMissingProducts = async () => {
+    if (!pendingMissingProductsRef.current || pendingMissingProductsRef.current.length === 0) {
+      setMessages(prev => [...prev, { type: 'assistant', content: 'There are no pending products to search right now.' }])
+      return
+    }
+
+    setIsProductSearching(true)
+    setMessages(prev => [...prev, { type: 'assistant', content: '🔎 Searching the web for missing product fields...', loading: true }])
+    try {
+      const response = await apiFetch('/api/products/enrich-from-upc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ products: pendingMissingProductsRef.current })
+      })
+      const data = await response.json()
+      const results = Array.isArray(data.results) ? data.results : []
+      const searchEnabled = data.searchEnabled !== false
+      const readyToAdd = results.every(result => result.success)
+      const previewLines = results.map(result => {
+        if (!result.payload) {
+          return `• ${result.upc || 'Unknown UPC'} — No data`
+        }
+        const payload = result.payload
+        const missing = Array.isArray(result.missingFields) && result.missingFields.length > 0
+          ? `Missing: ${result.missingFields.join(', ')}`
+          : 'All fields present'
+        return `• ${payload.upc} — ${payload.name || 'Unnamed product'} (${missing})`
+      })
+
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.loading)
+        if (!readyToAdd) {
+          const payloads = results.map(result => result.payload).filter(Boolean)
+          pendingMissingProductsRef.current = payloads
+          return [...filtered, {
+            type: 'assistant',
+            content: [
+              'Unable to proceed because some fields are missing:',
+              ...previewLines,
+              searchEnabled
+                ? 'If you want to try again, say: "search these on the web".'
+                : 'Web search is not configured. Please add SERPAPI_API_KEY or provide the missing fields.'
+            ].join('\n'),
+            pendingProducts: payloads
+          }]
+        }
+        const payloads = results.map(result => result.payload).filter(Boolean)
+        pendingAddProductsRef.current = payloads
+        pendingMissingProductsRef.current = null
+        const preview = buildProductPreview(payloads)
+        return [...filtered, {
+          type: 'assistant',
+          content: ['Here are the values I found:', preview, 'Review the fields below and click Add Product when ready.'].join('\n'),
+          pendingProducts: payloads
+        }]
+      })
+    } catch (error) {
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.loading)
+        return [...filtered, { type: 'assistant', content: 'Error searching product details. Please try again.' }]
+      })
+    } finally {
+      setIsProductSearching(false)
+    }
   }
 
   // Process user command
@@ -1920,12 +2249,84 @@ const CommandInterface = ({
     }
     setMessages(prev => [...prev, userMessage])
     
+    const normalizedInput = userInput.trim().toLowerCase()
+    if (pendingAddProductsRef.current) {
+      const fieldUpdate = applyFieldUpdate(userInput, pendingAddProductsRef.current)
+      if (fieldUpdate.updated) {
+        pendingAddProductsRef.current = fieldUpdate.products
+        const preview = buildProductPreview(pendingAddProductsRef.current)
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: `Updated ${fieldUpdate.field}. Review the values below:\n\n${preview}\n\nClick Add Product when ready.`,
+          pendingProducts: fieldUpdate.products
+        }])
+        return
+      }
+      if (['yes', 'y', 'ok', 'okay', 'looks good', 'confirm', 'confirmed'].includes(normalizedInput)) {
+        setMessages(prev => [...prev, { type: 'assistant', content: '🚀 Adding product now...', loading: true }])
+        try {
+          const response = await apiFetch('/api/products/add-from-upc', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ products: pendingAddProductsRef.current })
+          })
+          const data = await response.json()
+          const results = Array.isArray(data.results) ? data.results : []
+          const successCount = results.filter(r => r.success).length
+          const failureCount = results.length - successCount
+          const summary = [
+            `✅ Added ${successCount} product${successCount === 1 ? '' : 's'}.`,
+            failureCount > 0 ? `⚠️ ${failureCount} failed.` : null
+          ].filter(Boolean).join(' ')
+          setMessages(prev => {
+            const filtered = prev.filter(m => !m.loading)
+            return [...filtered, { type: 'assistant', content: summary }]
+          })
+        } catch (error) {
+          setMessages(prev => {
+            const filtered = prev.filter(m => !m.loading)
+            return [...filtered, { type: 'assistant', content: 'Error adding product. Please try again.' }]
+          })
+        }
+        pendingAddProductsRef.current = null
+        return
+      }
+      if (['no', 'n', 'cancel', 'stop'].includes(normalizedInput)) {
+        pendingAddProductsRef.current = null
+        setMessages(prev => [...prev, { type: 'assistant', content: 'Okay, cancelled. Share the corrected details and I will try again.' }])
+        return
+      }
+    }
+
+    if (pendingMissingProductsRef.current) {
+      const fieldUpdate = applyFieldUpdate(userInput, pendingMissingProductsRef.current)
+      if (fieldUpdate.updated) {
+        pendingMissingProductsRef.current = fieldUpdate.products
+        const preview = buildProductPreview(pendingMissingProductsRef.current)
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: `Updated ${fieldUpdate.field}. Review the values below:\n\n${preview}\n\nIf everything looks good, say: "search these on the web" or provide remaining fields.`
+        }])
+        return
+      }
+      if (normalizedInput.includes('search') && (normalizedInput.includes('web') || normalizedInput.includes('online') || normalizedInput.includes('google'))) {
+        await runWebSearchForMissingProducts()
+        return
+      }
+      if (['no', 'n', 'cancel', 'stop'].includes(normalizedInput)) {
+        pendingMissingProductsRef.current = null
+        setMessages(prev => [...prev, { type: 'assistant', content: 'Okay, cancelled. Share the corrected details and I will try again.' }])
+        return
+      }
+    }
+
     // Try to parse using GPT-4o-mini first, fallback to rule-based parsing
     let dateRange = null
     let parsedIntent = null
     let parsedCustomer = null
     let parsedBrand = null
     let parsedRetailer = null
+    let rawGptParsed = null
     
     try {
       console.log('🤖 Attempting GPT-4o-mini parsing...')
@@ -1940,8 +2341,9 @@ const CommandInterface = ({
         })
       })
       
-      if (parseResponse.ok) {
+        if (parseResponse.ok) {
         const parseData = await parseResponse.json()
+        rawGptParsed = parseData.parsed
         console.log('✅ GPT parsing successful:', parseData.parsed)
         
         if (parseData.parsed.startDate && parseData.parsed.endDate) {
@@ -2076,6 +2478,7 @@ const CommandInterface = ({
           
           let clarificationMessage = ''
           let suggestions = []
+          let shouldReturnClarification = true
           
           if (parseData.parsed.clarificationNeeded === 'date_range') {
             clarificationMessage = "I'd be happy to help! Could you please specify a date range or time period?\n\nFor example, you can ask for:"
@@ -2101,21 +2504,33 @@ const CommandInterface = ({
               "Tito's",
               'Grey Goose'
             ]
-          }
-          
-          const clarificationResponse = {
-            type: 'assistant',
-            content: clarificationMessage,
-            data: {
-              type: 'clarification',
-              clarificationNeeded: parseData.parsed.clarificationNeeded,
-              suggestions: suggestions,
-              originalQuery: userInput // Store original query in the message data
+          } else if (parseData.parsed.clarificationNeeded === 'product_upc') {
+            const { missingName } = parseAddProductRequest(userInput, parseData.parsed)
+            if (!missingName) {
+              shouldReturnClarification = false
+              console.log('✅ Product name provided; searching without UPC.')
+            } else {
+              clarificationMessage = "I'd be happy to add the product. Please share the UPC."
             }
+          } else if (parseData.parsed.clarificationNeeded === 'product_name') {
+            clarificationMessage = "I'd be happy to add the product. Please share the product name."
           }
-          
-          setMessages(prev => [...prev, clarificationResponse])
-          return // Exit early - don't process further
+
+          if (shouldReturnClarification) {
+            const clarificationResponse = {
+              type: 'assistant',
+              content: clarificationMessage,
+              data: {
+                type: 'clarification',
+                clarificationNeeded: parseData.parsed.clarificationNeeded,
+                suggestions: suggestions,
+                originalQuery: userInput // Store original query in the message data
+              }
+            }
+            
+            setMessages(prev => [...prev, clarificationResponse])
+            return // Exit early - don't process further
+          }
         } else if (parseData.parsed.needsClarification && (isAOVRetailerWithDate || isBrandWithDate)) {
           console.log('✅ AOV+retailer query with date range - proceeding despite clarification flag')
         }
@@ -2127,6 +2542,95 @@ const CommandInterface = ({
       }
     } catch (error) {
       console.log('⚠️ GPT parsing error, using fallback:', error.message)
+    }
+    
+    const lowerInput = userInput.toLowerCase()
+    const isAddProductIntent = parsedIntent === 'add_product' || lowerInput.includes('add product')
+    if (isAddProductIntent) {
+      const { products, missingUpc, missingName } = parseAddProductRequest(userInput, rawGptParsed)
+      if (missingUpc && !missingName) {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: 'UPC not provided. I will search the web by product name.'
+        }])
+      }
+      if (missingUpc && missingName) {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: 'Please provide the UPC or the product name so I can search.'
+        }])
+        return
+      }
+
+      const loadingMessage = {
+        type: 'assistant',
+        content: `🔎 Searching the web for ${products.length} product${products.length === 1 ? '' : 's'}...`,
+        loading: true
+      }
+      setMessages(prev => [...prev, loadingMessage])
+
+      try {
+        const response = await apiFetch('/api/products/enrich-from-upc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ products })
+        })
+        const data = await response.json()
+        const results = Array.isArray(data.results) ? data.results : []
+        const searchEnabled = data.searchEnabled !== false
+        const readyToAdd = results.every(result => result.success)
+        const previewLines = results.map(result => {
+          if (!result.payload) {
+            return `• ${result.upc || 'Unknown UPC'} — No data`
+          }
+          const payload = result.payload
+          const missing = Array.isArray(result.missingFields) && result.missingFields.length > 0
+            ? `Missing: ${result.missingFields.join(', ')}`
+            : 'All fields present'
+          return `• ${payload.upc} — ${payload.name || 'Unnamed product'} (${missing})`
+        })
+
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.loading)
+          if (!readyToAdd) {
+            const payloads = results.map(result => result.payload).filter(Boolean)
+            pendingMissingProductsRef.current = payloads
+            return [...filtered, {
+              type: 'assistant',
+              content: [
+                'Unable to proceed because some fields are missing:',
+                ...previewLines,
+                searchEnabled
+                  ? 'If you want to try again, say: "search these on the web".'
+                  : 'Web search is not configured. Please add SERPAPI_API_KEY or provide the missing fields.'
+              ].join('\n'),
+              pendingProducts: payloads
+            }]
+          }
+          pendingMissingProductsRef.current = null
+          const payloads = results.map(result => result.payload).filter(Boolean)
+          const preview = buildProductPreview(payloads)
+          return [...filtered, {
+            type: 'assistant',
+            content: ['Here are the values I found:', preview, 'Review the fields below and click Add Product when ready.'].join('\n'),
+            pendingProducts: payloads
+          }]
+        })
+
+        if (readyToAdd) {
+          pendingAddProductsRef.current = results.map(result => result.payload)
+        }
+      } catch (error) {
+        console.error('Error adding product:', error)
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.loading)
+          return [...filtered, {
+            type: 'assistant',
+            content: 'Error searching product details. Please try again.'
+          }]
+        })
+      }
+      return
     }
     
     // Fallback to rule-based parsing if GPT didn't work
@@ -2405,7 +2909,7 @@ const CommandInterface = ({
         console.log('🗺️  Fetching state-enriched data for state-based query (single API call)...')
         // Fetch directly from state-enriched endpoint
         const timestamp = Date.now()
-        fetch(`/api/orders-with-state?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}`)
+        fetch(`/api/orders-with-state?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}&t=${timestamp}`)
           .then(res => res.json())
           .then(data => {
             if (data.data && Array.isArray(data.data)) {
@@ -2561,16 +3065,16 @@ const CommandInterface = ({
               <div key={index} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-lg p-4 ${
                   message.type === 'user' 
-                    ? 'bg-blue-600 text-white shadow-sm' 
+                    ? 'bg-bevvi-primary-600 text-white shadow-sm' 
                     : 'bg-white border border-gray-300 shadow-sm text-gray-900'
                 }`}>
                   {message.loading ? (
                     <div className="flex items-center space-x-2">
                       <p className="text-sm leading-relaxed">{message.content}</p>
                       <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                        <div className="w-2 h-2 bg-bevvi-primary-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                        <div className="w-2 h-2 bg-bevvi-primary-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                        <div className="w-2 h-2 bg-bevvi-primary-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                       </div>
                     </div>
                   ) : (
@@ -2718,6 +3222,83 @@ const CommandInterface = ({
                   </div>
                 </div>
               )}
+
+              {message.pendingProducts && message.pendingProducts.length > 0 && (
+                <div className="mt-3 bg-amber-50 rounded-lg p-3 border border-amber-200">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center">
+                      <Package className="h-4 w-4 text-amber-600 mr-1" />
+                      <span className="text-xs font-medium text-amber-800">Product details from search</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        pendingMissingProductsRef.current = message.pendingProducts
+                        runWebSearchForMissingProducts()
+                      }}
+                      disabled={isProductSearching}
+                      className="text-xs font-medium text-amber-700 hover:text-amber-900 disabled:opacity-60"
+                    >
+                      {isProductSearching ? 'Searching...' : 'Search web again'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {message.pendingProducts.map((product, idx) => {
+                      const missingFields = getMissingRequiredFields(product)
+                      return (
+                        <div key={idx} className="bg-white rounded border border-amber-100 p-3 text-sm">
+                          <div className="font-medium text-amber-900 mb-2">Product {idx + 1}: {product.name || product.upc || 'Unnamed'}</div>
+                          {missingFields.length > 0 && (
+                            <div className="mb-3 text-xs text-amber-700">
+                              Missing required: {missingFields.join(', ')}
+                            </div>
+                          )}
+                          <div className="grid grid-cols-1 gap-2">
+                            {[...requiredAddProductFields, ...optionalAddProductFields].map(field => {
+                              const label = field.replace(/([A-Z])/g, ' $1').replace(/^./, s => s.toUpperCase()).trim()
+                              const value = product?.[field] ?? ''
+                              const isLong = ['description', 'productNotes', 'aroma', 'flavor'].includes(field)
+                              return (
+                                <label key={field} className="text-xs text-gray-700">
+                                  <span className="block mb-1 font-medium">
+                                    {label}{requiredAddProductFields.includes(field) ? ' *' : ''}
+                                  </span>
+                                  {isLong ? (
+                                    <textarea
+                                      value={value}
+                                      onChange={(e) => handlePendingProductFieldChange(index, idx, field, e.target.value)}
+                                      className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                                      rows={2}
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={value}
+                                      onChange={(e) => handlePendingProductFieldChange(index, idx, field, e.target.value)}
+                                      className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                                    />
+                                  )}
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddProductClick(message.pendingProducts)}
+                    disabled={isProductSaving || message.pendingProducts.some(product => getMissingRequiredFields(product).length > 0)}
+                    className="mt-3 flex items-center gap-2 px-4 py-2 bg-bevvi-primary-600 text-white text-sm font-medium rounded-md hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    <Plus className="w-4 h-4" />
+                    {isProductSaving ? 'Saving...' : 'Add Product to Bevvi'}
+                  </button>
+                </div>
+              )}
               
               {message.data && message.data.type === 'statusBreakdown' && (
                 <div className="mt-3 bg-gradient-to-br from-purple-50 to-pink-50 rounded-lg p-3 border border-purple-200">
@@ -2749,9 +3330,9 @@ const CommandInterface = ({
                       </div>
                     )}
                     {message.data.delivered > 0 && (
-                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-blue-50 rounded border border-blue-200">
+                      <div className="flex justify-between items-center text-sm py-1 px-2 bg-bevvi-primary-50 rounded border border-bevvi-primary-200">
                         <span className="text-gray-700">📦 Delivered:</span>
-                        <span className="font-semibold text-blue-900">{formatNumber(message.data.delivered)}</span>
+                        <span className="font-semibold text-bevvi-primary-900">{formatNumber(message.data.delivered)}</span>
                       </div>
                     )}
                     {message.data.other > 0 && (
@@ -2765,17 +3346,17 @@ const CommandInterface = ({
               )}
               
               {message.data && message.data.type === 'clarification' && (
-                <div className="mt-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                <div className="mt-3 bg-gradient-to-br from-bevvi-primary-50 to-bevvi-primary-100 rounded-lg p-4 border border-bevvi-primary-200">
                   <div className="flex items-center mb-3">
-                    <Sparkles className="h-5 w-5 text-blue-600 mr-2" />
-                    <span className="text-sm font-medium text-blue-800">Quick Suggestions</span>
+                    <Sparkles className="h-5 w-5 text-bevvi-primary-600 mr-2" />
+                    <span className="text-sm font-medium text-bevvi-primary-800">Quick Suggestions</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {message.data.suggestions.map((suggestion, idx) => (
                       <button
                         key={idx}
                         onClick={() => handleSuggestionClick(suggestion, message.data.originalQuery)}
-                        className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-white hover:bg-blue-100 border border-blue-300 rounded-lg transition-colors duration-150 ease-in-out hover:border-blue-400 hover:shadow-sm"
+                        className="px-3 py-1.5 text-sm font-medium text-bevvi-primary-700 bg-white hover:bg-bevvi-primary-100 border border-bevvi-primary-300 rounded-lg transition-colors duration-150 ease-in-out hover:border-bevvi-primary-400 hover:shadow-sm"
                       >
                         {suggestion}
                       </button>
@@ -2785,27 +3366,27 @@ const CommandInterface = ({
               )}
               
               {message.data && message.data.type === 'monthBreakdown' && (
-                <div className="mt-3 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-3 border border-blue-200">
+                <div className="mt-3 bg-gradient-to-br from-bevvi-primary-50 to-bevvi-primary-100 rounded-lg p-3 border border-bevvi-primary-200">
                   <div className="flex items-center mb-2">
-                    <Calendar className="h-4 w-4 text-blue-600 mr-1" />
-                    <span className="text-xs font-medium text-blue-800">
+                    <Calendar className="h-4 w-4 text-bevvi-primary-600 mr-1" />
+                    <span className="text-xs font-medium text-bevvi-primary-800">
                       {message.data.breakdownType === 'revenue' ? 'Revenue by Month' : 'Tax by Month'}
                     </span>
                   </div>
                   <div className="space-y-2">
                     {message.data.months.map((monthData, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-blue-100">
+                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-bevvi-primary-100">
                         <div className="flex items-center">
                           <span className="text-gray-700 font-medium mr-2">{idx + 1}.</span>
                           <span className="text-gray-900 font-semibold">{monthData.month}</span>
                           <span className="text-gray-500 text-xs ml-2">({formatNumber(monthData.count)} orders)</span>
                         </div>
-                        <span className="font-bold text-blue-900">{formatDollarAmount(monthData.revenue)}</span>
+                        <span className="font-bold text-bevvi-primary-900">{formatDollarAmount(monthData.revenue)}</span>
                       </div>
                     ))}
-                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-blue-200">
+                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-bevvi-primary-200">
                       <span className="text-gray-700 font-bold">Total ({formatNumber(message.data.orderCount)} orders):</span>
-                      <span className="font-bold text-blue-900 text-base">{formatDollarAmount(message.data.total)}</span>
+                      <span className="font-bold text-bevvi-primary-900 text-base">{formatDollarAmount(message.data.total)}</span>
                     </div>
                   </div>
                 </div>
@@ -2893,11 +3474,11 @@ const CommandInterface = ({
               
               {/* Data Display - Brand/Store Breakdown */}
               {message.data && message.data.type === 'brandBreakdown' && (
-                <div className="mt-3 rounded-lg p-3 border bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                <div className="mt-3 rounded-lg p-3 border bg-gradient-to-br from-bevvi-primary-50 to-bevvi-primary-100 border-bevvi-primary-200">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center">
-                      <TrendingUp className="h-4 w-4 mr-1 text-blue-600" />
-                      <span className="text-xs font-medium text-blue-800">
+                      <TrendingUp className="h-4 w-4 mr-1 text-bevvi-primary-600" />
+                      <span className="text-xs font-medium text-bevvi-primary-800">
                         {message.data.totalBrands ? 'Revenue by Brand' : 'Revenue by Store/Retailer'}
                       </span>
                     </div>
@@ -2909,7 +3490,7 @@ const CommandInterface = ({
                   </div>
                   <div className="space-y-2">
                     {message.data.brands.map((brandData, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-blue-100">
+                      <div key={idx} className="flex justify-between items-center text-sm py-1.5 px-2 bg-white rounded border border-bevvi-primary-100">
                         <div className="flex items-center">
                           <span className="text-gray-700 font-medium mr-2">{idx + 1}.</span>
                           <span className="text-gray-900 font-semibold">{brandData.brand}</span>
@@ -2918,17 +3499,17 @@ const CommandInterface = ({
                             {brandData.itemCount && `, ${formatNumber(brandData.itemCount)} bottles`})
                           </span>
                         </div>
-                        <span className="font-bold text-blue-900">{formatDollarAmount(brandData.revenue)}</span>
+                        <span className="font-bold text-bevvi-primary-900">{formatDollarAmount(brandData.revenue)}</span>
                       </div>
                     ))}
-                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-blue-200">
+                    <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-bevvi-primary-200">
                       <span className="text-gray-700 font-bold">
                         Total:
                       </span>
-                      <span className="font-bold text-base text-blue-900">{formatDollarAmount(message.data.total)}</span>
+                      <span className="font-bold text-base text-bevvi-primary-900">{formatDollarAmount(message.data.total)}</span>
                     </div>
                     {message.data.unknownRevenue > 0 && (
-                      <div className="text-xs text-gray-600 mt-2 pt-2 border-t border-blue-100">
+                      <div className="text-xs text-gray-600 mt-2 pt-2 border-t border-bevvi-primary-100">
                         <span className="italic">
                           Note: {formatDollarAmount(message.data.unknownRevenue)} from products without brand information (excluded from breakdown)
                         </span>
@@ -2939,11 +3520,11 @@ const CommandInterface = ({
               )}
               
               {message.data && message.data.type === 'orders' && message.data.orders.length > 0 && (
-                <div className="mt-3 -mx-4 bg-blue-50 rounded-lg p-3 border border-blue-200">
+                <div className="mt-3 -mx-4 bg-bevvi-primary-50 rounded-lg p-3 border border-bevvi-primary-200">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center">
-                      <Package className="h-4 w-4 text-blue-600 mr-1" />
-                      <span className="text-xs font-medium text-blue-800">
+                      <Package className="h-4 w-4 text-bevvi-primary-600 mr-1" />
+                      <span className="text-xs font-medium text-bevvi-primary-800">
                         {message.data.customerName 
                           ? (expandedOrders[index] 
                               ? `All ${message.data.orderType || 'Orders'} for ${message.data.customerName} (${message.data.total})`
@@ -2988,7 +3569,7 @@ const CommandInterface = ({
                         link.click()
                         document.body.removeChild(link)
                       }}
-                      className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-blue-700 hover:text-blue-900 bg-blue-100 hover:bg-blue-200 rounded transition-colors"
+                      className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-bevvi-primary-700 hover:text-bevvi-primary-900 bg-bevvi-primary-100 hover:bg-bevvi-primary-200 rounded transition-colors"
                       title="Download as CSV"
                     >
                       <Download className="h-3 w-3" />
@@ -2997,7 +3578,7 @@ const CommandInterface = ({
                   </div>
                   <div className="space-y-1">
                     {/* Header Row */}
-                    <div className="text-xs bg-gray-50 rounded px-2 py-1.5 border border-blue-200 font-mono font-semibold">
+                    <div className="text-xs bg-gray-50 rounded px-2 py-1.5 border border-bevvi-primary-200 font-mono font-semibold">
                       <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr] gap-2 items-center">
                         <div className="text-gray-600">Order ID</div>
                         <div className="text-gray-600">Customer</div>
@@ -3008,7 +3589,7 @@ const CommandInterface = ({
                     </div>
                     {/* Order Rows */}
                     {(expandedOrders[index] ? message.data.orders : message.data.orders.slice(0, 10)).map((order, idx) => (
-                      <div key={idx} className="text-xs bg-white rounded px-2 py-1.5 border border-blue-100 font-mono">
+                      <div key={idx} className="text-xs bg-white rounded px-2 py-1.5 border border-bevvi-primary-100 font-mono">
                         <div className="grid grid-cols-[2fr_2fr_1.5fr_1fr_1.2fr] gap-2 items-center">
                           <div className="font-semibold text-gray-900 truncate" title={order.ordernum || order.id}>
                             {order.ordernum || order.id}
@@ -3016,7 +3597,7 @@ const CommandInterface = ({
                           <div className="text-gray-700 truncate" title={order.customerName}>
                             {order.customerName}
                           </div>
-                          <div className="text-blue-700 font-semibold text-right">
+                          <div className="text-bevvi-primary-700 font-semibold text-right">
                             {formatDollarAmount(order.total)}
                           </div>
                           <div className="text-gray-600 text-center">
@@ -3026,7 +3607,7 @@ const CommandInterface = ({
                             order.status?.toLowerCase() === 'delivered' ? 'text-green-600' :
                             order.status?.toLowerCase() === 'pending' ? 'text-amber-600' :
                             order.status?.toLowerCase() === 'canceled' ? 'text-red-600' :
-                            order.status?.toLowerCase() === 'in_transit' ? 'text-blue-600' :
+                            order.status?.toLowerCase() === 'in_transit' ? 'text-bevvi-primary-600' :
                             'text-gray-600'
                           }`}>
                             {order.status}
@@ -3038,7 +3619,7 @@ const CommandInterface = ({
                       <button
                         type="button"
                         onClick={() => setExpandedOrders(prev => ({ ...prev, [index]: !prev[index] }))}
-                        className="w-full text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-100 text-center py-2 rounded transition-colors duration-200"
+                        className="w-full text-xs text-bevvi-primary-600 hover:text-bevvi-primary-800 hover:bg-bevvi-primary-100 text-center py-2 rounded transition-colors duration-200"
                       >
                         {expandedOrders[index] 
                           ? 'Show less' 
@@ -3085,7 +3666,7 @@ const CommandInterface = ({
             </div>
           )}
           
-          <div className="relative bg-white rounded-lg border-2 border-blue-400 shadow-md hover:border-blue-500 hover:shadow-lg transition-all duration-200">
+          <div className="relative bg-white rounded-lg border-2 border-bevvi-primary-400 shadow-md hover:border-bevvi-primary-500 hover:shadow-lg transition-all duration-200">
             <input
               type="text"
               value={input}
@@ -3097,7 +3678,7 @@ const CommandInterface = ({
             <button
               type="submit"
               disabled={!input.trim() || isLoadingData}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-md flex items-center justify-center"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-2 bg-bevvi-primary-600 text-white rounded-md hover:bg-bevvi-primary-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 shadow-md flex items-center justify-center"
             >
               {isLoadingData ? (
                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -3114,7 +3695,7 @@ const CommandInterface = ({
             <button
               type="button"
               onClick={() => setInput('What is the revenue for this month so far?')}
-              className="text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs text-blue-700 hover:text-blue-800 transition-all duration-200 border border-blue-200 hover:border-blue-300"
+              className="text-left px-3 py-2 bg-bevvi-primary-50 hover:bg-bevvi-primary-100 rounded-lg text-xs text-bevvi-primary-700 hover:text-bevvi-primary-800 transition-all duration-200 border border-bevvi-primary-200 hover:border-bevvi-primary-300"
             >
               Month To Date Revenue
             </button>

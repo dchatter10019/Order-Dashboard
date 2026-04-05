@@ -74,14 +74,14 @@ const MainDashboard = ({ onLogout }) => {
             <div className="flex items-center space-x-2">
               <button
                 onClick={onLogout}
-                className="hidden md:flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="hidden md:flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500"
               >
                 <LogOut className="w-4 h-4 mr-2" />
                 Logout
               </button>
               <button
                 onClick={() => setIsMobileMenuOpen(prev => !prev)}
-                className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500"
                 aria-label="Toggle navigation menu"
               >
                 {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -104,7 +104,7 @@ const MainDashboard = ({ onLogout }) => {
               <span className="text-base font-semibold text-gray-900">Navigation</span>
               <button
                 onClick={() => setIsMobileMenuOpen(false)}
-                className="inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                className="inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500"
                 aria-label="Close navigation menu"
               >
                 <X className="w-5 h-5" />
@@ -123,7 +123,7 @@ const MainDashboard = ({ onLogout }) => {
                       }}
                       className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium ${
                         activeTab === tab.id
-                          ? 'bg-blue-50 text-blue-700'
+                          ? 'bg-bevvi-primary-50 text-bevvi-primary-700'
                           : 'text-gray-700 hover:bg-gray-50'
                       }`}
                     >
@@ -166,7 +166,7 @@ const MainDashboard = ({ onLogout }) => {
                   onClick={() => setActiveTab(tab.id)}
                   className={`py-4 px-1 border-b-2 font-medium text-sm ${
                     activeTab === tab.id
-                      ? 'border-blue-500 text-blue-600'
+                      ? 'border-bevvi-primary-600 text-bevvi-primary-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >

@@ -57,7 +57,8 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
       
       // Use state-enriched endpoint only when explicitly requested
       const endpoint = useStateEnrichment ? '/api/orders-with-state' : '/api/orders'
-      const apiUrl = `${endpoint}?startDate=${requestedRange.startDate}&endDate=${requestedRange.endDate}&t=${timestamp}&r=${randomId}`
+      const clientTz = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)
+      const apiUrl = `${endpoint}?startDate=${requestedRange.startDate}&endDate=${requestedRange.endDate}&timeZone=${clientTz}&t=${timestamp}&r=${randomId}`
       
       const response = await fetch(apiUrl)
       const data = await response.json()
@@ -156,7 +157,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
     <div className="bg-gray-50 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
         {/* Gradient Header Banner */}
-        <div className="mb-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-t-xl p-3 shadow-lg">
+        <div className="mb-3 bg-gradient-to-r from-bevvi-primary-700 to-bevvi-primary-500 rounded-t-xl p-3 shadow-lg">
           <div className="flex items-center">
             <div className="mr-3">
               <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -165,7 +166,7 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
             </div>
             <div>
               <h1 className="text-lg font-bold text-white">AI Order Assistant</h1>
-              <p className="text-blue-100 text-xs">Ask me anything about your orders in natural language</p>
+              <p className="text-bevvi-primary-100 text-xs">Ask me anything about your orders in natural language</p>
             </div>
           </div>
         </div>

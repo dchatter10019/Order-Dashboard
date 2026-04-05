@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { Store, Calendar, RefreshCw, Download, ChevronUp, ChevronDown, FileSpreadsheet } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
+import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
 import * as XLSX from 'xlsx'
 
 const RetailerManagement = () => {
@@ -36,7 +37,12 @@ const RetailerManagement = () => {
       return 0.08
     }
     
-    // Priority 2: 10% Retailer List Rule
+    // Priority 2: Total Wine Manual (0%)
+    if (normalizedRetailer === 'total wine manual') {
+      return 0
+    }
+    
+    // Priority 3: 10% Retailer List Rule
     const tenPercentRetailers = [
       'wine & spirits market',
       'freshco',
@@ -51,29 +57,36 @@ const RetailerManagement = () => {
       'wine & spirits discount warehouse',
       'youbooze',
       'garfields beverage',
-      'royal wines & spirits',
-      'sundance liquor & gifts'
+      'royal wines & spirits'
     ]
     if (tenPercentRetailers.includes(normalizedRetailer)) {
       return 0.10
     }
     
-    // Priority 3: Ashburn Wine Shop Rule (15%)
-    if (normalizedRetailer === 'ashburn wine shop') {
+    // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
+    const fifteenPercentRetailers = [
+      'ashburn wine shop',
+      'rezerve wine & spirits',
+      'san_point-loma_446',
+      'sea_southcenter_596',
+      'pit_pittsburgh_294',
+      'mia_miami_183'
+    ]
+    if (fifteenPercentRetailers.includes(normalizedRetailer)) {
       return 0.15
     }
     
-    // Priority 4: Sendoso Customer Rule (12%)
+    // Priority 5: Sendoso Customer Rule (12%)
     if (normalizedCustomer === 'sendoso') {
       return 0.12
     }
     
-    // Priority 5: In Good Taste Wines Rule (25%)
+    // Priority 6: In Good Taste Wines Rule (25%)
     if (normalizedRetailer === 'in good taste wines') {
       return 0.25
     }
     
-    // Priority 6: Default Rule (20%)
+    // Priority 7: Default Rule (20%)
     return 0.20
   }
 
@@ -86,12 +99,32 @@ const RetailerManagement = () => {
     if (revenue === 0) {
       return { serviceFee: 0, retailerFee: 0 }
     }
+
+    const normalizedCustomer = customer.toLowerCase()
+    const establishmentKey = normalizeEstablishmentForFees(retailer)
+    const serviceFee = parseFloat(order.serviceCharge) || 0
+    if (normalizedCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
+      return { serviceFee, retailerFee: FLAT_RETAILER_FEES_USD[establishmentKey] }
+    }
     
     const feeRate = calculateFeeRate(retailer, customer)
     const retailerFee = Math.round(revenue * feeRate * 100) / 100
-    const serviceFee = parseFloat(order.serviceCharge) || 0
     
     return { serviceFee, retailerFee }
+  }
+
+  /** Human-readable retailer-fee rule per order (must stay aligned with calculateOrderFees). */
+  const getOrderRetailerFeeLabel = (order) => {
+    const retailer = (order.establishment || '').trim()
+    const customer = (order.customerName || '').trim()
+    const normC = customer.toLowerCase()
+    const estKey = normalizeEstablishmentForFees(retailer)
+    if (normC === 'vistajet') return '8%'
+    if (normC !== 'vistajet' && FLAT_RETAILER_FEES_USD[estKey] != null) {
+      return `$${FLAT_RETAILER_FEES_USD[estKey]} / order`
+    }
+    const rate = calculateFeeRate(retailer, customer)
+    return `${Math.round(rate * 100)}%`
   }
 
   // Filter orders by date range and exclude pending/cancelled/rejected
@@ -146,13 +179,19 @@ const RetailerManagement = () => {
     })
 
     // Convert map to array and round values
-    return Array.from(retailerMap.values()).map(retailer => ({
-      ...retailer,
-      gmv: Math.round(retailer.gmv * 100) / 100,
-      serviceFee: Math.round(retailer.serviceFee * 100) / 100,
-      retailerFee: Math.round(retailer.retailerFee * 100) / 100,
-      totalCharges: Math.round(retailer.totalCharges * 100) / 100
-    }))
+    return Array.from(retailerMap.values()).map(retailer => {
+      const labelSet = new Set()
+      retailer.orders.forEach(order => labelSet.add(getOrderRetailerFeeLabel(order)))
+      const feeRuleSummary = [...labelSet].sort().join(', ') || '—'
+      return {
+        ...retailer,
+        feeRuleSummary,
+        gmv: Math.round(retailer.gmv * 100) / 100,
+        serviceFee: Math.round(retailer.serviceFee * 100) / 100,
+        retailerFee: Math.round(retailer.retailerFee * 100) / 100,
+        totalCharges: Math.round(retailer.totalCharges * 100) / 100
+      }
+    })
   }, [filteredOrders])
 
   // Sort retailer data
@@ -183,8 +222,8 @@ const RetailerManagement = () => {
       return <ChevronUp className="h-4 w-4 text-gray-400" />
     }
     return sortConfig.direction === 'asc' 
-      ? <ChevronUp className="h-4 w-4 text-blue-600" />
-      : <ChevronDown className="h-4 w-4 text-blue-600" />
+      ? <ChevronUp className="h-4 w-4 text-bevvi-primary-600" />
+      : <ChevronDown className="h-4 w-4 text-bevvi-primary-600" />
   }
 
   // Fetch orders function
@@ -210,7 +249,8 @@ const RetailerManagement = () => {
       
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
-      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
+      const clientTz = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)
+      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&timeZone=${clientTz}&t=${timestamp}&r=${randomId}`
       console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
       
       const response = await fetch(apiUrl)
@@ -309,14 +349,20 @@ const RetailerManagement = () => {
   // Determine fee rate based on retailer and customer
   const determineFeeRate = (retailer, customer) => {
     const normalizedCustomer = (customer || '').trim().toLowerCase()
-    const normalizedRetailer = (retailer || '').trim()
+    const retailerTrim = (retailer || '').trim()
+    const retailerLower = retailerTrim.toLowerCase()
     
     // Priority 1: VistaJet Customer Rule (8%)
     if (normalizedCustomer === 'vistajet') {
       return 0.08
     }
     
-    // Priority 2: 10% Retailer List Rule
+    // Priority 2: Total Wine Manual (0%)
+    if (retailerLower === 'total wine manual') {
+      return 0
+    }
+    
+    // Priority 3: 10% Retailer List Rule
     const tenPercentRetailers = [
       'Wine & Spirits Market',
       'Freshco',
@@ -331,24 +377,36 @@ const RetailerManagement = () => {
       'Wine & Spirits Discount Warehouse',
       'Youbooze',
       'Garfields Beverage',
-      'ROYAL WINES & SPIRITS',
-      'Sundance Liquor & Gifts'
+      'ROYAL WINES & SPIRITS'
     ]
-    if (tenPercentRetailers.includes(normalizedRetailer)) {
+    if (tenPercentRetailers.includes(retailerTrim)) {
       return 0.10
     }
     
-    // Priority 3: Sendoso Customer Rule (12%)
+    // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
+    const fifteenPercentRetailers = [
+      'ashburn wine shop',
+      'rezerve wine & spirits',
+      'san_point-loma_446',
+      'sea_southcenter_596',
+      'pit_pittsburgh_294',
+      'mia_miami_183'
+    ]
+    if (fifteenPercentRetailers.includes(retailerLower)) {
+      return 0.15
+    }
+    
+    // Priority 5: Sendoso Customer Rule (12%)
     if (normalizedCustomer === 'sendoso') {
       return 0.12
     }
     
-    // Priority 4: In Good Taste Wines Rule (25%)
-    if (normalizedRetailer === 'In Good Taste Wines') {
+    // Priority 6: In Good Taste Wines Rule (25%)
+    if (retailerTrim === 'In Good Taste Wines') {
       return 0.25
     }
     
-    // Priority 5: Default Rule (20%)
+    // Priority 7: Default Rule (20%)
     return 0.20
   }
 
@@ -372,8 +430,17 @@ const RetailerManagement = () => {
       // Prepare transaction data for this retailer only
       const transactions = retailerOrders.map(order => {
         const subtotal = parseFloat(order.revenue) || 0
+        const normCustomer = (order.customerName || '').trim().toLowerCase()
+        const establishmentKey = normalizeEstablishmentForFees(order.establishment)
         const feeRate = determineFeeRate(order.establishment, order.customerName)
-        const serviceFee = Math.round(subtotal * feeRate * 100) / 100
+        let serviceFee = 0
+        if (subtotal > 0) {
+          if (normCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
+            serviceFee = FLAT_RETAILER_FEES_USD[establishmentKey]
+          } else {
+            serviceFee = Math.round(subtotal * feeRate * 100) / 100
+          }
+        }
         const serviceFeeTax = Math.round(serviceFee * 0.0875 * 100) / 100
         const total = Math.round((subtotal + serviceFee + serviceFeeTax) * 100) / 100
 
@@ -614,9 +681,10 @@ const RetailerManagement = () => {
 
   // CSV download handler
   const handleDownloadCSV = () => {
-    const headers = ['Retailer', 'GMV', 'Service Fee', 'Retailer Fee', 'Total Charges', 'Order Count']
+    const headers = ['Retailer', 'Retailer Fee Rate', 'GMV', 'Service Fee', 'Retailer Fee', 'Total Charges', 'Order Count']
     const rows = sortedRetailerData.map(retailer => [
       retailer.retailerName,
+      retailer.feeRuleSummary,
       retailer.gmv.toFixed(2),
       retailer.serviceFee.toFixed(2),
       retailer.retailerFee.toFixed(2),
@@ -627,6 +695,7 @@ const RetailerManagement = () => {
     // Add totals row
     rows.push([
       'TOTAL',
+      '',
       totals.gmv.toFixed(2),
       totals.serviceFee.toFixed(2),
       totals.retailerFee.toFixed(2),
@@ -678,7 +747,7 @@ const RetailerManagement = () => {
         <div className={`bg-white rounded-lg shadow transition-all duration-300 mb-6 ${collapsedFilters.dateRange ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <div className="flex items-center">
-              <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-1.5 sm:mr-2" />
+              <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-bevvi-primary-600 mr-1.5 sm:mr-2" />
               <h3 className="text-sm sm:text-lg font-medium text-gray-900">Date Range</h3>
             </div>
             <button
@@ -704,12 +773,12 @@ const RetailerManagement = () => {
 
         {/* Loading Overlay */}
         {isLoading && (
-          <div className="fixed inset-0 bg-gradient-to-br from-blue-900 to-blue-800 bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-lg mx-4 border-4 border-blue-500">
+          <div className="fixed inset-0 bg-gradient-to-br from-bevvi-primary-900 to-bevvi-primary-800 bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-lg mx-4 border-4 border-bevvi-primary-500">
               <div className="flex flex-col items-center">
                 <div className="relative mb-6">
                   <div className="animate-spin rounded-full h-24 w-24 border-8 border-gray-200"></div>
-                  <div className="animate-spin rounded-full h-24 w-24 border-8 border-blue-600 border-t-transparent absolute top-0"></div>
+                  <div className="animate-spin rounded-full h-24 w-24 border-8 border-bevvi-primary-600 border-t-transparent absolute top-0"></div>
                 </div>
                 <h3 className="text-2xl font-bold text-gray-900 mb-3 animate-pulse">
                   🔄 Fetching Orders...
@@ -736,7 +805,7 @@ const RetailerManagement = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6">
             <div className="bg-white rounded-lg shadow p-4 sm:p-6">
               <div className="flex items-center mb-2">
-                <Store className="h-5 w-5 text-blue-600 mr-2" />
+                <Store className="h-5 w-5 text-bevvi-primary-600 mr-2" />
                 <p className="text-xs sm:text-sm font-medium text-gray-600">Total Retailers</p>
               </div>
               <p className="text-xl sm:text-2xl font-bold text-gray-900">{formatNumber(retailerData.length)}</p>
@@ -786,6 +855,16 @@ const RetailerManagement = () => {
                         <div className="flex items-center space-x-1">
                           <span>Retailer</span>
                           {getSortIcon('retailerName')}
+                        </div>
+                      </th>
+                      <th 
+                        className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('feeRuleSummary')}
+                        title="Retailer fee as % of revenue, or flat per order (see fee rules). Multiple values if orders use different rules."
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Retailer Fee Rate</span>
+                          {getSortIcon('feeRuleSummary')}
                         </div>
                       </th>
                       <th 
@@ -844,6 +923,11 @@ const RetailerManagement = () => {
                         <td className="px-4 py-4 text-sm font-medium text-gray-900">
                           {retailer.retailerName}
                         </td>
+                        <td className="px-4 py-4 text-sm text-gray-700">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-100 text-gray-800 font-medium">
+                            {retailer.feeRuleSummary}
+                          </span>
+                        </td>
                         <td className="px-4 py-4 text-sm text-gray-900">
                           {formatDollarAmount(retailer.gmv)}
                         </td>
@@ -863,7 +947,7 @@ const RetailerManagement = () => {
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleChargeFees(retailer.retailerName)}
-                              className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-md hover:bg-blue-700 transition-colors"
+                              className="px-3 py-1.5 bg-bevvi-primary-600 text-white text-xs font-medium rounded-md hover:bg-bevvi-primary-700 transition-colors"
                             >
                               Charge Fees
                             </button>
@@ -881,6 +965,7 @@ const RetailerManagement = () => {
                     {/* Totals Row */}
                     <tr className="bg-gray-50 font-semibold">
                       <td className="px-4 py-4 text-sm text-gray-900">TOTAL</td>
+                      <td className="px-4 py-4 text-sm text-gray-500">—</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{formatDollarAmount(totals.gmv)}</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{formatDollarAmount(totals.serviceFee)}</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{formatDollarAmount(totals.retailerFee)}</td>
@@ -910,7 +995,7 @@ const RetailerManagement = () => {
             <button
               onClick={fetchOrders}
               disabled={isLoading}
-              className="w-full sm:w-auto px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full sm:w-auto px-4 py-2 text-sm bg-bevvi-primary-600 text-white rounded-lg hover:bg-bevvi-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Refreshing...' : 'Refresh Data'}
             </button>

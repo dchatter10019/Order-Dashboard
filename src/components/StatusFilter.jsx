@@ -14,7 +14,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
   return (
     <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
       <div className="flex items-center mb-4">
-        <Filter className="h-5 w-5 text-blue-600 mr-2" />
+        <Filter className="h-5 w-5 text-bevvi-primary-600 mr-2" />
         <h3 className="text-lg font-semibold text-gray-900">
           Status Filter
         </h3>
@@ -36,7 +36,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
                 onStatusFilterChange([])
               }
             }}
-            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+            className="h-4 w-4 text-bevvi-primary-600 focus:ring-bevvi-primary-500 border-gray-300 rounded"
           />
           <span className="ml-3 text-sm font-medium text-gray-700">
             Select All
@@ -61,7 +61,7 @@ const StatusFilter = ({ statusFilter, onStatusFilterChange }) => {
                   onStatusFilterChange(statusFilter.filter(item => item !== value))
                 }
               }}
-              className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              className="h-4 w-4 text-bevvi-primary-600 focus:ring-bevvi-primary-500 border-gray-300 rounded"
             />
             <span className="ml-3 text-sm text-gray-700 capitalize">
               {option.label.replace('_', ' ')}

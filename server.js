@@ -2,16 +2,144 @@ const express = require('express')
 const cors = require('cors')
 const axios = require('axios')
 const path = require('path')
-const crypto = require('crypto')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
+
+/** Calendar YYYY-MM-DD in a specific IANA zone (not server local / not raw UTC date). */
+const DEFAULT_ORDER_TIMEZONE = process.env.BEVVI_ORDER_TIMEZONE || 'America/New_York'
+
+function getYyyyMmDdInTimeZone(dateInput, timeZone = DEFAULT_ORDER_TIMEZONE) {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput)
+  if (isNaN(d.getTime())) return null
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(d)
+    const y = parts.find(p => p.type === 'year')?.value
+    const m = parts.find(p => p.type === 'month')?.value
+    const day = parts.find(p => p.type === 'day')?.value
+    if (!y || !m || !day) return null
+    return `${y}-${m}-${day}`
+  } catch (e) {
+    return null
+  }
+}
+
+function resolveOrderTimeZone(raw) {
+  if (!raw || typeof raw !== 'string') return DEFAULT_ORDER_TIMEZONE
+  const t = decodeURIComponent(raw.trim())
+  if (t.length > 80 || !/^[\w/+_-]+$/.test(t)) return DEFAULT_ORDER_TIMEZONE
+  try {
+    Intl.DateTimeFormat('en-US', { timeZone: t }).format(new Date(0))
+    return t
+  } catch {
+    return DEFAULT_ORDER_TIMEZONE
+  }
+}
+
+/**
+ * UTC epoch ms for a wall-clock moment YYYY-MM-DD H:M:S in an IANA timezone
+ * (used to turn the user's local calendar range into UTC bounds for the Bevvi CSV API).
+ */
+function zonedWallClockToUtcMs(dateStr, hour, minute, second, timeZone) {
+  const [Y, M, D] = dateStr.split('-').map(Number)
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  })
+
+  function wallAt(utcMs) {
+    const o = {}
+    for (const p of formatter.formatToParts(new Date(utcMs))) {
+      if (p.type !== 'literal') o[p.type] = parseInt(p.value, 10)
+    }
+    return o
+  }
+
+  function cmpWall(utcMs) {
+    const o = wallAt(utcMs)
+    if (o.year !== Y) return o.year - Y
+    if (o.month !== M) return o.month - M
+    if (o.day !== D) return o.day - D
+    if (o.hour !== hour) return o.hour - hour
+    if (o.minute !== minute) return o.minute - minute
+    return o.second - second
+  }
+
+  let lo = Date.UTC(Y, M - 1, D, 12, 0, 0) - 48 * 3600000
+  let hi = Date.UTC(Y, M - 1, D, 12, 0, 0) + 48 * 3600000
+
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    const c = cmpWall(mid)
+    if (c === 0) return mid
+    if (c < 0) lo = mid + 1
+    else hi = mid - 1
+  }
+  return Date.UTC(Y, M - 1, D, hour, minute, second)
+}
+
+/** Bevvi CSV API expects UTC calendar start/end; derive from user's local YYYY-MM-DD range in `timeZone`. */
+function bevviCsvUtcDateRange(startDate, endDate, timeZone) {
+  const startMs = zonedWallClockToUtcMs(startDate, 0, 0, 0, timeZone)
+  const endMs = zonedWallClockToUtcMs(endDate, 23, 59, 59, timeZone)
+  const utcStartString = new Date(startMs).toISOString().split('T')[0]
+  const utcEndString = new Date(endMs).toISOString().split('T')[0]
+  return utcStartString <= utcEndString
+    ? { utcStartString, utcEndString }
+    : { utcStartString: utcEndString, utcEndString: utcStartString }
+}
 
 const app = express()
 const PORT = process.env.PORT || 3001
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL
-const AFTERSHIP_API_KEY = process.env.AFTERSHIP_API_KEY
-const AFTERSHIP_WEBHOOK_SECRET = process.env.AFTERSHIP_WEBHOOK_SECRET
-const AFTERSHIP_API_BASE = process.env.AFTERSHIP_API_BASE || 'https://api.aftership.com/tracking/2026-01'
+const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY
+
+const OPTIONAL_PRODUCT_FIELDS = [
+  'imageFileName',
+  'brandLogo',
+  'industryRatings',
+  'sku'
+]
+
+const REQUIRED_PRODUCT_FIELDS = [
+  'upc',
+  'name',
+  'description',
+  'category',
+  'subcategory',
+  'varietal',
+  'region',
+  'appellation',
+  'country',
+  'abv',
+  'color',
+  'body',
+  'aroma',
+  'flavor',
+  'pairings',
+  'brandName',
+  'parentBrand',
+  'productNotes',
+  'year',
+  'size',
+  'units',
+  'companyName',
+  'lowestPrice',
+  'containerType',
+  'containerCount',
+  'averagePrice',
+  'slug'
+]
 
 // Initialize OpenAI client only when configured
 let openai = null
@@ -23,17 +151,6 @@ if (process.env.OPENAI_API_KEY) {
   console.warn('⚠️ OPENAI_API_KEY not set; AI parsing endpoint will be disabled.')
 }
 
-// Initialize AfterShip client only when configured
-const aftershipClient = AFTERSHIP_API_KEY
-  ? axios.create({
-      baseURL: AFTERSHIP_API_BASE,
-      headers: {
-        'Content-Type': 'application/json',
-        'as-api-key': AFTERSHIP_API_KEY
-      },
-      timeout: 10000
-    })
-  : null
 
 // Slack notifications state (in-memory)
 const slackNotificationState = new Map()
@@ -61,6 +178,545 @@ function formatSlackDateTime(dateTimeValue) {
   const parsed = new Date(dateTimeValue)
   if (isNaN(parsed.getTime())) return 'N/A'
   return parsed.toLocaleString()
+}
+
+function slugify(value) {
+  if (!value || typeof value !== 'string') return null
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/['"]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || null
+}
+
+function extractFilenameFromUrl(url) {
+  if (!url || typeof url !== 'string') return null
+  try {
+    const cleaned = url.split('?')[0]
+    const parts = cleaned.split('/')
+    const filename = parts[parts.length - 1]
+    return filename || null
+  } catch {
+    return null
+  }
+}
+
+function extractSizeUnitsFromName(name) {
+  if (!name || typeof name !== 'string') return null
+  const match = name.match(/\b(\d+(?:\.\d+)?)\s*(ml|mL|ML|l|L|oz|OZ|g|G|kg|KG|cl|CL|lt|LT)\b/)
+  if (!match) return null
+  return {
+    size: match[1],
+    units: match[2].toUpperCase()
+  }
+}
+
+function buildSerpCorpus(...chunks) {
+  const parts = []
+  const pushText = (value) => {
+    if (!value || typeof value !== 'string') return
+    parts.push(value)
+  }
+  const pushArray = (arr) => {
+    if (!Array.isArray(arr)) return
+    arr.forEach(item => {
+      if (typeof item === 'string') {
+        parts.push(item)
+      } else if (item && typeof item === 'object') {
+        pushText(item.title)
+        pushText(item.snippet)
+        pushText(item.snippet_highlighted_words?.join?.(' '))
+        pushText(item.content)
+        // Include pages from targeted searches (e.g. { field, query, results, pages })
+        if (Array.isArray(item.pages)) {
+          pushArray(item.pages)
+        }
+      }
+    })
+  }
+
+  chunks.forEach(chunk => {
+    if (!chunk) return
+    if (Array.isArray(chunk)) {
+      pushArray(chunk)
+      return
+    }
+    if (typeof chunk === 'string') {
+      parts.push(chunk)
+      return
+    }
+    if (typeof chunk === 'object') {
+      pushText(chunk.search_metadata?.status)
+      pushText(chunk.search_information?.query_displayed)
+      pushArray((chunk.organic_results || []).slice(0, 5))
+      pushArray((chunk.shopping_results || []).slice(0, 5))
+      pushArray((chunk.news_results || []).slice(0, 3))
+      pushArray((chunk.top_stories || []).slice(0, 3))
+      pushArray((chunk.images_results || []).slice(0, 3))
+      if (Array.isArray(chunk.pages)) {
+        pushArray(chunk.pages)
+      }
+    }
+  })
+
+  return parts.join(' ').slice(0, 15000)
+}
+
+function extractFieldsFromCorpus(corpus) {
+  if (!corpus || typeof corpus !== 'string') return {}
+
+  const extract = (pattern) => {
+    const match = corpus.match(pattern)
+    return match?.[1]?.trim() || null
+  }
+
+  const abvMatch = corpus.match(/(\d{1,2}(?:\.\d+)?)\s*%?\s*(?:abv|alc(?:\/vol)?|alcohol)\b/i)
+  const ratingMatch = corpus.match(/(\d{2,3})\s*(?:pts|points)\b/i)
+  const percentMatch = corpus.match(/(\d{1,2}(?:\.\d+)?)\s*%/i)
+  const countryMatch = corpus.match(/\b(United States|USA|France|Italy|Spain|Portugal|Germany|Austria|Greece|Argentina|Chile|Australia|New Zealand|South Africa|Canada|Mexico|Israel|Lebanon)\b/i)
+  const regionMatch = corpus.match(/\b(Napa Valley|Oakville|Sonoma County|Paso Robles|Santa Barbara County|Willamette Valley|Columbia Valley|Walla Walla|Bordeaux|Burgundy|Champagne|Rhone|Loire|Alsace|Mosel|Piedmont|Tuscany|Rioja|Priorat|Douro|Porto|Mendoza|Barossa|Marlborough)\b/i)
+  const ratingSources = [
+    'Wine Spectator',
+    'Wine Advocate',
+    'James Suckling',
+    'Decanter',
+    'Vinous',
+    'Jeb Dunnuck',
+    'Wine Enthusiast',
+    'The Wine Independent',
+    'Tastingbook',
+    'Robert Parker',
+    'Burghound',
+    'Jane Anson'
+  ]
+  const ratings = []
+  const ratingsRegex = new RegExp(`\\b(${ratingSources.join('|')})\\b[^0-9]{0,20}(\\d{2,3})\\b`, 'gi')
+  let ratingMatchIter = ratingsRegex.exec(corpus)
+  while (ratingMatchIter) {
+    ratings.push(`${ratingMatchIter[1]} ${ratingMatchIter[2]}`)
+    ratingMatchIter = ratingsRegex.exec(corpus)
+  }
+  const industryRatingsValue = ratings.length > 0
+    ? Array.from(new Set(ratings)).join('; ')
+    : (ratingMatch ? `${ratingMatch[1]} pts` : null)
+
+  return {
+    description: extract(/(?:description|overview|about|tasting\s+notes|notes)[:\s\-]+([a-z0-9\s,;'().-]{20,})/i),
+    appellation: extract(/appellation[:\s\-]+([a-z0-9\s'().-]+)/i),
+    region: extract(/region[:\s\-]+([a-z0-9\s'().-]+)/i) || (regionMatch ? regionMatch[1] : null),
+    country: extract(/country[:\s\-]+([a-z0-9\s'().-]+)/i) || (countryMatch ? countryMatch[1] : null),
+    abv: abvMatch ? abvMatch[1] : (percentMatch ? percentMatch[1] : null),
+    body: extract(/body[:\s\-]+([a-z0-9\s'().-]+)/i),
+    aroma: extract(/(?:aroma|nose)[:\s\-]+([a-z0-9\s,;'().-]+?)(?=\s+[a-z]+:|\s+flavor\b|$)/i),
+    flavor: extract(/flavor[:\s\-]+([a-z0-9\s'().-]+)/i),
+    pairings: extract(/pairings?[:\s\-]+([a-z0-9\s,;'().-]+)/i),
+    industryRatings: industryRatingsValue,
+    parentBrand: extract(/parent\s*brand[:\s\-]+([a-z0-9\s'().-]+)/i),
+    productNotes: extract(/(?:tasting\s+notes|notes)[:\s\-]+([a-z0-9\s,;'().-]+)/i) ||
+      extract(/(?:aromas?|flavors?)\s+(?:of|:)\s+([a-z0-9\s,;'().-]+)/i),
+    companyName: extract(/(?:producer|winery|company)[:\s\-]+([a-z0-9\s'().-]+)/i)
+  }
+}
+
+async function fetchUpcItemDb(upc) {
+  try {
+    const response = await axios.get('https://api.upcitemdb.com/prod/trial/lookup', {
+      params: { upc },
+      timeout: 10000,
+      headers: { 'Accept': 'application/json' }
+    })
+    return response.data || null
+  } catch (error) {
+    console.warn('⚠️ UPCitemdb lookup failed:', error.message)
+    return null
+  }
+}
+
+async function fetchSerpApiResults(query) {
+  if (!SERPAPI_API_KEY) {
+    console.warn('⚠️ SERPAPI_API_KEY not configured; web search disabled')
+    return {}
+  }
+  try {
+    console.log(`🔎 SerpAPI search: ${query}`)
+    const response = await axios.get('https://serpapi.com/search.json', {
+      params: {
+        engine: 'google',
+        q: query,
+        api_key: SERPAPI_API_KEY,
+        num: 10
+      },
+      timeout: 10000
+    })
+    return response.data || {}
+  } catch (error) {
+    console.warn('⚠️ SerpAPI search failed:', error.message)
+    return {}
+  }
+}
+
+function stripHtmlToText(html) {
+  if (!html || typeof html !== 'string') return ''
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+async function fetchSerpResultPages(serpData, limit = 1) {
+  const results = serpData?.organic_results || []
+  const pages = []
+  for (const result of results.slice(0, limit)) {
+    if (!result?.link) continue
+    try {
+      const response = await axios.get(result.link, { timeout: 8000 })
+      const text = stripHtmlToText(response.data || '')
+      pages.push({
+        url: result.link,
+        title: result.title || null,
+        snippet: result.snippet || null,
+        content: text.slice(0, 4000)
+      })
+    } catch (error) {
+      pages.push({
+        url: result.link,
+        title: result.title || null,
+        snippet: result.snippet || null,
+        content: null,
+        error: error.message
+      })
+    }
+  }
+  return pages
+}
+
+function buildFallbackProductData({ upc, name, upcData }) {
+  const item = upcData?.items?.[0] || null
+  const imageUrl = item?.images?.[0] || null
+  const inferredName = name || item?.title || null
+  const inferredSlug = slugify(inferredName)
+
+  return {
+    upc: upc || null,
+    name: inferredName,
+    description: item?.description || null,
+    category: item?.category || null,
+    subcategory: item?.subcategory || null,
+    varietal: null,
+    region: null,
+    appellation: null,
+    country: null,
+    abv: null,
+    color: null,
+    body: null,
+    aroma: null,
+    flavor: null,
+    pairings: null,
+    industryRatings: null,
+    brandName: item?.brand || null,
+    parentBrand: item?.brand || null,
+    productNotes: null,
+    imageFileName: extractFilenameFromUrl(imageUrl),
+    brandLogo: null,
+    year: null,
+    size: item?.size || null,
+    units: null,
+    companyName: null,
+    lowestPrice: item?.lowest_recorded_price || null,
+    containerType: null,
+    containerCount: null,
+    averagePrice: item?.average_price || null,
+    sku: item?.sku || null,
+    slug: inferredSlug
+  }
+}
+
+async function formatProductForDisplayWithAI(product) {
+  if (!openai || !product) return null
+  const systemPrompt = `Format product data for clear, readable display in a UI.
+Given a product object, output a clean formatted summary. Use human-friendly labels.
+Structure: group related fields, use proper capitalization, keep descriptions concise.
+Output plain text with clear line breaks. No markdown. No bullet points.
+Example format:
+Name: [product name]
+UPC: [upc]
+Category: [category] | Region: [region] | Country: [country]
+Size: [size] [units] | ABV: [abv]% | Year: [year]
+Brand: [brand]
+Description: [1-2 sentence summary if long, else full]
+Tasting Notes: [productNotes or aroma/flavor combined]
+Ratings: [industryRatings if present]
+Omit empty fields. Keep it scannable and professional.`
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: JSON.stringify(product, null, 2) }
+      ],
+      temperature: 0.2,
+      max_tokens: 600
+    })
+    return completion.choices?.[0]?.message?.content?.trim() || null
+  } catch (err) {
+    console.warn('⚠️ LLM format for display failed:', err.message)
+    return null
+  }
+}
+
+async function extractProductDetailsWithAI({ upc, name, upcData, serpData, userFields }) {
+  if (!openai) return null
+
+  const payload = {
+    upc,
+    name,
+    userFields,
+    upcData,
+    serpData
+  }
+
+  const systemPrompt = `You extract product details from web data.
+Use ONLY information present in the provided web data (UPC and search results). Do NOT guess or invent.
+If a value is missing, return null.
+Always preserve any user-provided fields and do not overwrite them.
+
+Normalize formatting:
+- size = numeric value only (e.g. 750). units = ML, L, OZ, CL, G, KG (uppercase) - NOT "bottle".
+- abv = alcohol percentage numeric string (12-16 for wine), NOT wine scores (80, 90 pts).
+- year = 4-digit string
+- country/region/appellation = proper case (e.g. "United States", "Napa Valley", "Oakville")
+- industryRatings = semicolon-separated list like "Wine Spectator 92; James Suckling 96"
+- description/aroma/flavor/productNotes = short sentence fragments, no marketing fluff
+
+Return ONLY valid JSON with these keys:
+upc, name, description, category, subcategory, varietal, region, appellation, country, abv, color, body, aroma, flavor, pairings, industryRatings, brandName, parentBrand, productNotes, imageFileName, brandLogo, year, size, units, companyName, lowestPrice, containerType, containerCount, averagePrice, sku, slug.`
+
+  const safeParse = (content) => {
+    if (!content || typeof content !== 'string') return null
+    try {
+      return JSON.parse(content)
+    } catch {
+      const match = content.match(/\{[\s\S]*\}/)
+      if (!match) return null
+      try {
+        return JSON.parse(match[0])
+      } catch {
+        return null
+      }
+    }
+  }
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: JSON.stringify(payload, null, 2) }
+      ],
+      temperature: 0.1,
+      max_tokens: 800,
+      response_format: { type: 'json_object' }
+    })
+
+    const content = completion.choices?.[0]?.message?.content
+    const parsed = safeParse(content)
+    if (parsed) return parsed
+
+    console.warn('⚠️ AI extraction returned invalid JSON')
+    return null
+  } catch (error) {
+    console.warn('⚠️ AI extraction failed:', error.message)
+    return null
+  }
+}
+
+function expandWineSearchQuery(name) {
+  if (!name || typeof name !== 'string') return name
+  // "Opus 2022" is commonly Opus One; expand for better wine-specific results
+  const m = name.match(/^Opus\s+(\d{4})(.*)$/i)
+  return m ? `Opus One ${m[1]}${m[2] || ''}`.replace(/\s+/g, ' ').trim() : name
+}
+
+function normalizeProductFields(payload) {
+  if (!payload || typeof payload !== 'object') return payload
+  const out = { ...payload }
+
+  // ABV sanity: 80, 90, 95 etc are likely wine scores, not ABV (wine is typically 12-16%)
+  const abvNum = parseFloat(out.abv)
+  if (!isNaN(abvNum) && (abvNum > 25 || abvNum < 5)) {
+    out.abv = null
+  }
+
+  // Size/units: "750 ml" -> size=750, units=ML; "750" with units "bottle" -> units=ML for wine
+  const sizeStr = String(out.size || '').trim()
+  const unitsStr = String(out.units || '').trim().toUpperCase()
+  const combinedMatch = sizeStr.match(/^(\d+(?:\.\d+)?)\s*(ml|mL|L|oz|OZ|cl|CL)?$/i)
+  if (combinedMatch) {
+    out.size = combinedMatch[1]
+    out.units = (combinedMatch[2] || 'ML').toUpperCase()
+  } else {
+    const withUnitsMatch = sizeStr.match(/^(\d+(?:\.\d+)?)\s*(ml|mL|L|oz|cl)\b/i)
+    if (withUnitsMatch) {
+      out.size = withUnitsMatch[1]
+      out.units = withUnitsMatch[2].toUpperCase()
+    } else if (unitsStr === 'BOTTLE' && /^\d+(?:\.\d+)?$/.test(sizeStr)) {
+      out.size = sizeStr
+      out.units = 'ML'
+    }
+  }
+
+  // Description cleanup: remove field labels and noisy concatenations
+  if (out.description) {
+    let desc = String(out.description).replace(/\s+/g, ' ').trim()
+    desc = desc.replace(/\b(size|units|companyName|lowestPrice|containerType|containerCount|averagePrice|varietal\s+composition)\b/gi, '')
+    const nameStr = String(out.name || '').trim()
+    if (nameStr && desc.toLowerCase().startsWith(nameStr.toLowerCase())) {
+      desc = desc.slice(nameStr.length).trim()
+    }
+    // Truncate to first two sentences or 280 chars
+    const sentences = desc.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0)
+    if (sentences.length >= 2) {
+      desc = `${sentences[0]} ${sentences[1]}`.trim()
+    }
+    if (desc.length > 280) {
+      desc = `${desc.slice(0, 277).trim()}...`
+    }
+    out.description = desc || null
+  }
+
+  // Reject aroma if it contains field labels (wrong extraction); use description's aroma if available
+  const aromaStr = String(out.aroma || '').trim()
+  if (aromaStr && /\b(flavor|pairings|parentBrand|productNotes)\b/i.test(aromaStr)) {
+    const desc = String(out.description || '')
+    const aromaFromDesc = desc.match(/(?:Primary\s+)?aromas?\s+of\s+[^.]{15,250}/i)?.[0]?.trim()
+    out.aroma = aromaFromDesc || null
+  }
+
+  // productNotes: if garbled (multiple snippets with ...), use description's tasting content or first good segment
+  const notesStr = String(out.productNotes || '').trim()
+  if (notesStr && notesStr.includes('...')) {
+    const desc = String(out.description || '')
+    const aromaMatch = desc.match(/(?:Primary\s+)?aromas?\s+of\s+[^.]{20,300}\.(?:\s+On\s+the\s+palate[^.]{20,200}\.)?/i)
+    const palateMatch = desc.match(/On\s+the\s+palate[^.]{20,300}\./i)
+    if (aromaMatch) {
+      out.productNotes = aromaMatch[0].trim()
+    } else if (palateMatch) {
+      out.productNotes = palateMatch[0].trim()
+    } else {
+      const segments = notesStr.split(/\s*\.{2,}\s*/).filter(s => s.trim().length > 30)
+      out.productNotes = segments[0]?.trim() || out.productNotes
+    }
+  }
+
+  return out
+}
+
+async function enrichProductFromWeb({ upc, name, userFields }) {
+  const upcData = upc ? await fetchUpcItemDb(upc) : await fetchUpcItemDb(name)
+  const expandedName = expandWineSearchQuery(name)
+  const searchQuery = [upc, expandedName].filter(Boolean).join(' ')
+  const serpData = await fetchSerpApiResults(searchQuery)
+  const serpPages = await fetchSerpResultPages(serpData, 3)
+  const nameSizeUnits = extractSizeUnitsFromName(name)
+  const initialCorpus = buildSerpCorpus(serpData, serpPages)
+  const extractedFromText = extractFieldsFromCorpus(initialCorpus)
+
+  let aiResult = await extractProductDetailsWithAI({ upc, name, upcData, serpData: { ...serpData, pages: serpPages }, userFields })
+  if (aiResult) {
+    const primaryMerged = {
+      ...buildFallbackProductData({ upc, name, upcData }),
+      ...aiResult,
+      ...extractedFromText,
+      ...userFields,
+      upc: aiResult.upc || upc || null,
+      name: aiResult.name || name || null,
+      size: aiResult.size || nameSizeUnits?.size || null,
+      units: aiResult.units || nameSizeUnits?.units || null,
+      slug: aiResult.slug || slugify(aiResult.name || name || '') || null
+    }
+    const missingFields = REQUIRED_PRODUCT_FIELDS.filter(field => {
+      const value = primaryMerged[field]
+      if (value === null || value === undefined) return true
+      if (typeof value === 'string' && value.trim() === '') return true
+      return false
+    })
+    if (missingFields.length === 0 || !SERPAPI_API_KEY) {
+      return normalizeProductFields(primaryMerged)
+    }
+
+    const secondaryQuery = [expandedName, upc, missingFields.join(' ')].filter(Boolean).join(' ')
+    const serpSecondary = await fetchSerpApiResults(secondaryQuery)
+    const serpSecondaryPages = await fetchSerpResultPages(serpSecondary, 3)
+
+    const wineFields = ['abv', 'industryRatings', 'productNotes']
+    const targetedSearches = []
+    for (const field of missingFields.slice(0, 4)) {
+      const wineHint = wineFields.includes(field) ? ' wine' : ''
+      const fieldQuery = ([expandedName, field].filter(Boolean).join(' ') + wineHint).trim()
+      const serpTargeted = await fetchSerpApiResults(fieldQuery)
+      const serpTargetedPages = await fetchSerpResultPages(serpTargeted, 2)
+      targetedSearches.push({
+        field,
+        query: fieldQuery,
+        results: serpTargeted,
+        pages: serpTargetedPages
+      })
+    }
+    const secondaryCorpus = buildSerpCorpus(serpSecondary, serpSecondaryPages, targetedSearches)
+    const extractedSecondary = extractFieldsFromCorpus(secondaryCorpus)
+    aiResult = await extractProductDetailsWithAI({
+      upc,
+      name,
+      upcData,
+      serpData: {
+        primary: { ...serpData, pages: serpPages },
+        secondary: { ...serpSecondary, pages: serpSecondaryPages },
+        targeted: targetedSearches
+      },
+      userFields
+    })
+
+    if (aiResult) {
+      return normalizeProductFields({
+        ...primaryMerged,
+        ...aiResult,
+        ...extractedSecondary,
+        ...userFields,
+        upc: aiResult.upc || primaryMerged.upc,
+        name: aiResult.name || primaryMerged.name,
+        size: aiResult.size || primaryMerged.size,
+        units: aiResult.units || primaryMerged.units,
+        slug: aiResult.slug || primaryMerged.slug
+      })
+    }
+
+    return normalizeProductFields({
+      ...primaryMerged,
+      ...extractedSecondary,
+      ...userFields
+    })
+  }
+
+  const fallback = buildFallbackProductData({ upc, name, upcData })
+  return normalizeProductFields({
+    ...fallback,
+    ...extractedFromText,
+    ...userFields,
+    size: fallback.size || nameSizeUnits?.size || null,
+    units: fallback.units || nameSizeUnits?.units || null
+  })
+}
+
+function normalizeUserFields(input) {
+  if (!input || typeof input !== 'object') return {}
+  const normalized = { ...input }
+  if (normalized.units && typeof normalized.units === 'string') {
+    normalized.units = normalized.units.toUpperCase()
+  }
+  return normalized
 }
 
 async function sendSlackMessage(text) {
@@ -173,7 +829,7 @@ app.use((req, res, next) => {
 // See line ~2840 where static files are actually served
 
 // CSV parsing function
-function parseCSVToOrders(csvData, orderDate) {
+function parseCSVToOrders(csvData, orderDate, displayTimeZone = DEFAULT_ORDER_TIMEZONE) {
   try {
     console.log('Starting CSV parsing...')
     console.log('Raw CSV data type:', typeof csvData)
@@ -224,7 +880,7 @@ function parseCSVToOrders(csvData, orderDate) {
       console.log(`Line ${i}: values count = ${values.length}, headers count = ${headers.length}`)
       
       if (values.length >= headers.length) {
-        const order = createOrderFromCSV(headers, values, orderDate)
+        const order = createOrderFromCSV(headers, values, orderDate, displayTimeZone)
         if (order) {
           orders.push(order)
         }
@@ -432,7 +1088,7 @@ function calculateBusinessDays(startDate, endDate) {
 }
 
 // Create order object from CSV data
-function createOrderFromCSV(headers, values, orderDate) {
+function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAULT_ORDER_TIMEZONE) {
   try {
     // Map Bevvi CSV fields to our order structure
     const order = {
@@ -462,10 +1118,7 @@ function createOrderFromCSV(headers, values, orderDate) {
       shippingState: '',
       billingState: '',
       shippingCity: '',
-      shippingZip: '',
-      trackingNumber: '',
-      trackingSlug: '',
-      trackingUrl: ''
+      shippingZip: ''
     }
     
     // First pass: Look for ORDER datetime fields in ALL headers (before switch statement)
@@ -505,8 +1158,9 @@ function createOrderFromCSV(headers, values, orderDate) {
                 }
                 
                 order.orderDateTime = datetimeValue
-                order.orderDate = parsedDateTime.getFullYear() + '-' + 
-                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                order.orderDate = getYyyyMmDdInTimeZone(parsedDateTime, displayTimeZone) ||
+                                 parsedDateTime.getFullYear() + '-' +
+                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' +
                                  String(parsedDateTime.getDate()).padStart(2, '0')
                 console.log(`✅ Found ORDER datetime in field "${header}"="${value}" -> "${datetimeValue}" for order ${order.id}`)
               }
@@ -552,31 +1206,6 @@ function createOrderFromCSV(headers, values, orderDate) {
           break
         case 'servicecharge':
           order.serviceCharge = parseFloat(value) || 0
-          break
-        case 'trackingnumber':
-        case 'tracking_number':
-        case 'trackingno':
-        case 'tracking_no':
-        case 'tracking id':
-        case 'trackingid':
-        case 'awb':
-        case 'waybill':
-        case 'waybillnumber':
-          order.trackingNumber = value || order.trackingNumber
-          break
-        case 'trackingurl':
-        case 'tracking_url':
-        case 'carriertrackingurl':
-        case 'carrier_tracking_url':
-          order.trackingUrl = value || order.trackingUrl
-          break
-        case 'carrierslug':
-        case 'carrier_slug':
-        case 'courierslug':
-        case 'courier_slug':
-        case 'carrier':
-        case 'courier':
-          order.trackingSlug = value || order.trackingSlug
           break
         case 'status':
           // Map status strings from the new store transactions API
@@ -644,9 +1273,9 @@ function createOrderFromCSV(headers, values, orderDate) {
                   
                   // Store full datetime with UTC indicator
                   order.orderDateTime = datetimeValue
-                  // Extract local date part (using UTC date)
-                  order.orderDate = parsedDateTime.getFullYear() + '-' + 
-                                   String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                  order.orderDate = getYyyyMmDdInTimeZone(parsedDateTime, displayTimeZone) ||
+                                   parsedDateTime.getFullYear() + '-' +
+                                   String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' +
                                    String(parsedDateTime.getDate()).padStart(2, '0')
                   console.log(`✅ Parsed datetime "${value}" -> "${datetimeValue}" to date "${order.orderDate}" for order ${order.id}`)
                 }
@@ -721,6 +1350,7 @@ function createOrderFromCSV(headers, values, orderDate) {
                 
                 if (!isNaN(combinedDateTime.getTime())) {
                   order.orderDateTime = combinedDateTime.toISOString()
+                  order.orderDate = getYyyyMmDdInTimeZone(order.orderDateTime, displayTimeZone) || order.orderDate
                   console.log(`Combined date "${order.orderDate}" and time "${value}" to datetime "${order.orderDateTime}" for order ${order.id}`)
                 }
               }
@@ -761,9 +1391,9 @@ function createOrderFromCSV(headers, values, orderDate) {
                 
                 // Store full datetime with UTC indicator
                 order.orderDateTime = datetimeValue
-                // Extract local date part (using UTC date)
-                order.orderDate = parsedDateTime.getFullYear() + '-' + 
-                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
+                order.orderDate = getYyyyMmDdInTimeZone(parsedDateTime, displayTimeZone) ||
+                                 parsedDateTime.getFullYear() + '-' +
+                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' +
                                  String(parsedDateTime.getDate()).padStart(2, '0')
                 console.log(`✅ Parsed datetime field "${lowerHeader}"="${value}" -> "${datetimeValue}" to date "${order.orderDate}" for order ${order.id}`)
               } else {
@@ -800,12 +1430,6 @@ function createOrderFromCSV(headers, values, orderDate) {
             try {
               const parsedDeliveryDate = new Date(value)
               if (!isNaN(parsedDeliveryDate.getTime())) {
-                // Keep the UTC date as-is, frontend will handle timezone conversion for filtering
-                order.deliveryDate = parsedDeliveryDate.getUTCFullYear() + '-' + 
-                                   String(parsedDeliveryDate.getUTCMonth() + 1).padStart(2, '0') + '-' + 
-                                   String(parsedDeliveryDate.getUTCDate()).padStart(2, '0')
-                // Also preserve the full deliveryDateTime for frontend display
-                // Ensure UTC timezone indicator
                 let deliveryDateTimeValue = value
                 if (!deliveryDateTimeValue.includes('Z') && !deliveryDateTimeValue.match(/[+-]\d{2}:\d{2}$/)) {
                   if (deliveryDateTimeValue.includes('T')) {
@@ -814,6 +1438,11 @@ function createOrderFromCSV(headers, values, orderDate) {
                     deliveryDateTimeValue = deliveryDateTimeValue.replace(' ', 'T') + 'Z'
                   }
                 }
+                order.deliveryDate = getYyyyMmDdInTimeZone(deliveryDateTimeValue, displayTimeZone) ||
+                                   getYyyyMmDdInTimeZone(parsedDeliveryDate, displayTimeZone) ||
+                                   parsedDeliveryDate.getUTCFullYear() + '-' +
+                                   String(parsedDeliveryDate.getUTCMonth() + 1).padStart(2, '0') + '-' +
+                                   String(parsedDeliveryDate.getUTCDate()).padStart(2, '0')
                 order.deliveryDateTime = deliveryDateTimeValue
                 console.log(`✅ Set deliveryDate to: ${order.deliveryDate} and deliveryDateTime to: ${order.deliveryDateTime} for order ${order.id}`)
                 
@@ -893,12 +1522,6 @@ function createOrderFromCSV(headers, values, orderDate) {
           break
       }
 
-      if (!order.trackingNumber && lowerHeader.includes('tracking') && value) {
-        order.trackingNumber = value
-      }
-      if (!order.trackingUrl && lowerHeader.includes('tracking') && lowerHeader.includes('url') && value) {
-        order.trackingUrl = value
-      }
     })
     
     // Set default values if not found
@@ -1221,60 +1844,50 @@ async function enrichOrdersWithState(orders, startDate, endDate) {
   return enrichedOrders
 }
 
-// Helper function to get local date from an order (converts UTC to local time)
-function getOrderLocalDate(order) {
-  // If we have orderDateTime, use it to get the local date
+// Helper: calendar date in client/business timezone (YYYY-MM-DD)
+function getOrderLocalDate(order, timeZone = DEFAULT_ORDER_TIMEZONE) {
   if (order.orderDateTime) {
+    const z = getYyyyMmDdInTimeZone(order.orderDateTime, timeZone)
+    if (z) return z
     try {
       const date = new Date(order.orderDateTime)
-      // Convert to local date string (YYYY-MM-DD)
-      return date.getFullYear() + '-' + 
-             String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-             String(date.getDate()).padStart(2, '0')
+      if (!isNaN(date.getTime())) {
+        return date.getFullYear() + '-' +
+          String(date.getMonth() + 1).padStart(2, '0') + '-' +
+          String(date.getDate()).padStart(2, '0')
+      }
     } catch (e) {
-      // Fallback to orderDate if parsing fails
-      return order.orderDate
+      /* fall through */
     }
   }
-  // If no orderDateTime, use orderDate as-is (assumed to already be in correct format)
   return order.orderDate
 }
 
-// Helper function to get delivery local date from an order
-function getDeliveryLocalDate(order) {
+function getDeliveryLocalDate(order, timeZone = DEFAULT_ORDER_TIMEZONE) {
   if (!order.deliveryDate || order.deliveryDate === 'N/A') {
     return null
   }
-  
-  // If we have deliveryDateTime, use it to get the local date
+
   if (order.deliveryDateTime) {
+    const z = getYyyyMmDdInTimeZone(order.deliveryDateTime, timeZone)
+    if (z) return z
     try {
       const date = new Date(order.deliveryDateTime)
-      // Convert to local date string (YYYY-MM-DD)
-      return date.getFullYear() + '-' + 
-             String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-             String(date.getDate()).padStart(2, '0')
+      if (!isNaN(date.getTime())) {
+        return date.getFullYear() + '-' +
+          String(date.getMonth() + 1).padStart(2, '0') + '-' +
+          String(date.getDate()).padStart(2, '0')
+      }
     } catch (e) {
-      // Fallback to deliveryDate if parsing fails
-      return order.deliveryDate
+      /* fall through */
     }
   }
-  // If no deliveryDateTime, use deliveryDate as-is
   return order.deliveryDate
 }
 
 // Helper function to fetch orders for a specific date range
-async function fetchOrdersForDateRange(startDate, endDate) {
-  // Convert local dates to UTC
-  const localStartDate = new Date(startDate + 'T00:00:00')
-  const localEndDate = new Date(endDate + 'T23:59:59')
-  
-  const utcStartDate = new Date(localStartDate.getTime() - (localStartDate.getTimezoneOffset() * 60000))
-  const utcEndDate = new Date(localEndDate.getTime() - (localEndDate.getTimezoneOffset() * 60000))
-  
-  const utcStartString = utcStartDate.toISOString().split('T')[0]
-  const utcEndString = utcEndDate.toISOString().split('T')[0]
-  
+async function fetchOrdersForDateRange(startDate, endDate, timeZone = DEFAULT_ORDER_TIMEZONE) {
+  const { utcStartString, utcEndString } = bevviCsvUtcDateRange(startDate, endDate, timeZone)
   const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${utcStartString}&endDate=${utcEndString}`
   
   let response
@@ -1303,16 +1916,16 @@ async function fetchOrdersForDateRange(startDate, endDate) {
   if (response.status === 200 && response.data && response.data.results) {
     const csvData = response.data.results
     
-    const allOrders = parseCSVToOrders(csvData, startDate)
+    const allOrders = parseCSVToOrders(csvData, startDate, timeZone)
     
     // Filter orders by date range - convert to local time before comparing
     const filteredOrders = allOrders.filter(order => {
-      const orderLocalDate = getOrderLocalDate(order)
+      const orderLocalDate = getOrderLocalDate(order, timeZone)
       if (orderLocalDate) {
         return orderLocalDate >= startDate && orderLocalDate <= endDate
       }
 
-      const deliveryLocalDate = getDeliveryLocalDate(order)
+      const deliveryLocalDate = getDeliveryLocalDate(order, timeZone)
       return deliveryLocalDate && deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
     })
     
@@ -1322,51 +1935,13 @@ async function fetchOrdersForDateRange(startDate, endDate) {
   return []
 }
 
-function attachTrackingStatusToOrders(orders) {
-  if (!aftershipClient || !Array.isArray(orders)) return orders
-  orders.forEach(order => {
-    const orderNumber = order.ordernum || order.id
-    if (order.trackingNumber) {
-      orderToTrackingMap.set(orderNumber, {
-        trackingNumber: order.trackingNumber,
-        slug: order.trackingSlug || null
-      })
-      trackingToOrderMap.set(order.trackingNumber, orderNumber)
-    } else if (orderNumber && orderToTrackingMap.has(orderNumber)) {
-      const mapped = orderToTrackingMap.get(orderNumber)
-      order.trackingNumber = mapped.trackingNumber
-      order.trackingSlug = mapped.slug
-    }
-
-    if (!order.trackingNumber) return
-
-    const cacheKey = buildTrackingCacheKey(order.trackingNumber, order.trackingSlug)
-    const cached = trackingStatusCache.get(cacheKey)
-    if (cached) {
-      order.shipmentStatus = normalizeAfterShipTag(cached.tag) || 'unknown'
-      order.shipmentSubstatus = cached.subtag || null
-      order.shipmentStatusUpdatedAt = cached.lastUpdated || null
-      order.trackingUrl = order.trackingUrl || cached.trackingUrl || null
-      const isShippingOrder = (parseFloat(order.shippingFee) || 0) > 0
-      if (isShippingOrder && cached.deliveryDateTime) {
-        order.deliveryDateTime = cached.deliveryDateTime
-        order.deliveryDate = cached.deliveryDate || order.deliveryDate
-      }
-    }
-
-    if (!cached || !isTrackingCacheFresh(cached)) {
-      ensureTrackingStatus(orderNumber, order.trackingNumber, order.trackingSlug, orderNumber).catch(() => {})
-    }
-  })
-
-  return orders
-}
 
 // API Routes
 app.get('/api/orders', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query
-    console.log('📥 /api/orders REQUEST received:', { startDate, endDate })
+    const { startDate, endDate, timeZone: timeZoneQuery } = req.query
+    const orderTimeZone = resolveOrderTimeZone(timeZoneQuery)
+    console.log('📥 /api/orders REQUEST received:', { startDate, endDate, orderTimeZone })
     
     if (!startDate || !endDate) {
       console.log('❌ Missing dates in request')
@@ -1412,8 +1987,8 @@ app.get('/api/orders', async (req, res) => {
       })
     }
 
-    // Update auto-refresh range when new dates are requested
-    updateAutoRefreshRange(startDate, endDate)
+    // Update auto-refresh range when new dates are requested (preserve client TZ for UTC API conversion)
+    updateAutoRefreshRange(startDate, endDate, orderTimeZone)
     
     // Automatically start auto-refresh if not already running
     if (!autoRefreshTimer) {
@@ -1443,7 +2018,7 @@ app.get('/api/orders', async (req, res) => {
         console.log(`🔄 Processing chunk ${i + 1}/${chunks.length}: ${chunk.startDate} to ${chunk.endDate}`)
         
         try {
-          const chunkOrders = await fetchOrdersForDateRange(chunk.startDate, chunk.endDate)
+          const chunkOrders = await fetchOrdersForDateRange(chunk.startDate, chunk.endDate, orderTimeZone)
           allOrders = allOrders.concat(chunkOrders)
           successfulChunks++
           console.log(`✅ Chunk ${i + 1} complete: ${chunkOrders.length} orders`)
@@ -1461,7 +2036,6 @@ app.get('/api/orders', async (req, res) => {
         console.warn(`⚠️ WARNING: Only ${successfulChunks}/${chunks.length} chunks succeeded - data may be incomplete!`)
       }
       
-      allOrders = attachTrackingStatusToOrders(allOrders)
       return res.json({
         success: true,
         data: allOrders,
@@ -1478,24 +2052,11 @@ app.get('/api/orders', async (req, res) => {
       })
     }
     
-    // For smaller date ranges, use single request
-    // Convert local dates to UTC before calling the Bevvi API
-    // This ensures we get orders that are scheduled for delivery on the requested local dates
-    const localStartDate = new Date(startDate + 'T00:00:00') // Start of day in local time
-    const localEndDate = new Date(endDate + 'T23:59:59') // End of day in local time
-    
-    // Convert to UTC for API call
-    const utcStartDate = new Date(localStartDate.getTime() - (localStartDate.getTimezoneOffset() * 60000))
-    const utcEndDate = new Date(localEndDate.getTime() - (localEndDate.getTimezoneOffset() * 60000))
-    
-    // Format as YYYY-MM-DD for API
-    const utcStartString = utcStartDate.toISOString().split('T')[0]
-    const utcEndString = utcEndDate.toISOString().split('T')[0]
-    
-    // Call the Bevvi API with UTC dates
+    // For smaller date ranges, interpret calendar days in orderTimeZone then convert to UTC for Bevvi CSV API
+    const { utcStartString, utcEndString } = bevviCsvUtcDateRange(startDate, endDate, orderTimeZone)
     const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${utcStartString}&endDate=${utcEndString}`
     
-    console.log('🕐 Converting local dates to UTC for API call:')
+    console.log('🕐 Converting local calendar range to UTC for API (IANA TZ:', orderTimeZone + '):')
     console.log('  Local requested range:', startDate, 'to', endDate)
     console.log('  UTC API range:', utcStartString, 'to', utcEndString)
     console.log('Calling Bevvi API:', apiUrl)
@@ -1545,17 +2106,17 @@ app.get('/api/orders', async (req, res) => {
           console.log('CSV Data preview (first 200 chars):', csvData.substring(0, 200))
           
           // Parse the CSV data from the results field
-          const allOrders = parseCSVToOrders(csvData, startDate)
+          const allOrders = parseCSVToOrders(csvData, startDate, orderTimeZone)
           
           // Filter orders to show only those delivered within the requested local date range
           // Convert order dates to local time before comparing
           const filteredOrders = allOrders.filter(order => {
-            const orderLocalDate = getOrderLocalDate(order)
+            const orderLocalDate = getOrderLocalDate(order, orderTimeZone)
             if (orderLocalDate) {
               return orderLocalDate >= startDate && orderLocalDate <= endDate
             }
 
-            const deliveryLocalDate = getDeliveryLocalDate(order)
+            const deliveryLocalDate = getDeliveryLocalDate(order, orderTimeZone)
             return deliveryLocalDate && deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
           })
           
@@ -1576,7 +2137,6 @@ app.get('/api/orders', async (req, res) => {
           
           // Check if we got real orders from API
           if (filteredOrders.length > 0 && filteredOrders[0].id && !filteredOrders[0].id.startsWith('ORD')) {
-            attachTrackingStatusToOrders(filteredOrders)
             // Real orders from API
             return res.json({
               success: true,
@@ -1683,12 +2243,13 @@ function splitDateRange(startDate, endDate, maxDays = 3) {
 // New endpoint: Get orders WITH state enrichment (for state-based queries only)
 app.get('/api/orders-with-state', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query
+    const { startDate, endDate, timeZone } = req.query
     
-    console.log('🗺️  /api/orders-with-state REQUEST:', { startDate, endDate })
+    console.log('🗺️  /api/orders-with-state REQUEST:', { startDate, endDate, timeZone })
     
+    const tzParam = timeZone ? `&timeZone=${encodeURIComponent(timeZone)}` : ''
     // First, get regular orders (fast, from cache if available)
-    const ordersResponse = await axios.get(`http://localhost:${PORT}/api/orders?startDate=${startDate}&endDate=${endDate}`)
+    const ordersResponse = await axios.get(`http://localhost:${PORT}/api/orders?startDate=${startDate}&endDate=${endDate}${tzParam}`)
     
     if (ordersResponse.data && ordersResponse.data.data) {
       const orders = ordersResponse.data.data
@@ -1885,12 +2446,6 @@ let slackCheckTimer = null
 // Store connected clients for real-time updates
 let connectedClients = []
 
-// AfterShip tracking cache (in-memory)
-const TRACKING_CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-const trackingStatusCache = new Map() // key: `${slug || 'auto'}:${trackingNumber}`
-const orderToTrackingMap = new Map() // key: orderNumber -> { trackingNumber, slug }
-const trackingToOrderMap = new Map() // key: trackingNumber -> orderNumber
-
 // Orders cache removed - always fetch fresh from API
 
 // Products cache - loaded on server startup
@@ -1906,10 +2461,15 @@ function startAutoRefresh() {
   
   autoRefreshTimer = setInterval(async () => {
     if (lastAutoRefreshRange) {
-      console.log(`🔄 Auto-refreshing orders for ${lastAutoRefreshRange.startDate} to ${lastAutoRefreshRange.endDate}`)
+      const tz = lastAutoRefreshRange.timeZone || DEFAULT_ORDER_TIMEZONE
+      console.log(`🔄 Auto-refreshing orders for ${lastAutoRefreshRange.startDate} to ${lastAutoRefreshRange.endDate} (${tz})`)
       try {
-        // Call the Bevvi API to get fresh data
-        const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${lastAutoRefreshRange.startDate}&endDate=${lastAutoRefreshRange.endDate}`
+        const { utcStartString, utcEndString } = bevviCsvUtcDateRange(
+          lastAutoRefreshRange.startDate,
+          lastAutoRefreshRange.endDate,
+          tz
+        )
+        const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${utcStartString}&endDate=${utcEndString}`
         
         let response
         let retryCount = 0
@@ -1937,7 +2497,7 @@ function startAutoRefresh() {
         
         if (response && response.status === 200 && response.data && response.data.results) {
           const csvData = response.data.results
-          const orders = parseCSVToOrders(csvData, lastAutoRefreshRange.startDate)
+          const orders = parseCSVToOrders(csvData, lastAutoRefreshRange.startDate, tz)
           
           console.log(`✅ Auto-refresh successful: ${orders.length} orders updated`)
           lastAutoRefreshDate = new Date()
@@ -1998,9 +2558,9 @@ function startSlackChecks() {
 }
 
 // Function to update auto-refresh with new date range
-function updateAutoRefreshRange(startDate, endDate) {
-  lastAutoRefreshRange = { startDate, endDate }
-  console.log(`📅 Auto-refresh range updated to ${startDate} to ${endDate}`)
+function updateAutoRefreshRange(startDate, endDate, timeZone = DEFAULT_ORDER_TIMEZONE) {
+  lastAutoRefreshRange = { startDate, endDate, timeZone }
+  console.log(`📅 Auto-refresh range updated to ${startDate} to ${endDate} (${timeZone})`)
 }
 
 // Function to notify all connected clients about data refresh
@@ -2021,142 +2581,6 @@ function notifyClientsOfRefresh(ordersCount, refreshTime) {
   })
   
   console.log(`📡 Notified ${connectedClients.length} connected clients about data refresh`)
-}
-
-function notifyClientsOfTrackingUpdate(payload) {
-  const message = JSON.stringify({
-    type: 'tracking_update',
-    ...payload
-  })
-  connectedClients.forEach(client => {
-    if (client.res && !client.res.destroyed) {
-      client.res.write(`data: ${message}\n\n`)
-    }
-  })
-}
-
-function normalizeIsoDateTime(value) {
-  if (!value) return null
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return null
-  return parsed.toISOString()
-}
-
-function normalizeAfterShipTag(tag) {
-  if (!tag) return null
-  const normalized = tag
-    .replace(/([a-z])([A-Z])/g, '$1_$2')
-    .replace(/\s+/g, '_')
-    .toLowerCase()
-  return normalized
-}
-
-function buildTrackingCacheKey(trackingNumber, slug) {
-  return `${slug || 'auto'}:${trackingNumber}`
-}
-
-function isTrackingCacheFresh(entry) {
-  if (!entry) return false
-  return Date.now() - entry.updatedAt <= TRACKING_CACHE_TTL_MS
-}
-
-function extractTrackingInfoFromPayload(payload) {
-  if (!payload) return {}
-  const tracking = payload.tracking || payload.data?.tracking || payload.msg?.tracking || payload.msg || payload
-  const trackingNumber = tracking.tracking_number || tracking.trackingNumber || tracking.tracking_no || tracking.trackingNo || tracking.number
-  const slug = tracking.slug || tracking.courier_slug || tracking.courier || tracking.courier_code
-  return { tracking, trackingNumber, slug }
-}
-
-function updateTrackingCache(tracking, trackingNumber, slug, orderNumber = null) {
-  if (!trackingNumber) return null
-  const deliveryDateValue = tracking?.shipment_delivery_date || tracking?.delivered_at || tracking?.delivery_date || tracking?.shipmentDeliveryDate
-  const deliveryDateTime = normalizeIsoDateTime(deliveryDateValue)
-  const deliveryDate = deliveryDateTime ? deliveryDateTime.split('T')[0] : null
-  const tag = tracking?.tag || tracking?.status || tracking?.delivery_status
-  const cacheEntry = {
-    trackingNumber,
-    slug: slug || tracking?.slug || null,
-    tag: tag || null,
-    subtag: tracking?.subtag || null,
-    subtagMessage: tracking?.subtag_message || tracking?.subtagMessage || null,
-    trackingUrl: tracking?.aftership_tracking_url || tracking?.courier_tracking_link || tracking?.tracking_url || null,
-    deliveryDateTime,
-    deliveryDate,
-    lastUpdated: tracking?.updated_at || tracking?.updatedAt || null,
-    updatedAt: Date.now()
-  }
-  const key = buildTrackingCacheKey(trackingNumber, cacheEntry.slug)
-  trackingStatusCache.set(key, cacheEntry)
-  if (orderNumber) {
-    orderToTrackingMap.set(orderNumber, {
-      trackingNumber,
-      slug: cacheEntry.slug
-    })
-    trackingToOrderMap.set(trackingNumber, orderNumber)
-  }
-  return cacheEntry
-}
-
-async function createOrUpdateAfterShipTracking({ trackingNumber, slug, orderNumber, title }) {
-  if (!aftershipClient || !trackingNumber) return null
-  try {
-    const response = await aftershipClient.post('/trackings', {
-      tracking: {
-        tracking_number: trackingNumber,
-        slug: slug || undefined,
-        title: title || trackingNumber,
-        order_number: orderNumber || undefined
-      }
-    })
-    return response?.data?.data?.tracking || null
-  } catch (error) {
-    console.error('❌ AfterShip create tracking failed:', error.response?.data || error.message)
-    return null
-  }
-}
-
-async function fetchAfterShipTracking(trackingNumber, slug) {
-  if (!aftershipClient || !trackingNumber || !slug) return null
-  try {
-    const response = await aftershipClient.get(`/trackings/${encodeURIComponent(slug)}/${encodeURIComponent(trackingNumber)}`)
-    return response?.data?.data?.tracking || null
-  } catch (error) {
-    return null
-  }
-}
-
-async function ensureTrackingStatus(orderNumber, trackingNumber, slug, title) {
-  if (!aftershipClient || !trackingNumber) return null
-  const key = buildTrackingCacheKey(trackingNumber, slug)
-  const cached = trackingStatusCache.get(key)
-  if (isTrackingCacheFresh(cached)) {
-    return cached
-  }
-  let tracking = null
-  if (slug) {
-    tracking = await fetchAfterShipTracking(trackingNumber, slug)
-  }
-  if (!tracking) {
-    tracking = await createOrUpdateAfterShipTracking({ trackingNumber, slug, orderNumber, title })
-  }
-  if (!tracking) {
-    return null
-  }
-  const updated = updateTrackingCache(tracking, trackingNumber, tracking.slug || slug, orderNumber)
-  if (updated && orderNumber) {
-    notifyClientsOfTrackingUpdate({
-      orderNumber,
-      trackingNumber: updated.trackingNumber,
-      shipmentStatus: normalizeAfterShipTag(updated.tag) || 'unknown',
-      shipmentSubstatus: updated.subtag || null,
-      trackingUrl: updated.trackingUrl || null,
-      deliveryDateTime: updated.deliveryDateTime || null,
-      deliveryDate: updated.deliveryDate || null,
-      updatedAt: updated.lastUpdated || null
-    })
-  }
-  return updated
 }
 
 // Function to add a new client connection
@@ -2302,6 +2726,127 @@ app.get('/api/products/status', (req, res) => {
   })
 })
 
+// Add product via UPC enrichment + external API
+app.post('/api/products/add-from-upc', async (req, res) => {
+  try {
+    const { products } = req.body || {}
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'products array is required' })
+    }
+
+    const results = []
+    for (const product of products) {
+      const userFields = normalizeUserFields(product || {})
+      const upc = typeof userFields.upc === 'string' ? userFields.upc.trim() : ''
+      const name = typeof userFields.name === 'string' ? userFields.name.trim() : ''
+
+      const needsEnrichment = REQUIRED_PRODUCT_FIELDS.some(field => userFields[field] === null || userFields[field] === undefined || (typeof userFields[field] === 'string' && userFields[field].trim() === ''))
+      const enriched = needsEnrichment
+        ? await enrichProductFromWeb({ upc: upc || null, name: name || null, userFields })
+        : userFields
+      const payload = {
+        ...enriched,
+        upc: enriched.upc || upc || null,
+        name: enriched.name || name || null
+      }
+
+      const missingFields = REQUIRED_PRODUCT_FIELDS.filter(field => {
+        const value = payload[field]
+        if (value === null || value === undefined) return true
+        if (typeof value === 'string' && value.trim() === '') return true
+        return false
+      })
+
+      if (missingFields.length > 0) {
+        results.push({
+          success: false,
+          upc: payload.upc || null,
+          name: payload.name || null,
+          error: 'Missing required fields',
+          missingFields
+        })
+        continue
+      }
+
+      const { formattedDisplay, ...apiPayload } = payload
+      try {
+        const response = await axios.post('https://api.getbevvi.com/api/shopifyorders/addProduct', apiPayload, {
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          timeout: 20000
+        })
+
+        results.push({
+          success: true,
+          upc,
+          name: payload.name,
+          data: response.data
+        })
+      } catch (error) {
+        results.push({
+          success: false,
+          upc,
+          name: payload.name || name || null,
+          error: error.response?.data || error.message
+        })
+      }
+    }
+
+    res.json({ success: true, results, searchEnabled: !!SERPAPI_API_KEY })
+  } catch (error) {
+    console.error('Error adding products from UPC:', error)
+    res.status(500).json({ error: 'Failed to add products', message: error.message })
+  }
+})
+
+// Enrich product via UPC without adding
+app.post('/api/products/enrich-from-upc', async (req, res) => {
+  try {
+    const { products } = req.body || {}
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'products array is required' })
+    }
+
+    const results = []
+    for (const product of products) {
+      const userFields = normalizeUserFields(product || {})
+      const upc = typeof userFields.upc === 'string' ? userFields.upc.trim() : ''
+      const name = typeof userFields.name === 'string' ? userFields.name.trim() : ''
+
+      const enriched = await enrichProductFromWeb({ upc: upc || null, name: name || null, userFields })
+      const payload = {
+        ...enriched,
+        upc: enriched.upc || upc || null,
+        name: enriched.name || name || null
+      }
+
+      const missingFields = REQUIRED_PRODUCT_FIELDS.filter(field => {
+        const value = payload[field]
+        if (value === null || value === undefined) return true
+        if (typeof value === 'string' && value.trim() === '') return true
+        return false
+      })
+
+      const formattedDisplay = await formatProductForDisplayWithAI(payload)
+
+      results.push({
+        success: missingFields.length === 0,
+        upc: payload.upc || null,
+        name: payload.name || null,
+        payload: { ...payload, formattedDisplay: formattedDisplay || undefined },
+        missingFields
+      })
+    }
+
+    res.json({ success: true, results })
+  } catch (error) {
+    console.error('Error enriching products from UPC:', error)
+    res.status(500).json({ error: 'Failed to enrich products', message: error.message })
+  }
+})
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   const now = new Date()
@@ -2371,25 +2916,7 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
     console.log('📊 Order details response status:', response.status)
     console.log('📊 Order details response data:', response.data)
 
-    const { tracking, trackingNumber, slug } = extractTrackingInfoFromPayload(response.data || {})
-    let aftership = null
-    if (trackingNumber) {
-      const orderNumberKey = orderNumber
-      const cached = await ensureTrackingStatus(orderNumberKey, trackingNumber, slug, orderNumberKey)
-      aftership = {
-        trackingNumber,
-        slug: slug || cached?.slug || null,
-        shipmentStatus: normalizeAfterShipTag(cached?.tag || tracking?.tag) || 'unknown',
-        shipmentSubstatus: cached?.subtag || tracking?.subtag || null,
-        trackingUrl: cached?.trackingUrl || tracking?.aftership_tracking_url || tracking?.courier_tracking_link || null,
-        updatedAt: cached?.lastUpdated || tracking?.updated_at || null
-      }
-    }
-    
-    res.json({
-      ...response.data,
-      aftership
-    })
+    res.json(response.data)
   } catch (error) {
     console.error('❌ Error proxying order details:', error.message)
     res.status(500).json({
@@ -2418,73 +2945,6 @@ app.get('/api/gopuff/order-status/:orderNumber', async (req, res) => {
       error: 'Failed to fetch GoPuff order status',
       message: error.message
     })
-  }
-})
-
-// AfterShip webhook for real-time tracking updates
-app.post('/api/aftership/webhook', async (req, res) => {
-  try {
-    const signature = req.header('aftership-hmac-sha256')
-    if (AFTERSHIP_WEBHOOK_SECRET && signature) {
-      const computed = crypto
-        .createHmac('sha256', AFTERSHIP_WEBHOOK_SECRET)
-        .update(req.rawBody || '')
-        .digest('base64')
-      const sigBuffer = Buffer.from(signature)
-      const computedBuffer = Buffer.from(computed)
-      const isValid = sigBuffer.length === computedBuffer.length && crypto.timingSafeEqual(sigBuffer, computedBuffer)
-      if (!isValid) {
-        console.warn('⚠️ Invalid AfterShip webhook signature')
-        return res.status(401).json({ error: 'Invalid signature' })
-      }
-    } else if (AFTERSHIP_WEBHOOK_SECRET && !signature) {
-      console.warn('⚠️ AfterShip webhook signature missing')
-    }
-
-    const payload = req.body || {}
-    const { tracking, trackingNumber, slug } = extractTrackingInfoFromPayload(payload)
-    const orderNumber = tracking?.order_number || tracking?.orderNumber || trackingToOrderMap.get(trackingNumber) || null
-
-    const updated = updateTrackingCache(tracking || payload, trackingNumber, slug, orderNumber)
-    if (updated) {
-      notifyClientsOfTrackingUpdate({
-        orderNumber,
-        trackingNumber: updated.trackingNumber,
-        shipmentStatus: normalizeAfterShipTag(updated.tag) || 'unknown',
-        shipmentSubstatus: updated.subtag || null,
-        trackingUrl: updated.trackingUrl || null,
-        deliveryDateTime: updated.deliveryDateTime || null,
-        deliveryDate: updated.deliveryDate || null,
-        updatedAt: updated.lastUpdated || null
-      })
-    }
-
-    res.json({ success: true })
-  } catch (error) {
-    console.error('❌ AfterShip webhook error:', error.message)
-    res.status(500).json({ error: 'Webhook processing failed' })
-  }
-})
-
-// Manual tracking registration endpoint (optional)
-app.post('/api/aftership/trackings', async (req, res) => {
-  try {
-    const { orderNumber, trackingNumber, slug, title } = req.body || {}
-    if (!trackingNumber) {
-      return res.status(400).json({ error: 'trackingNumber is required' })
-    }
-    const result = await ensureTrackingStatus(orderNumber || null, trackingNumber, slug, title)
-    res.json({
-      success: true,
-      trackingNumber,
-      shipmentStatus: normalizeAfterShipTag(result?.tag) || 'unknown',
-      shipmentSubstatus: result?.subtag || null,
-      trackingUrl: result?.trackingUrl || null,
-      updatedAt: result?.lastUpdated || null
-    })
-  } catch (error) {
-    console.error('❌ AfterShip tracking registration failed:', error.message)
-    res.status(500).json({ error: 'Failed to register tracking' })
   }
 })
 
@@ -3125,22 +3585,26 @@ Extract the following information from the user's query:
   * delayed_orders_by_customer: asking for delayed orders for a specific customer
   * tax_by_state: asking for tax breakdown by state (e.g., "tax by state for Oct")
   * sales_by_state: asking for sales/revenue breakdown by state (e.g., "sales by state for Nov")
+  * add_product: add product(s) using UPC and product name (e.g., "add product 012345678905 name Tito's Vodka")
   * unknown: if the query is NOT about orders, revenue, tax, tips, delivery, or customer data (e.g., weather, personal questions, unrelated topics)
   
 - customer: Customer name if mentioned (Sendoso, OnGoody, Air Culinaire, Air Culinaire Worldwide, Vistajet, VistaJet, etc.). Always extract full company name, not partial words. Extract customer names from phrases like "orders from [customer]", "orders for [customer]", "orders of [customer]", "revenue from [customer]", "revenue for [month] for [customer]". For queries like "revenue for Oct for Air Culinaire" or "show me all orders of Vistajet in Dec 2025", extract the full customer name. Note: "Vistajet" and "VistaJet" refer to the same customer - extract as "Vistajet" or "VistaJet" based on what appears in the query.
 - brand: Brand name if mentioned (Schrader, Dom Perignon, Tito's, Grey Goose, etc.). Extract the full brand name.
 - retailer: Retailer/store/establishment name if mentioned (e.g., "Liquor Master", "Wine & Spirits Market", "Freshco", etc.). Extract from phrases like "from retailer [name]", "from store [name]", "from [retailer name]". Extract the full retailer name.
+- products: Array of objects with { upc, name } when intent is add_product. Extract UPCs (8-14 digits) and product name(s). If one name applies to all UPCs, repeat it. If name is missing, set needsClarification true and clarificationNeeded to "product_name".
 - startDate: Start date in YYYY-MM-DD format
 - endDate: End date in YYYY-MM-DD format
 - isMTD: Boolean, true if asking for "month to date" or "this month so far"
 - needsClarification: Boolean, true if the query is too open-ended and needs more information
-- clarificationNeeded: String indicating what's missing - "date_range" if no date/timeframe specified, "customer_name" if asking about a customer but not specifying which one, "brand_name" if asking about a brand but not specifying which one
+- clarificationNeeded: String indicating what's missing - "date_range" if no date/timeframe specified, "customer_name" if asking about a customer but not specifying which one, "brand_name" if asking about a brand but not specifying which one, "product_upc" if add_product without UPC, "product_name" if add_product without name
 
 Important: 
 - Customer names should be exact - "Sendoso" not "sendoso in", "Air Culinaire" not "air", "Vistajet" not "vista", etc.
 - "show me orders", "orders placed today", "how many orders" = total_orders intent (NOT pending_orders)
 - "show me all orders from Vistajet", "orders from Sendoso", "list orders for Air Culinaire" = total_orders intent WITH customer extracted
 - "show me pending orders", "pending status" = pending_orders intent
+- If intent is add_product and UPC is missing, set needsClarification to true and clarificationNeeded to "product_upc"
+- If intent is add_product and name is missing, set needsClarification to true and clarificationNeeded to "product_name"
 - If a query asks for orders, revenue, tax, etc. WITHOUT specifying any timeframe (no "today", "this month", specific month, etc.), set needsClarification to true and clarificationNeeded to "date_range"
 - Queries like "show me all orders", "what's the revenue", "how much tax" without dates = needsClarification: true
 - EXCEPTION: Status-specific queries (accepted_orders, pending_orders, delivered_orders, delayed_orders, not_delivered_orders) do NOT need clarification even without dates - they can use current loaded data
@@ -3181,6 +3645,7 @@ Return ONLY valid JSON, no explanation. Format:
 }
 
 If customer is not mentioned, omit the "customer" field.
+If intent is add_product, include "products" array.
 If brand is not mentioned, omit the "brand" field.
 If retailer is not mentioned, omit the "retailer" field.
 If no clarification needed, omit "clarificationNeeded" field or set to null.`
@@ -3228,7 +3693,8 @@ If no clarification needed, omit "clarificationNeeded" field or set to null.`
 
 // Auto-refresh control endpoints
 app.post('/api/auto-refresh/start', (req, res) => {
-  const { startDate, endDate } = req.body
+  const { startDate, endDate, timeZone: timeZoneBody } = req.body
+  const refreshTz = resolveOrderTimeZone(timeZoneBody)
   
   if (!startDate || !endDate) {
     return res.status(400).json({
@@ -3236,14 +3702,14 @@ app.post('/api/auto-refresh/start', (req, res) => {
     })
   }
   
-  updateAutoRefreshRange(startDate, endDate)
+  updateAutoRefreshRange(startDate, endDate, refreshTz)
   startAutoRefresh()
   
   res.json({
     success: true,
     message: 'Auto-refresh started',
     interval: `${AUTO_REFRESH_INTERVAL / 60000} minutes`,
-    dateRange: { startDate, endDate }
+    dateRange: { startDate, endDate, timeZone: refreshTz }
   })
 })
 
@@ -3416,6 +3882,7 @@ app.listen(PORT, async () => {
   console.log(`   GET  /api/products/search?q=<term> - Search products`)
   console.log(`   POST /api/products/refresh - Refresh products cache`)
   console.log(`   GET  /api/products/status - Get cache status`)
+  console.log(`   POST /api/products/add-from-upc - Enrich + add product`)
   console.log(``)
   
   // Orders cache disabled - always fetch fresh from API

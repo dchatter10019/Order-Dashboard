@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
-import OrderModal from './OrderModal'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
+import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
 
 const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
@@ -25,11 +26,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected'])
   const [deliveryFilter, setDeliveryFilter] = useState([])
   
-  const [selectedOrder, setSelectedOrder] = useState(null)
-  const [isOrderModalOpen, setIsOrderModalOpen] = useState(false)
-  const [orderDetailsById, setOrderDetailsById] = useState({})
-  const [detailsLoadingById, setDetailsLoadingById] = useState({})
-  const [detailsErrorById, setDetailsErrorById] = useState({})
+  const navigate = useNavigate()
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(null)
   const [sortConfig, setSortConfig] = useState({
@@ -148,29 +145,8 @@ const Dashboard = ({ onSwitchToAI }) => {
       return <ChevronUp className="h-4 w-4 text-gray-400" />
     }
     return sortConfig.direction === 'asc' 
-      ? <ChevronUp className="h-4 w-4 text-blue-600" />
-      : <ChevronDown className="h-4 w-4 text-blue-600" />
-  }
-
-  const getShipmentStatusClass = (status) => {
-    switch ((status || '').toLowerCase()) {
-      case 'delivered':
-        return 'bg-green-100 text-green-800'
-      case 'in_transit':
-        return 'bg-blue-100 text-blue-800'
-      case 'out_for_delivery':
-        return 'bg-indigo-100 text-indigo-800'
-      case 'exception':
-      case 'attempt_fail':
-        return 'bg-red-100 text-red-800'
-      case 'available_for_pickup':
-        return 'bg-amber-100 text-amber-800'
-      case 'pending':
-      case 'info_received':
-        return 'bg-gray-100 text-gray-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
+      ? <ChevronUp className="h-4 w-4 text-bevvi-primary-600" />
+      : <ChevronDown className="h-4 w-4 text-bevvi-primary-600" />
   }
 
   const ordersInDateRange = useMemo(() => {
@@ -425,7 +401,12 @@ const Dashboard = ({ onSwitchToAI }) => {
       return 0.08
     }
     
-    // Priority 2: 10% Retailer List Rule
+    // Priority 2: Total Wine Manual (0%)
+    if (normalizedRetailer === 'total wine manual') {
+      return 0
+    }
+    
+    // Priority 3: 10% Retailer List Rule
     const tenPercentRetailers = [
       'wine & spirits market',
       'freshco',
@@ -440,29 +421,36 @@ const Dashboard = ({ onSwitchToAI }) => {
       'wine & spirits discount warehouse',
       'youbooze',
       'garfields beverage',
-      'royal wines & spirits',
-      'sundance liquor & gifts'
+      'royal wines & spirits'
     ]
     if (tenPercentRetailers.includes(normalizedRetailer)) {
       return 0.10
     }
     
-    // Priority 3: Ashburn Wine Shop Rule (15%)
-    if (normalizedRetailer === 'ashburn wine shop') {
+    // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
+    const fifteenPercentRetailers = [
+      'ashburn wine shop',
+      'rezerve wine & spirits',
+      'san_point-loma_446',
+      'sea_southcenter_596',
+      'pit_pittsburgh_294',
+      'mia_miami_183'
+    ]
+    if (fifteenPercentRetailers.includes(normalizedRetailer)) {
       return 0.15
     }
     
-    // Priority 4: Sendoso Customer Rule (12%)
+    // Priority 5: Sendoso Customer Rule (12%)
     if (normalizedCustomer === 'sendoso') {
       return 0.12
     }
     
-    // Priority 5: In Good Taste Wines Rule (25%)
+    // Priority 6: In Good Taste Wines Rule (25%)
     if (normalizedRetailer === 'in good taste wines') {
       return 0.25
     }
     
-    // Priority 6: Default Rule (20%)
+    // Priority 7: Default Rule (20%)
     return 0.20
   }
 
@@ -474,6 +462,13 @@ const Dashboard = ({ onSwitchToAI }) => {
     
     if (revenue === 0) {
       return { serviceFee: 0, retailerFee: 0 }
+    }
+
+    const normalizedCustomer = customer.toLowerCase()
+    const establishmentKey = normalizeEstablishmentForFees(retailer)
+    // VistaJet (8%) still uses percentage; flat per-order fees for named retailers otherwise
+    if (normalizedCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
+      return { serviceFee: 0, retailerFee: FLAT_RETAILER_FEES_USD[establishmentKey] }
     }
     
     // Determine fee rate based on retailer and customer rules
@@ -544,7 +539,8 @@ const Dashboard = ({ onSwitchToAI }) => {
       
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
-      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&t=${timestamp}&r=${randomId}`
+      const clientTz = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)
+      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&timeZone=${clientTz}&t=${timestamp}&r=${randomId}`
       console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
       
       const response = await apiFetch(apiUrl, {
@@ -663,64 +659,10 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   const getOrderKey = useCallback((order) => order.ordernum || order.id, [])
 
-  const setOrderDetailsFor = useCallback((orderNumber, details) => {
-    setOrderDetailsById(prev => ({
-      ...prev,
-      [orderNumber]: details
-    }))
-  }, [])
-
-  // Fetch detailed order information from Bevvi API
-  const fetchOrderDetails = async (orderNumber) => {
-    try {
-      if (!orderNumber) return
-      setDetailsLoadingById(prev => ({ ...prev, [orderNumber]: true }))
-      setDetailsErrorById(prev => ({ ...prev, [orderNumber]: null }))
-      
-      const response = await fetch(`/api/order-details/${orderNumber}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        }
-      })
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      const data = await response.json()
-      setOrderDetailsById(prev => ({
-        ...prev,
-        [orderNumber]: data
-      }))
-    } catch (error) {
-      console.error('❌ Error fetching order details:', error.message)
-      setDetailsErrorById(prev => ({
-        ...prev,
-        [orderNumber]: {
-          message: 'Failed to fetch order details',
-          details: error.message
-        }
-      }))
-    } finally {
-      setDetailsLoadingById(prev => ({ ...prev, [orderNumber]: false }))
-    }
-  }
-  
-  const openOrderModal = (order) => {
+  const openOrderDetailsPage = (order) => {
     const orderKey = getOrderKey(order)
     if (!orderKey) return
-    setSelectedOrder(order)
-    setIsOrderModalOpen(true)
-    if (!orderDetailsById[orderKey] && !detailsLoadingById[orderKey]) {
-      fetchOrderDetails(orderKey)
-    }
-  }
-
-  const closeOrderModal = () => {
-    setIsOrderModalOpen(false)
-    setSelectedOrder(null)
+    navigate(`/orders/${encodeURIComponent(orderKey)}`, { state: { order } })
   }
 
   useEffect(() => {
@@ -842,22 +784,6 @@ const Dashboard = ({ onSwitchToAI }) => {
                 // You can add a toast notification here if you want
                 console.log(`📊 Auto-refreshed: ${data.ordersCount} orders updated`)
               }
-            } else if (data.type === 'tracking_update') {
-              setOrders(prev => prev.map(order => {
-                const orderNumber = order.ordernum || order.id
-                if (orderNumber && data.orderNumber && orderNumber === data.orderNumber) {
-                  return {
-                    ...order,
-                    shipmentStatus: data.shipmentStatus || order.shipmentStatus,
-                    shipmentSubstatus: data.shipmentSubstatus || order.shipmentSubstatus,
-                    shipmentStatusUpdatedAt: data.updatedAt || order.shipmentStatusUpdatedAt,
-                    trackingUrl: data.trackingUrl || order.trackingUrl,
-                    deliveryDateTime: data.deliveryDateTime || order.deliveryDateTime,
-                    deliveryDate: data.deliveryDate || order.deliveryDate
-                  }
-                }
-                return order
-              }))
             } else if (data.type === 'connected') {
               console.log('✅ Real-time connection established')
             } else if (data.type === 'heartbeat') {
@@ -986,8 +912,6 @@ const Dashboard = ({ onSwitchToAI }) => {
     }))
   }
 
-  const selectedOrderKey = selectedOrder ? getOrderKey(selectedOrder) : null
-
   return (
     <div className="bg-gray-50 pb-20 sm:pb-16">
       {/* Main Content */}
@@ -1010,7 +934,7 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* AI Assistant Promotion Banner */}
         {onSwitchToAI && (
-          <div className="mb-4 sm:mb-6 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+          <div className="mb-4 sm:mb-6 bg-gradient-to-r from-bevvi-primary-700 to-bevvi-primary-500 rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
             <button
               onClick={onSwitchToAI}
               className="w-full px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between text-left group"
@@ -1042,7 +966,7 @@ const Dashboard = ({ onSwitchToAI }) => {
           <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedFilters.dateRange ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
             <div className="flex items-center justify-between mb-3 sm:mb-4">
               <div className="flex items-center">
-                <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 mr-1.5 sm:mr-2" />
+                <Calendar className="h-4 w-4 sm:h-5 sm:w-5 text-bevvi-primary-600 mr-1.5 sm:mr-2" />
                 <h3 className="text-sm sm:text-lg font-medium text-gray-900">Date Range</h3>
               </div>
               <button
@@ -1123,13 +1047,13 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* Loading Overlay - Covers entire screen */}
         {isLoading && (
-          <div className="fixed inset-0 bg-gradient-to-br from-blue-900 to-blue-800 bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-lg mx-4 border-4 border-blue-500">
+          <div className="fixed inset-0 bg-gradient-to-br from-bevvi-primary-900 to-bevvi-primary-800 bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-lg mx-4 border-4 border-bevvi-primary-500">
               <div className="flex flex-col items-center">
                 {/* Large Spinner */}
                 <div className="relative mb-6">
                   <div className="animate-spin rounded-full h-24 w-24 border-8 border-gray-200"></div>
-                  <div className="animate-spin rounded-full h-24 w-24 border-8 border-blue-600 border-t-transparent absolute top-0"></div>
+                  <div className="animate-spin rounded-full h-24 w-24 border-8 border-bevvi-primary-600 border-t-transparent absolute top-0"></div>
                 </div>
                 
                 {/* Loading Text */}
@@ -1156,11 +1080,11 @@ const Dashboard = ({ onSwitchToAI }) => {
                   if (diffDays > 90) {
                     const chunks = Math.ceil(diffDays / 30)
                     return (
-                      <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mt-2">
-                        <p className="text-sm text-blue-800 font-medium text-center">
+                      <div className="bg-bevvi-primary-50 border-2 border-bevvi-primary-200 rounded-lg p-4 mt-2">
+                        <p className="text-sm text-bevvi-primary-800 font-medium text-center">
                           📦 Processing {chunks} chunks for optimal performance
                         </p>
-                        <p className="text-xs text-blue-600 mt-2 text-center">
+                        <p className="text-xs text-bevvi-primary-600 mt-2 text-center">
                           This may take a moment for large datasets
                         </p>
                       </div>
@@ -1186,8 +1110,8 @@ const Dashboard = ({ onSwitchToAI }) => {
           <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
             <div className="flex items-center justify-between">
             <div className="flex items-center min-w-0 flex-1">
-                <div className="p-1.5 sm:p-2 bg-blue-100 rounded-lg flex-shrink-0">
-                  <Calendar className="h-4 w-4 sm:h-6 sm:w-6 text-blue-600" />
+                <div className="p-1.5 sm:p-2 bg-bevvi-primary-100 rounded-lg flex-shrink-0">
+                  <Calendar className="h-4 w-4 sm:h-6 sm:w-6 text-bevvi-primary-600" />
               </div>
               <div className="ml-2 sm:ml-4 min-w-0 flex-1">
                   <p className="text-xs sm:text-sm font-medium text-gray-600">Total Orders</p>
@@ -1466,7 +1390,6 @@ const Dashboard = ({ onSwitchToAI }) => {
                               <col className="w-28" />
                               <col className="w-24" />
                               <col className="w-24" />
-                              <col className="w-28" />
                               <col className="w-24" />
                               <col className="w-28" />
                               <col className="w-24" />
@@ -1554,17 +1477,6 @@ const Dashboard = ({ onSwitchToAI }) => {
                     </th>
                     <th 
                           className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('shipmentStatus')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Shipment Status</span>
-                            {sortConfig.key === 'shipmentStatus' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                       onClick={() => handleSort('orderType')}
                     >
                           <div className="flex items-center space-x-1">
@@ -1620,7 +1532,6 @@ const Dashboard = ({ onSwitchToAI }) => {
                             <col className="w-28" />
                             <col className="w-24" />
                             <col className="w-24" />
-                            <col className="w-28" />
                             <col className="w-24" />
                             <col className="w-28" />
                             <col className="w-24" />
@@ -1635,8 +1546,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                                 <td className="pl-2 pr-3 py-4 text-sm font-medium text-gray-900">
                                   <button
                                     type="button"
-                                    onClick={() => openOrderModal(order)}
-                                    className="truncate block w-full text-left text-blue-600 hover:text-blue-700 hover:underline"
+                                    onClick={() => openOrderDetailsPage(order)}
+                                    className="truncate block w-full text-left text-bevvi-primary-600 hover:text-bevvi-primary-700 hover:underline"
                                     title={order.ordernum || order.id}
                                     aria-label="Open order details"
                                   >
@@ -1708,7 +1619,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                               order.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                              order.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
+                              order.status === 'in_transit' ? 'bg-bevvi-primary-100 text-bevvi-primary-800' :
                               order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
                               order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
                               order.status === 'canceled' ? 'bg-red-100 text-red-800' :
@@ -1719,13 +1630,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                         </span>
                       </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus)}`}>
-                              {(order.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
-                            </span>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-bevvi-primary-100 text-bevvi-primary-800' : 'bg-gray-100 text-gray-800'
                             }`}>
                               {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
                             </span>
@@ -1803,8 +1709,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                             <div className="flex-1 min-w-0">
                               <button
                                 type="button"
-                                onClick={() => openOrderModal(order)}
-                                className="text-blue-600 hover:text-blue-700 hover:underline font-semibold text-base mb-1 block truncate w-full text-left"
+                                onClick={() => openOrderDetailsPage(order)}
+                                className="text-bevvi-primary-600 hover:text-bevvi-primary-700 hover:underline font-semibold text-base mb-1 block truncate w-full text-left"
                                 aria-label="Open order details"
                               >
                                 {order.ordernum || order.id}
@@ -1814,7 +1720,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             <div className="ml-2 flex-shrink-0 flex items-center gap-2">
                               <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                 order.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                                order.status === 'in_transit' ? 'bg-blue-100 text-blue-800' :
+                                order.status === 'in_transit' ? 'bg-bevvi-primary-100 text-bevvi-primary-800' :
                                 order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
                                 order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
                                 order.status === 'canceled' ? 'bg-red-100 text-red-800' :
@@ -1877,12 +1783,9 @@ const Dashboard = ({ onSwitchToAI }) => {
                           {/* Badges Row */}
                           <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-bevvi-primary-100 text-bevvi-primary-800' : 'bg-gray-100 text-gray-800'
                             }`}>
                               {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
-                            </span>
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus)}`}>
-                              {(order.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
                             </span>
                             {order.deliveryStatus && (
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -1916,7 +1819,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 fetchOrders()
               }}
               disabled={isLoading}
-              className="w-full sm:w-auto px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              className="w-full sm:w-auto px-4 py-2 text-sm bg-bevvi-primary-600 text-white rounded-lg hover:bg-bevvi-primary-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               {isLoading ? (
                 <>
@@ -1934,20 +1837,6 @@ const Dashboard = ({ onSwitchToAI }) => {
         </div>
         )}
       </div>
-
-      <OrderModal
-        order={selectedOrder}
-        orderDetails={selectedOrderKey ? orderDetailsById[selectedOrderKey] : null}
-        isOpen={isOrderModalOpen}
-        onClose={closeOrderModal}
-        isLoadingDetails={selectedOrderKey ? !!detailsLoadingById[selectedOrderKey] : false}
-        detailsError={selectedOrderKey ? detailsErrorById[selectedOrderKey] : null}
-        setOrderDetails={(details) => {
-          if (selectedOrderKey) {
-            setOrderDetailsFor(selectedOrderKey, details)
-          }
-        }}
-      />
 
       {/* Status Band */}
       <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-gray-700 z-40">

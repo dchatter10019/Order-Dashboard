@@ -353,14 +353,14 @@ const ProductManagement = () => {
       </div>
 
       {/* Helpful banner */}
-      <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+      <div className="mb-6 bg-bevvi-primary-50 border border-bevvi-primary-200 rounded-lg p-4">
         <div className="flex items-start">
           <div className="flex-shrink-0">
-            <Package className="h-5 w-5 text-blue-600 mt-0.5" />
+            <Package className="h-5 w-5 text-bevvi-primary-600 mt-0.5" />
           </div>
           <div className="ml-3 flex-1">
-            <h3 className="text-sm font-medium text-blue-800">Backend-Cached Product Search</h3>
-            <div className="mt-2 text-sm text-blue-700">
+            <h3 className="text-sm font-medium text-bevvi-primary-800">Backend-Cached Product Search</h3>
+            <div className="mt-2 text-sm text-bevvi-primary-700">
               <p>All products and stores are loaded automatically!</p>
               <p className="mt-1 text-xs">✓ ALL Bevvi products cached in backend (50,000+)</p>
               <p className="mt-1 text-xs">✓ Instant search results from server memory (&lt; 10ms)</p>
@@ -376,7 +376,7 @@ const ProductManagement = () => {
         {/* Products Status */}
         <div className="bg-white p-6 rounded-lg shadow-md border">
           <div className="flex items-center mb-4">
-            <Package className="w-6 h-6 text-blue-600 mr-3" />
+            <Package className="w-6 h-6 text-bevvi-primary-600 mr-3" />
             <h3 className="text-lg font-semibold">Products</h3>
           </div>
           {productCacheStatus ? (
@@ -389,12 +389,12 @@ const ProductManagement = () => {
                 </p>
               )}
               {searchResults.length > 0 && (
-                <p className="text-xs text-blue-600 mt-1">{searchResults.length} results found</p>
+                <p className="text-xs text-bevvi-primary-600 mt-1">{searchResults.length} results found</p>
               )}
             </>
           ) : (
-            <div className="flex items-center text-sm text-blue-600 mt-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+            <div className="flex items-center text-sm text-bevvi-primary-600 mt-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-bevvi-primary-600 mr-2"></div>
               Checking cache status...
             </div>
           )}
@@ -408,8 +408,8 @@ const ProductManagement = () => {
           </div>
           <p className="text-sm text-gray-500 mt-2">Loaded from API</p>
           {isLoadingData && stores.length === 0 ? (
-            <div className="flex items-center text-sm text-blue-600 mt-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+            <div className="flex items-center text-sm text-bevvi-primary-600 mt-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-bevvi-primary-600 mr-2"></div>
               Loading stores...
             </div>
           ) : stores.length > 0 ? (
@@ -465,7 +465,7 @@ const ProductManagement = () => {
             }
           }}
           disabled={isLoadingData}
-          className="flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center px-6 py-3 bg-bevvi-primary-600 text-white font-medium rounded-md hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoadingData ? (
             <>
@@ -577,12 +577,12 @@ const ProductManagement = () => {
                       setShowProductDropdown(true)
                     }
                   }}
-                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-transparent"
                   autoComplete="off"
                 />
                 {(isSearching || (debouncedSearchTerm !== productSearchTerm && productSearchTerm.length >= 3)) && (
                   <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-bevvi-primary-600"></div>
                   </div>
                 )}
               </div>
@@ -592,7 +592,7 @@ const ProductManagement = () => {
                 <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
                   {isSearching ? (
                     <div className="px-3 py-4 text-gray-400 text-sm text-center flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-bevvi-primary-600 mr-2"></div>
                       Searching products...
                     </div>
                   ) : filteredProducts.length > 0 ? (
@@ -608,7 +608,7 @@ const ProductManagement = () => {
                             setDebouncedSearchTerm(productName)
                             setShowProductDropdown(false)
                           }}
-                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                          className="px-3 py-2 hover:bg-bevvi-primary-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
                         >
                           <div className="font-medium text-gray-900">{product.name || product.Name}</div>
                           <div className="text-xs text-gray-500">UPC: {product.upc || product.UPC}</div>
@@ -653,12 +653,12 @@ const ProductManagement = () => {
                       setShowStoreDropdown(true)
                     }
                   }}
-                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-transparent"
                   autoComplete="off"
                 />
                 {(isSearchingStores || (debouncedStoreSearchTerm !== storeSearchTerm && storeSearchTerm.length >= 2)) && (
                   <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-bevvi-primary-600"></div>
                   </div>
                 )}
               </div>
@@ -668,7 +668,7 @@ const ProductManagement = () => {
                 <div className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
                   {isSearchingStores ? (
                     <div className="px-3 py-4 text-gray-400 text-sm text-center flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-bevvi-primary-600 mr-2"></div>
                       Searching stores...
                     </div>
                   ) : filteredStores.length > 0 ? (
@@ -683,7 +683,7 @@ const ProductManagement = () => {
                             setDebouncedStoreSearchTerm(storeName)
                             setShowStoreDropdown(false)
                           }}
-                          className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                          className="px-3 py-2 hover:bg-bevvi-primary-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
                         >
                           <div className="font-medium text-gray-900">{store.name || store.Name}</div>
                         </div>
@@ -710,7 +710,7 @@ const ProductManagement = () => {
               <select
                 value={selectedCompany}
                 onChange={(e) => setSelectedCompany(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-transparent"
                 required
               >
                 <option value="">Select a company</option>
@@ -734,7 +734,7 @@ const ProductManagement = () => {
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 placeholder="0.00"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-transparent"
                 required
               />
             </div>
@@ -750,7 +750,7 @@ const ProductManagement = () => {
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder="0"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-transparent"
                 required
               />
             </div>
@@ -761,7 +761,7 @@ const ProductManagement = () => {
             <button
               type="submit"
               disabled={isLoading}
-              className="flex items-center px-6 py-3 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center px-6 py-3 bg-bevvi-primary-600 text-white font-medium rounded-md hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>

@@ -20,8 +20,65 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
   if (!isActive || !order) return null
 
   const isTimelineRetailer = () => {
-    const name = order?.establishment || ''
-    return name.includes('SAN_Point-Loma_446') || name.includes('SEA_SouthCenter_596')
+    const name = (order?.establishment || '').trim()
+    const lowerName = name.toLowerCase()
+    if (!lowerName) return false
+    if (lowerName.includes('gopuff')) return true
+    return /^[a-z]{3}_[a-z0-9-]+_\d+$/i.test(name)
+  }
+
+  const extractTimelineEvents = (data) => {
+    const candidates = [
+      data?.result?.order?.timelineEvents,
+      data?.result?.order?.timeline_events,
+      data?.result?.order?.timeline,
+      data?.result?.order?.statusTimeline,
+      data?.result?.order?.status_timeline,
+      data?.result?.order?.statusHistory,
+      data?.result?.order?.status_history,
+      data?.result?.timelineEvents,
+      data?.result?.timeline,
+      data?.timelineEvents,
+      data?.timeline,
+      data?.order?.timelineEvents,
+      data?.order?.timeline,
+      data?.order?.statusHistory
+    ]
+
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate) && candidate.length > 0) return candidate
+    }
+
+    const findTimelineArray = (value, depth = 0) => {
+      if (!value || depth > 4) return null
+      if (Array.isArray(value)) {
+        if (value.length === 0) return null
+        const sample = value[0]
+        if (sample && typeof sample === 'object') {
+          const hasTime = 'timestamp' in sample || 'time' in sample || 'createdAt' in sample || 'created_at' in sample || 'date' in sample
+          const hasType = 'type' in sample || 'status' in sample || 'eventType' in sample || 'event_type' in sample || 'name' in sample
+          if (hasTime || hasType) return value
+        }
+        return null
+      }
+      if (typeof value === 'object') {
+        for (const next of Object.values(value)) {
+          const found = findTimelineArray(next, depth + 1)
+          if (found) return found
+        }
+      }
+      return null
+    }
+
+    return findTimelineArray(data) || []
+  }
+
+  const normalizeTimelineEvents = (events) => {
+    return events.map(event => {
+      const timestamp = event.timestamp || event.time || event.createdAt || event.created_at || event.date || event.datetime || null
+      const type = event.type || event.status || event.eventType || event.event_type || event.name || event.description || 'Update'
+      return { ...event, timestamp, type }
+    })
   }
 
   const parseLocalDateTime = (dateTimeValue) => {
@@ -128,17 +185,27 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
     }
   }, [isActive, order, orderNumber])
 
-  // Load GoPuff timeline for specific retailers
+  // Load GoPuff timeline for GoPuff orders
   useEffect(() => {
     if (!isActive || !order || !isTimelineRetailer()) return
     if (!orderNumber) return
     setIsLoadingTimeline(true)
     setTimelineError(null)
     fetch(`/api/gopuff/order-status/${encodeURIComponent(orderNumber)}`)
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+        return response.json()
+      })
       .then(data => {
-        const events = data?.result?.order?.timelineEvents || []
-        const sortedEvents = [...events].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        const rawEvents = extractTimelineEvents(data)
+        const normalizedEvents = normalizeTimelineEvents(rawEvents)
+        const sortedEvents = [...normalizedEvents].sort((a, b) => {
+          const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0
+          const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0
+          return aTime - bTime
+        })
         setTimelineEvents(sortedEvents)
       })
       .catch(error => {
@@ -226,7 +293,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       case 'delivered':
         return <CheckCircle className="h-5 w-5 text-green-500" />
       case 'in_transit':
-        return <Clock className="h-5 w-5 text-blue-500" />
+        return <Clock className="h-5 w-5 text-bevvi-primary-500" />
       case 'accepted':
         return <CheckCircle className="h-5 w-5 text-green-500" />
 
@@ -246,7 +313,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       case 'delivered':
         return 'bg-green-100 text-green-800'
       case 'in_transit':
-        return 'bg-blue-100 text-blue-800'
+        return 'bg-bevvi-primary-100 text-bevvi-primary-800'
       case 'accepted':
         return 'bg-green-100 text-green-800'
 
@@ -261,35 +328,14 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
     }
   }
 
-  const getShipmentStatusClass = (status) => {
-    switch ((status || '').toLowerCase()) {
-      case 'delivered':
-        return 'bg-green-100 text-green-800'
-      case 'in_transit':
-        return 'bg-blue-100 text-blue-800'
-      case 'out_for_delivery':
-        return 'bg-indigo-100 text-indigo-800'
-      case 'exception':
-      case 'attempt_fail':
-        return 'bg-red-100 text-red-800'
-      case 'available_for_pickup':
-        return 'bg-amber-100 text-amber-800'
-      case 'pending':
-      case 'info_received':
-        return 'bg-gray-100 text-gray-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
-
   return (
     <div className="p-6 space-y-6">
       {/* Loading State for Order Details */}
       {isLoadingDetails && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="bg-bevvi-primary-50 border border-bevvi-primary-200 rounded-lg p-4">
           <div className="flex items-center">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
-            <span className="text-blue-700 font-medium">Loading detailed order information...</span>
+            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-bevvi-primary-600 mr-3"></div>
+            <span className="text-bevvi-primary-700 font-medium">Loading detailed order information...</span>
           </div>
         </div>
       )}
@@ -318,7 +364,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
           </span>
         </div>
         <div className="text-right">
-          <p className="text-3xl font-bold text-blue-600">
+          <p className="text-3xl font-bold text-bevvi-primary-600">
             {formatDollarAmount(order.total)}
           </p>
           <p className="text-sm text-gray-500">Total Amount</p>
@@ -329,7 +375,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4">
           <h4 className="text-lg font-semibold text-gray-900 flex items-center">
-            <User className="h-5 w-5 text-blue-600 mr-2" />
+            <User className="h-5 w-5 text-bevvi-primary-600 mr-2" />
             Customer Information
           </h4>
           <div className="space-y-3">
@@ -356,7 +402,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
 
         <div className="space-y-4">
           <h4 className="text-lg font-semibold text-gray-900 flex items-center">
-            <Calendar className="h-5 w-5 text-blue-600 mr-2" />
+            <Calendar className="h-5 w-5 text-bevvi-primary-600 mr-2" />
             Order Timeline
           </h4>
           <div className="space-y-3">
@@ -408,7 +454,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       {/* Product Details - Show API data if available, otherwise show basic order items */}
       <div className="space-y-4">
         <h4 className="text-lg font-semibold text-gray-900 flex items-center">
-          <Package className="h-5 w-5 text-blue-600 mr-2" />
+          <Package className="h-5 w-5 text-bevvi-primary-600 mr-2" />
           Product Details
         </h4>
         
@@ -487,8 +533,8 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
               {order.items && order.items.map((item, index) => (
                 <div key={index} className="flex justify-between items-center py-2 border-b border-gray-200 last:border-b-0">
                   <div className="flex items-center">
-                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center mr-3">
-                      <Package className="h-4 w-4 text-blue-600" />
+                    <div className="w-8 h-8 bg-bevvi-primary-100 rounded-full flex items-center justify-center mr-3">
+                      <Package className="h-4 w-4 text-bevvi-primary-600" />
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{item.name}</p>
@@ -511,64 +557,64 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       {/* Financial Breakdown */}
       <div className="space-y-4">
         <h4 className="text-lg font-semibold text-gray-900 flex items-center">
-                          <DollarSign className="h-5 w-5 text-blue-600 mr-2" />
+                          <DollarSign className="h-5 w-5 text-bevvi-primary-600 mr-2" />
           Financial Breakdown
         </h4>
-                    <div className="bg-gradient-to-r from-blue-50 to-blue-50 rounded-lg p-6 border border-blue-200">
+                    <div className="bg-gradient-to-r from-bevvi-primary-50 to-bevvi-primary-50 rounded-lg p-6 border border-bevvi-primary-200">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Revenue & Base Costs */}
             <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Base Revenue</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.revenue || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Base Revenue</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.revenue || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Gift Note Charge</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.giftNoteCharge || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Gift Note Charge</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.giftNoteCharge || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Promo Discount</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Promo Discount</span>
                 <span className="font-semibold text-red-600">-{formatDollarAmount(order.promoDiscAmt || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Tax</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.tax || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Tax</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.tax || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Tip</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.tip || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Tip</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.tip || 0)}</span>
               </div>
             </div>
 
             {/* Fees & Charges */}
             <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Shipping Fee</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.shippingFee || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Shipping Fee</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.shippingFee || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Delivery Fee</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.deliveryFee || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Delivery Fee</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.deliveryFee || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Service Charge</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceCharge || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Service Charge</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.serviceCharge || 0)}</span>
                 </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Service Charge Tax</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Service Charge Tax</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">Service Charge Tax</span>
-                <span className="font-semibold text-blue-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">Service Charge Tax</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200">
-                <span className="text-sm font-medium text-blue-700">API Total Amount</span>
-                <span className="font-semibold text-blue-900">${(order.totalAmount || 0).toFixed(2)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
+                <span className="text-sm font-medium text-bevvi-primary-700">API Total Amount</span>
+                <span className="font-semibold text-bevvi-primary-900">${(order.totalAmount || 0).toFixed(2)}</span>
               </div>
-              <div className="flex justify-between items-center py-2 border-b border-blue-200 bg-blue-100 p-2 rounded">
-                <span className="text-sm font-medium text-blue-700">Calculated Total</span>
-                <span className="text-lg font-bold text-blue-900">${order.total.toFixed(2)}</span>
+              <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200 bg-bevvi-primary-100 p-2 rounded">
+                <span className="text-sm font-medium text-bevvi-primary-700">Calculated Total</span>
+                <span className="text-lg font-bold text-bevvi-primary-900">${order.total.toFixed(2)}</span>
               </div>
             </div>
           </div>
@@ -578,7 +624,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       {/* Additional Metadata */}
       <div className="space-y-4">
         <h4 className="text-lg font-semibold text-gray-900 flex items-center">
-          <Package className="h-5 w-5 text-blue-600 mr-2" />
+          <Package className="h-5 w-5 text-bevvi-primary-600 mr-2" />
           Additional Order Metadata
         </h4>
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-lg p-6 border border-amber-200">
@@ -647,7 +693,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
               <div className="flex justify-between items-center py-2">
                 <span className="text-sm font-medium text-amber-700">Order Type</span>
                 <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                  (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                  (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-bevvi-primary-100 text-bevvi-primary-800' : 'bg-gray-100 text-gray-800'
                 }`}>
                   {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
                 </span>
@@ -662,31 +708,6 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
                   {order.deliveryStatus || 'N/A'}
                 </span>
               </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="text-sm font-medium text-amber-700">Shipment Status</span>
-                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getShipmentStatusClass(order.shipmentStatus || orderDetails?.aftership?.shipmentStatus)}`}>
-                  {(order.shipmentStatus || orderDetails?.aftership?.shipmentStatus || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
-                </span>
-              </div>
-              {(order.trackingNumber || orderDetails?.aftership?.trackingNumber) && (
-                <div className="flex justify-between items-center py-2">
-                  <span className="text-sm font-medium text-amber-700">Tracking</span>
-                  {order.trackingUrl || orderDetails?.aftership?.trackingUrl ? (
-                    <a
-                      href={order.trackingUrl || orderDetails.aftership?.trackingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:underline"
-                    >
-                      {order.trackingNumber || orderDetails?.aftership?.trackingNumber}
-                    </a>
-                  ) : (
-                    <span className="text-sm font-medium text-amber-900">
-                      {order.trackingNumber || orderDetails?.aftership?.trackingNumber}
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -709,9 +730,9 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
               {timelineEvents.map((event, index) => (
                 <div key={`${event.type}-${event.timestamp}-${index}`} className="flex items-start gap-3">
                   <div className="flex flex-col items-center">
-                    <div className="h-3 w-3 rounded-full bg-blue-600 mt-1" />
+                    <div className="h-3 w-3 rounded-full bg-bevvi-primary-600 mt-1" />
                     {index < timelineEvents.length - 1 && (
-                      <div className="w-px flex-1 bg-blue-200 mt-1" />
+                      <div className="w-px flex-1 bg-bevvi-primary-200 mt-1" />
                     )}
                   </div>
                   <div className="flex-1">
@@ -731,7 +752,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       <div className="space-y-4">
         <div className="flex justify-between items-center">
           <h4 className="text-lg font-semibold text-gray-900 flex items-center">
-            <FileText className="h-5 w-5 text-blue-600 mr-2" />
+            <FileText className="h-5 w-5 text-bevvi-primary-600 mr-2" />
             Order Notes
           </h4>
           {asanaTaskUrl && (
@@ -749,10 +770,10 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
         <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg p-6 border border-purple-200">
           {/* Loading State */}
           {isLoadingNotes && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="bg-bevvi-primary-50 border border-bevvi-primary-200 rounded-lg p-4 mb-4">
               <div className="flex items-center">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
-                <span className="text-blue-700 font-medium">Loading notes from Asana...</span>
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-bevvi-primary-600 mr-3"></div>
+                <span className="text-bevvi-primary-700 font-medium">Loading notes from Asana...</span>
               </div>
             </div>
           )}
@@ -826,10 +847,10 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
           <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg p-6 border border-green-200">
             {/* Loading State */}
             {isLoadingComments && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="bg-bevvi-primary-50 border border-bevvi-primary-200 rounded-lg p-4">
                 <div className="flex items-center">
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mr-3"></div>
-                  <span className="text-blue-700 font-medium">Loading comments...</span>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-bevvi-primary-600 mr-3"></div>
+                  <span className="text-bevvi-primary-700 font-medium">Loading comments...</span>
                 </div>
               </div>
             )}
@@ -899,12 +920,12 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
       )}
 
       {/* Order Summary */}
-      <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-lg p-6 border border-blue-200">
+      <div className="bg-gradient-to-r from-bevvi-primary-50 to-green-50 rounded-lg p-6 border border-bevvi-primary-200">
         <div className="flex justify-between items-center">
-          <span className="text-lg font-semibold text-blue-900">Final Order Total</span>
-          <span className="text-3xl font-bold text-blue-900">${order.total.toFixed(2)}</span>
+          <span className="text-lg font-semibold text-bevvi-primary-900">Final Order Total</span>
+          <span className="text-3xl font-bold text-bevvi-primary-900">${order.total.toFixed(2)}</span>
         </div>
-        <div className="mt-2 text-sm text-blue-700">
+        <div className="mt-2 text-sm text-bevvi-primary-700">
           {order.status === 'delivered' ? '✅ Order has been delivered' : 
            order.status === 'in_transit' ? '🚚 Order is in transit' : 
            order.status === 'accepted' ? '✅ Order has been accepted' :

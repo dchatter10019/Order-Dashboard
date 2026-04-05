@@ -11,7 +11,7 @@ const OrderModal = ({ order, orderDetails, isOpen, onClose, isLoadingDetails, de
         {/* Header */}
         <div className="flex justify-between items-center p-6 border-b border-gray-200">
           <div className="flex items-center">
-            <Package className="h-6 w-6 text-blue-600 mr-3" />
+            <Package className="h-6 w-6 text-bevvi-primary-600 mr-3" />
             <h2 className="text-xl font-semibold text-gray-900">
               Order Details
             </h2>
