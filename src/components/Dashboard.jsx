@@ -7,6 +7,7 @@ import DeliveryFilter from './DeliveryFilter'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
+import { filterOrdersByCalendarRange, resolveOrderTimeZone } from '../utils/orderDates'
 
 const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
@@ -55,29 +56,15 @@ const Dashboard = ({ onSwitchToAI }) => {
     return isNaN(parsed.getTime()) ? null : parsed
   }, [])
 
-  const getLocalDateString = useCallback((dateTimeValue, dateValue) => {
-    if (dateTimeValue) {
-      const localDateTime = parseLocalDateTime(dateTimeValue)
-      if (localDateTime) {
-        return localDateTime.getFullYear() + '-' +
-               String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' +
-               String(localDateTime.getDate()).padStart(2, '0')
-      }
-    }
-    return dateValue || null
-  }, [parseLocalDateTime])
-
-  const filterOrdersByDateRange = useCallback((ordersToFilter, startDate, endDate) => {
-    if (!startDate || !endDate) return ordersToFilter
-
-    return ordersToFilter.filter(order => {
-      const orderLocalDate = getLocalDateString(order.orderDateTime, order.orderDate)
-      const deliveryLocalDate = getLocalDateString(order.deliveryDateTime, order.deliveryDate)
-      const dateToCheck = orderLocalDate || deliveryLocalDate
-
-      return dateToCheck && dateToCheck >= startDate && dateToCheck <= endDate
-    })
-  }, [getLocalDateString])
+  // Same timezone resolution as /api/orders (query param), so date filtering matches the server
+  const browserTimeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+    []
+  )
+  const orderFilterTimeZone = useMemo(
+    () => resolveOrderTimeZone(browserTimeZone),
+    [browserTimeZone]
+  )
 
   // Helper function to check if date is this week
   const isThisWeek = (dateString) => {
@@ -150,16 +137,22 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   const ordersInDateRange = useMemo(() => {
-    return filterOrdersByDateRange(orders, dateRange.startDate, dateRange.endDate)
-  }, [orders, dateRange, filterOrdersByDateRange])
+    return filterOrdersByCalendarRange(
+      orders,
+      dateRange.startDate,
+      dateRange.endDate,
+      orderFilterTimeZone
+    )
+  }, [orders, dateRange, orderFilterTimeZone])
 
   const pendingAcceptedCounts = useMemo(() => {
     let pending = 0
     let accepted = 0
     for (const o of ordersInDateRange) {
-      const s = (o.status || '').toLowerCase()
-      if (s === 'pending') pending++
-      if (s === 'accepted') accepted++
+      const s = (o.status || '').toLowerCase().trim()
+      if (!s) continue
+      if (s === 'pending' || s.includes('pending')) pending++
+      else if (s === 'accepted' || s.includes('accepted')) accepted++
     }
     return { pending, accepted }
   }, [ordersInDateRange])
@@ -1121,7 +1114,7 @@ const Dashboard = ({ onSwitchToAI }) => {
         <>
         {(pendingAcceptedCounts.pending > 0 || pendingAcceptedCounts.accepted > 0) && (
           <div
-            className="mb-4 sm:mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-start gap-3 animate-alert-flash motion-reduce:animate-none"
+            className="mb-4 sm:mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-start gap-3 animate-alert-flash motion-reduce:animate-none md:sticky md:top-3 md:z-30"
             role="status"
           >
             <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" aria-hidden />
