@@ -808,8 +808,21 @@ app.use((req, res, next) => {
 })
 
 // Middleware
+const CORS_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173'
+])
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3001'],
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true)
+    if (CORS_ORIGINS.has(origin)) return callback(null, true)
+    if (process.env.CORS_ORIGIN && origin === process.env.CORS_ORIGIN) return callback(null, true)
+    callback(null, false)
+  },
   credentials: true
 }))
 app.use(express.json({
@@ -2452,6 +2465,31 @@ let connectedClients = []
 let productsCache = []
 let productsCacheTimestamp = null
 const PRODUCTS_CACHE_DURATION = 60 * 60 * 1000 // 1 hour cache for products
+let supplementalProductsLoadAttempted = false
+
+/** If cache is empty after startup, try loading once more (e.g. transient network failure). */
+async function ensureProductsCacheLoaded() {
+  if (productsCache.length > 0) return
+  if (supplementalProductsLoadAttempted) return
+  supplementalProductsLoadAttempted = true
+  console.log('📦 Product cache empty — running one supplemental load...')
+  await loadAllProducts()
+}
+
+function normalizeStoresFromApi(data) {
+  if (!data) return []
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data.results)) return data.results
+  if (Array.isArray(data.stores)) return data.stores
+  if (typeof data === 'string') {
+    try {
+      return normalizeStoresFromApi(JSON.parse(data))
+    } catch {
+      return []
+    }
+  }
+  return []
+}
 
 // Function to start auto-refresh
 function startAutoRefresh() {
@@ -2651,7 +2689,7 @@ function searchProducts(searchTerm) {
 }
 
 // Product search endpoint - searches cached products
-app.get('/api/products/search', (req, res) => {
+app.get('/api/products/search', async (req, res) => {
   try {
     const { q } = req.query
     
@@ -2662,6 +2700,8 @@ app.get('/api/products/search', (req, res) => {
         message: 'Search term must be at least 3 characters'
       })
     }
+    
+    await ensureProductsCacheLoaded()
     
     // Check if cache needs refresh (older than 1 hour)
     const cacheAge = productsCacheTimestamp ? Date.now() - productsCacheTimestamp : null
@@ -2968,11 +3008,11 @@ app.get('/api/stores', async (req, res) => {
       timeout: 10000
     })
     
+    const storesList = normalizeStoresFromApi(response.data)
     console.log('📊 Stores response status:', response.status)
-    console.log('📊 Stores loaded:', response.data?.results?.length || 0, 'stores')
+    console.log('📊 Stores loaded:', storesList.length, 'stores')
     
-    // Send JSON response
-    res.json(response.data)
+    res.json({ results: storesList })
   } catch (error) {
     console.error('❌ Error proxying stores:', error.message)
     console.error('❌ Error stack:', error.stack)

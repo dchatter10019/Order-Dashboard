@@ -199,7 +199,13 @@ const ProductManagement = () => {
       const data = await response.json()
       console.log('🏪 Stores loaded from API:', data)
       
-      const storesList = data.results || []
+      const storesList = Array.isArray(data?.results)
+        ? data.results
+        : Array.isArray(data?.stores)
+          ? data.stores
+          : Array.isArray(data)
+            ? data
+            : []
       setStores(storesList)
       return storesList.length
     } catch (error) {
@@ -381,7 +387,13 @@ const ProductManagement = () => {
           </div>
           {productCacheStatus ? (
             <>
-              <p className="text-sm text-green-600 mt-2">✓ {productCacheStatus.totalProducts.toLocaleString()} products cached</p>
+              {productCacheStatus.totalProducts > 0 ? (
+                <p className="text-sm text-green-600 mt-2">✓ {productCacheStatus.totalProducts.toLocaleString()} products cached</p>
+              ) : (
+                <p className="text-sm text-amber-700 mt-2">
+                  No products in cache yet. Searching will trigger a load, or use &quot;Refresh products cache&quot; below. Ensure the server can reach api.getbevvi.com.
+                </p>
+              )}
               <p className="text-xs text-gray-400 mt-1">All Bevvi products loaded in backend</p>
               {productCacheStatus.lastUpdated && (
                 <p className="text-xs text-gray-500 mt-1">
@@ -414,7 +426,11 @@ const ProductManagement = () => {
             </div>
           ) : stores.length > 0 ? (
             <p className="text-sm text-green-600 mt-2">✓ {stores.length} stores available</p>
-          ) : null}
+          ) : (
+            <p className="text-sm text-amber-700 mt-2">
+              No stores loaded. Click &quot;Load Stores&quot; below, or confirm <code className="text-xs bg-gray-100 px-1 rounded">/api/stores</code> reaches this app&apos;s server (same host as the UI when using port 3001, or Vite proxy on 3000).
+            </p>
+          )}
         </div>
 
         {/* Company Info */}
