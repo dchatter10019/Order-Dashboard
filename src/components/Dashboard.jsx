@@ -965,6 +965,55 @@ const Dashboard = ({ onSwitchToAI }) => {
             </button>
           </div>
         )}
+
+        {!isLoading && (pendingAcceptedCounts.pending > 0 || pendingAcceptedCounts.accepted > 0) && (
+          <div
+            className="mb-4 sm:mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-start gap-3 animate-alert-flash motion-reduce:animate-none md:sticky md:top-3 md:z-30"
+            role="status"
+          >
+            <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" aria-hidden />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-900">Pending and accepted orders</p>
+              <p className="text-sm text-amber-800 mt-1">
+                This date range includes{' '}
+                <span className="font-medium">{formatNumber(pendingAcceptedCounts.pending)} pending</span>
+                {' and '}
+                <span className="font-medium">{formatNumber(pendingAcceptedCounts.accepted)} accepted</span>
+                {' '}orders. Review and confirm as needed.
+              </p>
+              <p className="text-xs text-amber-700/90 mt-2">
+                Optional Slack alerts (set <span className="font-mono">SLACK_WEBHOOK_URL</span> on the server): pending over 15 minutes; still accepted within 30 minutes of scheduled delivery. Alerts run when orders are fetched or on auto-refresh.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {pendingAcceptedCounts.pending > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(['pending'])}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
+                  >
+                    Show pending only
+                  </button>
+                )}
+                {pendingAcceptedCounts.accepted > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter(['accepted'])}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
+                  >
+                    Show accepted only
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter([...allStatusFilterValues])}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700"
+                >
+                  All statuses
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Date Range and Filters */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-4 sm:mb-6">
@@ -1112,54 +1161,6 @@ const Dashboard = ({ onSwitchToAI }) => {
         {/* Summary Tiles - Hidden during loading */}
         {!isLoading && (
         <>
-        {(pendingAcceptedCounts.pending > 0 || pendingAcceptedCounts.accepted > 0) && (
-          <div
-            className="mb-4 sm:mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-start gap-3 animate-alert-flash motion-reduce:animate-none md:sticky md:top-3 md:z-30"
-            role="status"
-          >
-            <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" aria-hidden />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-amber-900">Pending and accepted orders</p>
-              <p className="text-sm text-amber-800 mt-1">
-                This date range includes{' '}
-                <span className="font-medium">{formatNumber(pendingAcceptedCounts.pending)} pending</span>
-                {' and '}
-                <span className="font-medium">{formatNumber(pendingAcceptedCounts.accepted)} accepted</span>
-                {' '}orders. Review and confirm as needed.
-              </p>
-              <p className="text-xs text-amber-700/90 mt-2">
-                Optional Slack alerts (set <span className="font-mono">SLACK_WEBHOOK_URL</span> on the server): pending over 15 minutes; still accepted within 30 minutes of scheduled delivery. Alerts run when orders are fetched or on auto-refresh.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {pendingAcceptedCounts.pending > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter(['pending'])}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
-                  >
-                    Show pending only
-                  </button>
-                )}
-                {pendingAcceptedCounts.accepted > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter(['accepted'])}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
-                  >
-                    Show accepted only
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter([...allStatusFilterValues])}
-                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700"
-                >
-                  All statuses
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-4 sm:mb-6">
           {/* Total Orders Tile */}
           <div className={`bg-white rounded-lg shadow transition-all duration-300 ${collapsedTiles.totalOrders ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
