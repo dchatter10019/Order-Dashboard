@@ -70,9 +70,14 @@ export default {
             backgroundColor: 'rgb(254 243 199)',
           },
         },
+        'drawer-slide-in-right': {
+          '0%': { transform: 'translateX(100%)' },
+          '100%': { transform: 'translateX(0)' },
+        },
       },
       animation: {
         'alert-flash': 'alert-flash 2s ease-in-out infinite',
+        'drawer-slide-in-right': 'drawer-slide-in-right 0.2s ease-out forwards',
       },
     },
   },

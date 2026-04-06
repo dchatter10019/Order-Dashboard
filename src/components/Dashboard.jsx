@@ -48,6 +48,8 @@ const Dashboard = ({ onSwitchToAI }) => {
     statusFilter: false,
     deliveryFilter: false
   })
+  /** Below md: user can collapse the pending/accepted banner to a single row; desktop always shows full banner. */
+  const [mobilePendingAlertMinimized, setMobilePendingAlertMinimized] = useState(false)
 
   // Parse API date/time into local time
   const parseLocalDateTime = useCallback((dateTimeValue) => {
@@ -156,6 +158,12 @@ const Dashboard = ({ onSwitchToAI }) => {
     }
     return { pending, accepted }
   }, [ordersInDateRange])
+
+  useEffect(() => {
+    if (pendingAcceptedCounts.pending === 0 && pendingAcceptedCounts.accepted === 0) {
+      setMobilePendingAlertMinimized(false)
+    }
+  }, [pendingAcceptedCounts.pending, pendingAcceptedCounts.accepted])
 
   const allStatusFilterValues = ['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected']
 
@@ -967,52 +975,80 @@ const Dashboard = ({ onSwitchToAI }) => {
         )}
 
         {!isLoading && (pendingAcceptedCounts.pending > 0 || pendingAcceptedCounts.accepted > 0) && (
-          <div
-            className="mb-4 sm:mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-start gap-3 animate-alert-flash motion-reduce:animate-none md:sticky md:top-3 md:z-30"
-            role="status"
-          >
-            <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" aria-hidden />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-amber-900">Pending and accepted orders</p>
-              <p className="text-sm text-amber-800 mt-1">
-                This date range includes{' '}
-                <span className="font-medium">{formatNumber(pendingAcceptedCounts.pending)} pending</span>
-                {' and '}
-                <span className="font-medium">{formatNumber(pendingAcceptedCounts.accepted)} accepted</span>
-                {' '}orders. Review and confirm as needed.
-              </p>
-              <p className="text-xs text-amber-700/90 mt-2">
-                Optional Slack alerts (set <span className="font-mono">SLACK_WEBHOOK_URL</span> on the server): pending over 15 minutes; still accepted within 30 minutes of scheduled delivery. Alerts run when orders are fetched or on auto-refresh.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {pendingAcceptedCounts.pending > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter(['pending'])}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
-                  >
-                    Show pending only
-                  </button>
-                )}
-                {pendingAcceptedCounts.accepted > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter(['accepted'])}
-                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
-                  >
-                    Show accepted only
-                  </button>
-                )}
+          <>
+            {mobilePendingAlertMinimized && (
+              <div
+                className="mb-4 sm:mb-6 md:hidden rounded-lg border border-amber-200 bg-amber-50 shadow-sm sticky top-3 z-30"
+                role="status"
+              >
                 <button
                   type="button"
-                  onClick={() => setStatusFilter([...allStatusFilterValues])}
-                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700"
+                  onClick={() => setMobilePendingAlertMinimized(false)}
+                  className="w-full flex items-center gap-2 px-3 py-3 sm:py-2.5 text-left rounded-lg active:bg-amber-100/80"
+                  aria-label="Expand pending and accepted alert"
                 >
-                  All statuses
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-600" aria-hidden />
+                  <span className="flex-1 min-w-0 text-sm font-medium text-amber-900">
+                    {formatNumber(pendingAcceptedCounts.pending)} pending · {formatNumber(pendingAcceptedCounts.accepted)} accepted
+                  </span>
+                  <ChevronDown className="h-5 w-5 flex-shrink-0 text-amber-700" aria-hidden />
                 </button>
               </div>
+            )}
+            <div
+              className={`mb-4 sm:mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 sm:px-5 sm:py-4 gap-3 animate-alert-flash motion-reduce:animate-none md:sticky md:top-3 md:z-30 ${
+                mobilePendingAlertMinimized ? 'hidden md:flex' : 'flex'
+              } flex-col sm:flex-row sm:items-start relative`}
+              role="status"
+            >
+              <button
+                type="button"
+                onClick={() => setMobilePendingAlertMinimized(true)}
+                className="md:hidden absolute top-3 right-3 p-2 rounded-md text-amber-800 hover:bg-amber-100/90 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-1 focus:ring-offset-amber-50"
+                aria-label="Minimize alert"
+              >
+                <ChevronUp className="h-5 w-5" aria-hidden />
+              </button>
+              <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5 md:mt-0.5" aria-hidden />
+              <div className="flex-1 min-w-0 pr-10 md:pr-0">
+                <p className="text-sm font-semibold text-amber-900">Pending and accepted orders</p>
+                <p className="text-sm text-amber-800 mt-1">
+                  This date range includes{' '}
+                  <span className="font-medium">{formatNumber(pendingAcceptedCounts.pending)} pending</span>
+                  {' and '}
+                  <span className="font-medium">{formatNumber(pendingAcceptedCounts.accepted)} accepted</span>
+                  {' '}orders. Review and confirm as needed.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {pendingAcceptedCounts.pending > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter(['pending'])}
+                      className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
+                    >
+                      Show pending only
+                    </button>
+                  )}
+                  {pendingAcceptedCounts.accepted > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter(['accepted'])}
+                      className="px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100"
+                    >
+                      Show accepted only
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter([...allStatusFilterValues])}
+                    className="px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700"
+                  >
+                    All statuses
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          </>
         )}
         
         {/* Date Range and Filters */}

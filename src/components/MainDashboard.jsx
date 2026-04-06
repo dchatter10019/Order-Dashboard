@@ -64,15 +64,16 @@ const MainDashboard = ({ onLogout }) => {
       <header className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
+            <div className="flex items-center min-w-0 flex-1">
               <Logo />
-              <h1 className="ml-4 text-xl font-semibold text-gray-900">
+              <h1 className="ml-3 sm:ml-4 text-base sm:text-xl font-semibold text-gray-900 truncate min-w-0">
                 Bevvi Order Tracking System
               </h1>
             </div>
 
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 flex-shrink-0">
               <button
+                type="button"
                 onClick={onLogout}
                 className="hidden md:flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500"
               >
@@ -80,8 +81,11 @@ const MainDashboard = ({ onLogout }) => {
                 Logout
               </button>
               <button
+                type="button"
                 onClick={() => setIsMobileMenuOpen(prev => !prev)}
-                className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500"
+                className="md:hidden inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500 -mr-1"
+                aria-expanded={isMobileMenuOpen}
+                aria-controls="mobile-nav-drawer"
                 aria-label="Toggle navigation menu"
               >
                 {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -99,10 +103,18 @@ const MainDashboard = ({ onLogout }) => {
             onClick={() => setIsMobileMenuOpen(false)}
             aria-hidden="true"
           />
-          <div className="fixed inset-y-0 left-0 w-72 bg-white shadow-xl z-50 flex flex-col">
+          <div
+            id="mobile-nav-drawer"
+            dir="ltr"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+            className="fixed inset-y-0 right-0 left-auto w-72 max-w-[min(18rem,85vw)] bg-white shadow-xl z-50 flex flex-col animate-drawer-slide-in-right motion-reduce:animate-none"
+          >
             <div className="flex items-center justify-between px-4 py-4 border-b">
               <span className="text-base font-semibold text-gray-900">Navigation</span>
               <button
+                type="button"
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="inline-flex items-center justify-center p-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-bevvi-primary-500"
                 aria-label="Close navigation menu"
