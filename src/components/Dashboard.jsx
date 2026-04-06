@@ -8,6 +8,7 @@ import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
 import { filterOrdersByCalendarRange, resolveOrderTimeZone } from '../utils/orderDates'
+import pkg from '../../package.json'
 
 const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
@@ -1968,7 +1969,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(ordersInDateRange.length)} | 
                     Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.4.0
+                    v{pkg.version}
                   </>
                 )}
               </div>
@@ -2009,7 +2010,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <>
                     Orders: {formatNumber(ordersInDateRange.length)} | 
                     Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v2.4.0
+                    v{pkg.version}
                   </>
                 )}
               </div>
