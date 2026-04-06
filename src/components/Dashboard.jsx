@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown, AlertTriangle, Search, X } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
@@ -1411,42 +1411,6 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* Order Types Tile */}
 
-
-        {/* Search Bar - Hidden during loading */}
-        {!isLoading && (
-        <div className="mb-4 sm:mb-6">
-          <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <svg className="h-4 w-4 sm:h-5 sm:w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </div>
-            <input
-              type="text"
-              placeholder="Search orders..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="block w-full pl-9 sm:pl-10 pr-3 py-2 text-sm border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-bevvi-500 focus:border-bevvi-500"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center"
-              >
-                <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-          </div>
-          {searchTerm && (
-            <p className="mt-2 text-sm text-gray-600">
-              Found {formatNumber(filteredOrders.length)} orders matching "{searchTerm}"
-            </p>
-          )}
-        </div>
-        )}
-
         {!isLoading && (
         <div className="bg-white rounded-lg shadow p-3 sm:p-4 lg:p-6">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 sm:mb-4 gap-2">
@@ -1454,6 +1418,43 @@ const Dashboard = ({ onSwitchToAI }) => {
             <div className="text-xs sm:text-sm text-gray-600">
               Showing {formatNumber(filteredOrdersByStatusAndDelivery.length)} of {formatNumber(totalOrders)} orders
             </div>
+          </div>
+
+          <div className="mb-4 sm:mb-5 rounded-xl border-2 border-bevvi-primary-200 bg-gradient-to-b from-bevvi-primary-50 to-white p-3 sm:p-4 shadow-sm ring-1 ring-bevvi-primary-100/80">
+            <label htmlFor="dashboard-order-search" className="block text-sm font-semibold text-bevvi-primary-900 mb-2">
+              Search orders
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-bevvi-primary-600 sm:left-3.5 sm:h-5 sm:w-5" aria-hidden />
+              <input
+                id="dashboard-order-search"
+                type="search"
+                autoComplete="off"
+                placeholder="Order #, customer name, or type delayed…"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="block w-full rounded-lg border border-bevvi-primary-200 bg-white py-3 pl-11 pr-11 text-base text-gray-900 shadow-inner placeholder:text-gray-500 focus:border-bevvi-primary-500 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 sm:pl-12 sm:pr-12 sm:text-base"
+              />
+              {searchTerm ? (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-800"
+                  aria-label="Clear search"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-2 text-xs text-gray-600">
+              Filter the list below by order ID, customer, or order number. Use the keyword <span className="font-medium text-gray-800">delayed</span> to show delayed deliveries.
+            </p>
+            {searchTerm ? (
+              <p className="mt-2 text-sm font-medium text-bevvi-primary-800">
+                Found {formatNumber(filteredOrders.length)} matching {formatNumber(filteredOrders.length) === 1 ? 'order' : 'orders'}
+                {searchTerm.trim() ? ` for "${searchTerm.trim()}"` : ''}
+              </p>
+            ) : null}
           </div>
 
           {/* Error Display */}
