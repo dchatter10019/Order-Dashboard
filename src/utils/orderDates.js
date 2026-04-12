@@ -56,6 +56,60 @@ export function getOrderLocalDate(order, timeZone) {
   return order.orderDate || null
 }
 
+/**
+ * Local YYYY-MM-DD for the Order Date column (must stay in sync with Dashboard.jsx).
+ * If orderDateTime is present but invalid, falls back to order.orderDate like the UI.
+ */
+export function getOrderYmdForDashboard(order) {
+  if (!order || !order.orderDate) return null
+  if (order.orderDateTime) {
+    try {
+      const date = new Date(order.orderDateTime)
+      if (isNaN(date.getTime())) return order.orderDate
+      return (
+        `${date.getFullYear()}-` +
+        `${String(date.getMonth() + 1).padStart(2, '0')}-` +
+        `${String(date.getDate()).padStart(2, '0')}`
+      )
+    } catch {
+      return order.orderDate
+    }
+  }
+  return order.orderDate
+}
+
+/**
+ * Local YYYY-MM-DD for the Delivery Date column (must stay in sync with Dashboard.jsx).
+ */
+export function getDeliveryYmdForDashboard(order) {
+  if (!order || order.deliveryDate === 'N/A') return null
+  if (order.deliveryDateTime) {
+    try {
+      const d = new Date(order.deliveryDateTime)
+      if (isNaN(d.getTime())) return order.deliveryDate
+      return (
+        `${d.getFullYear()}-` +
+        `${String(d.getMonth() + 1).padStart(2, '0')}-` +
+        `${String(d.getDate()).padStart(2, '0')}`
+      )
+    } catch {
+      return order.deliveryDate
+    }
+  }
+  return order.deliveryDate
+}
+
+/**
+ * True when the delivery calendar date is strictly after the order (creation) calendar date,
+ * using the same YYYY-MM-DD rules as the dashboard table. Same calendar day → no highlight.
+ */
+export function isDeliveryDateAfterOrderDate(order) {
+  const orderYmd = getOrderYmdForDashboard(order)
+  const deliveryYmd = getDeliveryYmdForDashboard(order)
+  if (!orderYmd || !deliveryYmd) return false
+  return deliveryYmd > orderYmd
+}
+
 export function getDeliveryLocalDate(order, timeZone) {
   if (!order.deliveryDate || order.deliveryDate === 'N/A') return null
   if (order.deliveryDateTime) {

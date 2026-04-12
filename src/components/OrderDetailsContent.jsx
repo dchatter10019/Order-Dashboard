@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle, FileText, Save, ExternalLink, MessageSquare } from 'lucide-react'
 import { formatDollarAmount } from '../utils/formatCurrency'
+import { isDeliveryDateAfterOrderDate } from '../utils/orderDates'
 
 const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, detailsError, setOrderDetails, autoFetch = true }) => {
   const [notes, setNotes] = useState('')
@@ -428,7 +429,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
             </div>
             <div>
               <p className="text-sm font-medium text-gray-600">Expected Delivery</p>
-              <p className="text-gray-900">
+              <p className={isDeliveryDateAfterOrderDate(order) ? 'text-bevvi-primary-700 font-medium' : 'text-gray-900'}>
                 {order.deliveryDate === 'N/A' ? 'N/A' : (() => {
                   // Convert UTC delivery date to local date for display
                   let displayDate = order.deliveryDate
@@ -665,7 +666,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
               </div>
               <div className="flex justify-between items-center py-2">
                 <span className="text-sm font-medium text-amber-700">Delivery Date</span>
-                <span className="font-semibold text-amber-900">
+                <span className={`font-semibold ${isDeliveryDateAfterOrderDate(order) ? 'text-bevvi-primary-700' : 'text-amber-900'}`}>
                   {order.deliveryDate === 'N/A' ? 'N/A' : (() => {
                     // Convert UTC delivery date to local date for display
                     let displayDate = order.deliveryDate

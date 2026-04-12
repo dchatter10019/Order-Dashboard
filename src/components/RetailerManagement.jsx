@@ -3,7 +3,45 @@ import { Store, Calendar, RefreshCw, Download, ChevronUp, ChevronDown, FileSprea
 import DateRangePicker from './DateRangePicker'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
-import * as XLSX from 'xlsx'
+import * as XLSX from 'xlsx-js-style'
+
+// xlsx community build drops fills; xlsx-js-style preserves them for .xlsx export
+const EXCEL_HEADER_STYLE = {
+  fill: { patternType: 'solid', fgColor: { rgb: 'FF1F4E79' } },
+  font: { bold: true, color: { rgb: 'FFFFFFFF' }, sz: 11 },
+  alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+  border: {
+    top: { style: 'thin', color: { rgb: 'FF1F4E79' } },
+    bottom: { style: 'thin', color: { rgb: 'FF1F4E79' } },
+    left: { style: 'thin', color: { rgb: 'FF1F4E79' } },
+    right: { style: 'thin', color: { rgb: 'FF1F4E79' } }
+  }
+}
+
+const EXCEL_TOTAL_ROW_STYLE = {
+  fill: { patternType: 'solid', fgColor: { rgb: 'FFFFFFCC' } },
+  font: { bold: true, sz: 11 },
+  alignment: { vertical: 'center' }
+}
+
+const EXCEL_SECTION_TITLE_STYLE = {
+  font: { bold: true, sz: 12 },
+  alignment: { horizontal: 'left', vertical: 'center' }
+}
+
+function applyRowStyle(sheet, row0Based, colCount, style) {
+  for (let c = 0; c < colCount; c++) {
+    const ref = XLSX.utils.encode_cell({ r: row0Based, c })
+    if (!sheet[ref]) continue
+    const cell = sheet[ref]
+    cell.s = { ...style }
+  }
+}
+
+function mergeCellStyle(sheet, ref, patch) {
+  if (!sheet[ref]) return
+  sheet[ref].s = { ...(sheet[ref].s || {}), ...patch }
+}
 
 const RetailerManagement = () => {
   const [orders, setOrders] = useState([])
@@ -61,6 +99,11 @@ const RetailerManagement = () => {
     ]
     if (tenPercentRetailers.includes(normalizedRetailer)) {
       return 0.10
+    }
+
+    // Priority 3b: All stores starting with GoPuff (15%)
+    if (normalizedRetailer.startsWith('gopuff')) {
+      return 0.15
     }
     
     // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
@@ -382,6 +425,11 @@ const RetailerManagement = () => {
     if (tenPercentRetailers.includes(retailerTrim)) {
       return 0.10
     }
+
+    // Priority 3b: All stores starting with GoPuff (15%)
+    if (retailerLower.startsWith('gopuff')) {
+      return 0.15
+    }
     
     // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
     const fifteenPercentRetailers = [
@@ -427,22 +475,42 @@ const RetailerManagement = () => {
       // Create workbook
       const wb = XLSX.utils.book_new()
 
+      const formatReportDate = (iso) => {
+        if (!iso) return ''
+        const s = String(iso).trim()
+        if (s.match(/^\d{4}-\d{2}-\d{2}$/)) {
+          const [y, m, d] = s.split('-')
+          return `${parseInt(m, 10)}/${parseInt(d, 10)}/${y}`
+        }
+        return s
+      }
+      const reportDateRange = `${formatReportDate(dateRange.startDate)} to ${formatReportDate(dateRange.endDate)}`
+
       // Prepare transaction data for this retailer only
       const transactions = retailerOrders.map(order => {
         const subtotal = parseFloat(order.revenue) || 0
         const normCustomer = (order.customerName || '').trim().toLowerCase()
         const establishmentKey = normalizeEstablishmentForFees(order.establishment)
         const feeRate = determineFeeRate(order.establishment, order.customerName)
-        let serviceFee = 0
+        let bevviFees = 0
         if (subtotal > 0) {
           if (normCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
-            serviceFee = FLAT_RETAILER_FEES_USD[establishmentKey]
+            bevviFees = FLAT_RETAILER_FEES_USD[establishmentKey]
           } else {
-            serviceFee = Math.round(subtotal * feeRate * 100) / 100
+            bevviFees = Math.round(subtotal * feeRate * 100) / 100
           }
         }
-        const serviceFeeTax = Math.round(serviceFee * 0.0875 * 100) / 100
-        const total = Math.round((subtotal + serviceFee + serviceFeeTax) * 100) / 100
+        const tax = parseFloat(order.tax) || 0
+        const tip = parseFloat(order.tip) || 0
+        const shippingFee = parseFloat(order.shippingFee) || 0
+        const deliveryFee = parseFloat(order.deliveryFee) || 0
+        const platformServiceFee = parseFloat(order.serviceCharge) || 0
+        const serviceChargeTax = parseFloat(order.serviceChargeTax) || 0
+        let totalAmount = parseFloat(order.totalAmount) || 0
+        if (!totalAmount && subtotal > 0) {
+          totalAmount = Math.round((subtotal + tax + tip + shippingFee + deliveryFee + platformServiceFee + serviceChargeTax) * 100) / 100
+        }
+        const feeRatePct = subtotal > 0 ? Math.round((bevviFees / subtotal) * 1000) / 10 : 0
 
         return {
           id: order.id || order.ordernum || `ORD-${Date.now()}`,
@@ -450,10 +518,21 @@ const RetailerManagement = () => {
           retailer: order.establishment || 'Unknown Retailer',
           customer: order.customerName || 'Unknown Customer',
           order_number: order.ordernum || order.id || 'N/A',
-          subtotal: subtotal,
-          serviceFee: serviceFee,
-          serviceFeeTax: serviceFeeTax,
-          total: total
+          subtotal,
+          bevviFees,
+          feeRatePct,
+          tax,
+          tip,
+          shippingFee,
+          deliveryFee,
+          platformServiceFee,
+          serviceChargeTax,
+          totalAmount,
+          paymentId:
+            order.stripePaymentId ||
+            order.stripepaymentid ||
+            order.paymentId ||
+            ''
         }
       })
 
@@ -462,8 +541,8 @@ const RetailerManagement = () => {
       
       // Aggregate totals for this retailer
       const retailerSubtotal = transactions.reduce((sum, t) => sum + t.subtotal, 0)
-      const retailerServiceFees = transactions.reduce((sum, t) => sum + t.serviceFee, 0)
-      const retailerTotal = transactions.reduce((sum, t) => sum + t.total, 0)
+      const retailerServiceFees = transactions.reduce((sum, t) => sum + t.bevviFees, 0)
+      const retailerTotal = transactions.reduce((sum, t) => sum + (t.totalAmount || 0), 0)
 
       summaryData.push([
         retailerName,
@@ -481,26 +560,22 @@ const RetailerManagement = () => {
       ])
 
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
-      
-      // Format header row
-      summarySheet['A1'].s = { font: { bold: true }, alignment: { horizontal: 'left' } }
-      summarySheet['B1'].s = { font: { bold: true }, alignment: { horizontal: 'right' } }
-      summarySheet['C1'].s = { font: { bold: true }, alignment: { horizontal: 'right' } }
-      summarySheet['D1'].s = { font: { bold: true }, alignment: { horizontal: 'right' } }
-      
-      // Format GRAND TOTAL row
-      const totalRowIndex = summaryData.length
-      summarySheet[`A${totalRowIndex}`].s = { font: { bold: true }, alignment: { horizontal: 'left' } }
-      summarySheet[`B${totalRowIndex}`].s = { font: { bold: true }, alignment: { horizontal: 'right' } }
-      summarySheet[`C${totalRowIndex}`].s = { font: { bold: true }, alignment: { horizontal: 'right' } }
-      summarySheet[`D${totalRowIndex}`].s = { font: { bold: true }, alignment: { horizontal: 'right' } }
 
-      // Set currency format for monetary columns
       const currencyFormat = '$#,##0.00'
-      for (let row = 2; row <= totalRowIndex; row++) {
-        summarySheet[`B${row}`].z = currencyFormat
-        summarySheet[`C${row}`].z = currencyFormat
-        summarySheet[`D${row}`].z = currencyFormat
+      applyRowStyle(summarySheet, 0, 4, EXCEL_HEADER_STYLE)
+      const totalRowIndex0 = summaryData.length - 1
+      applyRowStyle(summarySheet, totalRowIndex0, 4, EXCEL_TOTAL_ROW_STYLE)
+
+      for (let row0 = 1; row0 <= totalRowIndex0; row0++) {
+        for (let c = 1; c <= 3; c++) {
+          const ref = XLSX.utils.encode_cell({ r: row0, c })
+          if (summarySheet[ref]) {
+            mergeCellStyle(summarySheet, ref, {
+              numFmt: currencyFormat,
+              alignment: { horizontal: 'right', vertical: 'center' }
+            })
+          }
+        }
       }
 
       // Calculate and set column widths based on content
@@ -513,156 +588,201 @@ const RetailerManagement = () => {
 
       XLSX.utils.book_append_sheet(wb, summarySheet, 'Executive Summary')
 
-      // Create retailer sheet for this specific retailer
+      // Create retailer sheet: title + customer summary + detailed transactions (Google Sheets style)
       const retailerSheetData = []
 
-        // Customer Summary Section
-        retailerSheetData.push(['Customer Summary'])
-        retailerSheetData.push(['Customer', 'Subtotal', 'Bevvi Marketing Fees', 'Total'])
+      retailerSheetData.push([`--- ${retailerName} - Customer Summary ---`])
+      retailerSheetData.push([])
 
-        // Group by customer for this retailer
-        const customerMap = new Map()
-        transactions.forEach(txn => {
-          const customer = txn.customer
-          if (!customerMap.has(customer)) {
-            customerMap.set(customer, { subtotal: 0, serviceFee: 0, total: 0 })
-          }
-          const customerData = customerMap.get(customer)
-          customerData.subtotal += txn.subtotal
-          customerData.serviceFee += txn.serviceFee
-          customerData.total += txn.total
-        })
+      const customerSummaryHeader = [
+        'Customer',
+        'Transactions',
+        'Revenue',
+        'Bevvi Fees',
+        'Fee Rate %',
+        'Avg Transaction',
+        'Total Tip',
+        'Total Delivery Fee',
+        'Date Range'
+      ]
+      retailerSheetData.push(customerSummaryHeader)
 
-        // Sort customers alphabetically
-        const sortedCustomers = Array.from(customerMap.entries()).sort((a, b) => 
-          a[0].localeCompare(b[0])
-        )
-
-        sortedCustomers.forEach(([customer, data]) => {
-          retailerSheetData.push([
-            customer,
-            Math.round(data.subtotal * 100) / 100,
-            Math.round(data.serviceFee * 100) / 100,
-            Math.round(data.total * 100) / 100
-          ])
-        })
-
-        // Customer Summary TOTAL
-        const customerTotalSubtotal = sortedCustomers.reduce((sum, [, data]) => sum + data.subtotal, 0)
-        const customerTotalServiceFee = sortedCustomers.reduce((sum, [, data]) => sum + data.serviceFee, 0)
-        const customerTotalTotal = sortedCustomers.reduce((sum, [, data]) => sum + data.total, 0)
-        retailerSheetData.push([
-          'TOTAL',
-          Math.round(customerTotalSubtotal * 100) / 100,
-          Math.round(customerTotalServiceFee * 100) / 100,
-          Math.round(customerTotalTotal * 100) / 100
-        ])
-
-        // Blank rows
-        retailerSheetData.push([])
-        retailerSheetData.push([])
-
-        // Detailed Transactions Section
-        retailerSheetData.push(['Detailed Transactions'])
-        retailerSheetData.push(['Date', 'Customer', 'Order Number', 'Subtotal', 'Bevvi Marketing Fee', 'Service Fee Tax', 'Total'])
-
-        // Sort transactions by date, then customer
-        const sortedTransactions = [...transactions].sort((a, b) => {
-          const dateCompare = (a.date || '').localeCompare(b.date || '')
-          if (dateCompare !== 0) return dateCompare
-          return (a.customer || '').localeCompare(b.customer || '')
-        })
-
-        sortedTransactions.forEach(txn => {
-        // Format date as MM/DD/YYYY
-        let formattedDate = txn.date
-        if (txn.date && txn.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-          const [year, month, day] = txn.date.split('-')
-          formattedDate = `${month}/${day}/${year}`
+      const customerMap = new Map()
+      transactions.forEach(txn => {
+        const customer = txn.customer
+        if (!customerMap.has(customer)) {
+          customerMap.set(customer, {
+            subtotal: 0,
+            bevviFees: 0,
+            count: 0,
+            totalTip: 0,
+            totalDeliveryFee: 0
+          })
         }
+        const d = customerMap.get(customer)
+        d.subtotal += txn.subtotal
+        d.bevviFees += txn.bevviFees
+        d.count += 1
+        d.totalTip += txn.tip
+        d.totalDeliveryFee += txn.deliveryFee
+      })
 
+      const sortedCustomers = Array.from(customerMap.entries()).sort((a, b) =>
+        a[0].localeCompare(b[0])
+      )
+
+      sortedCustomers.forEach(([customer, data]) => {
+        const rev = Math.round(data.subtotal * 100) / 100
+        const fees = Math.round(data.bevviFees * 100) / 100
+        const feeRatePct =
+          rev > 0 ? `${Math.round((fees / rev) * 1000) / 10}%` : '0%'
+        const avgTxn = data.count > 0 ? Math.round((data.subtotal / data.count) * 100) / 100 : 0
         retailerSheetData.push([
+          customer,
+          data.count,
+          rev,
+          fees,
+          feeRatePct,
+          avgTxn,
+          Math.round(data.totalTip * 100) / 100,
+          Math.round(data.totalDeliveryFee * 100) / 100,
+          reportDateRange
+        ])
+      })
+
+      const customerTotalSubtotal = sortedCustomers.reduce((sum, [, data]) => sum + data.subtotal, 0)
+      const customerTotalFees = sortedCustomers.reduce((sum, [, data]) => sum + data.bevviFees, 0)
+      const customerTotalCount = sortedCustomers.reduce((sum, [, data]) => sum + data.count, 0)
+      const customerTotalTip = sortedCustomers.reduce((sum, [, data]) => sum + data.totalTip, 0)
+      const customerTotalDelivery = sortedCustomers.reduce(
+        (sum, [, data]) => sum + data.totalDeliveryFee,
+        0
+      )
+      const grandRev = Math.round(customerTotalSubtotal * 100) / 100
+      const grandFees = Math.round(customerTotalFees * 100) / 100
+      const grandFeeRatePct =
+        grandRev > 0 ? `${Math.round((grandFees / grandRev) * 1000) / 10}%` : '0%'
+      const grandAvg =
+        customerTotalCount > 0
+          ? Math.round((customerTotalSubtotal / customerTotalCount) * 100) / 100
+          : 0
+
+      retailerSheetData.push([
+        'TOTAL',
+        customerTotalCount,
+        grandRev,
+        grandFees,
+        grandFeeRatePct,
+        grandAvg,
+        Math.round(customerTotalTip * 100) / 100,
+        Math.round(customerTotalDelivery * 100) / 100,
+        reportDateRange
+      ])
+
+      retailerSheetData.push([])
+      retailerSheetData.push([])
+      retailerSheetData.push(['--- Detailed Transactions ---'])
+      const detailHeader = [
+        'Order Number',
+        'Date',
+        'Customer',
+        'Revenue',
+        'Bevvi Fees',
+        'Fee Rate %',
+        'Tax',
+        'Tip',
+        'Shipping Fee',
+        'Delivery Fee',
+        'Service Fee',
+        'Service Fee Tax',
+        'Total Amount',
+        'Payment ID'
+      ]
+      retailerSheetData.push(detailHeader)
+
+      const sortedTransactions = [...transactions].sort((a, b) => {
+        const dateCompare = (a.date || '').localeCompare(b.date || '')
+        if (dateCompare !== 0) return dateCompare
+        return (a.customer || '').localeCompare(b.customer || '')
+      })
+
+      sortedTransactions.forEach(txn => {
+        const formattedDate = formatReportDate(txn.date)
+        const feePctStr =
+          txn.subtotal > 0 ? `${txn.feeRatePct}%` : '0%'
+        retailerSheetData.push([
+          txn.order_number,
           formattedDate,
           txn.customer,
-          txn.order_number,
           txn.subtotal,
-          txn.serviceFee,
-          txn.serviceFeeTax,
-          txn.total
+          txn.bevviFees,
+          feePctStr,
+          txn.tax,
+          txn.tip,
+          txn.shippingFee,
+          txn.deliveryFee,
+          txn.platformServiceFee,
+          txn.serviceChargeTax,
+          txn.totalAmount,
+          txn.paymentId
         ])
-        })
+      })
 
-        const retailerSheet = XLSX.utils.aoa_to_sheet(retailerSheetData)
+      const retailerSheet = XLSX.utils.aoa_to_sheet(retailerSheetData)
 
-        // Format section headers (Customer Summary and Detailed Transactions)
-        const customerSummaryRow = 1
-        const detailedTransactionsRow = retailerSheetData.findIndex(row => 
-          row[0] === 'Detailed Transactions'
+      mergeCellStyle(retailerSheet, 'A1', EXCEL_SECTION_TITLE_STYLE)
+
+      const customerHeaderIdx =
+        retailerSheetData.findIndex(
+          (row) => row[0] === 'Customer' && row[1] === 'Transactions'
         ) + 1
+      const totalRowIdx =
+        customerHeaderIdx + sortedCustomers.length + 1
+      const detailedTitleRow =
+        retailerSheetData.findIndex((row) => row[0] === '--- Detailed Transactions ---') + 1
+      const detailHeaderIdx = detailedTitleRow + 1
 
-        retailerSheet[`A${customerSummaryRow}`].s = { font: { bold: true, sz: 12 } }
-        retailerSheet[`A${detailedTransactionsRow}`].s = { font: { bold: true, sz: 12 } }
+      applyRowStyle(retailerSheet, customerHeaderIdx - 1, 9, EXCEL_HEADER_STYLE)
+      applyRowStyle(retailerSheet, totalRowIdx - 1, 9, EXCEL_TOTAL_ROW_STYLE)
 
-        // Format column headers
-        const customerSummaryHeaders = 2
-        const detailedTransactionsHeaders = detailedTransactionsRow + 1
+      mergeCellStyle(
+        retailerSheet,
+        XLSX.utils.encode_cell({ r: detailedTitleRow - 1, c: 0 }),
+        EXCEL_SECTION_TITLE_STYLE
+      )
 
-        for (let col = 0; col < 4; col++) {
-          const cellRef = XLSX.utils.encode_cell({ r: customerSummaryHeaders - 1, c: col })
+      applyRowStyle(retailerSheet, detailHeaderIdx - 1, 14, EXCEL_HEADER_STYLE)
+
+      for (let row = customerHeaderIdx + 1; row <= totalRowIdx; row++) {
+        ;[2, 3, 5, 6, 7].forEach((c) => {
+          const cellRef = XLSX.utils.encode_cell({ r: row - 1, c })
           if (retailerSheet[cellRef]) {
-            retailerSheet[cellRef].s = { font: { bold: true } }
+            mergeCellStyle(retailerSheet, cellRef, {
+              numFmt: currencyFormat,
+              alignment: { horizontal: 'right', vertical: 'center' }
+            })
           }
-        }
+        })
+      }
 
-        for (let col = 0; col < 7; col++) {
-          const cellRef = XLSX.utils.encode_cell({ r: detailedTransactionsHeaders - 1, c: col })
+      const detailFirstRow = detailHeaderIdx + 1
+      const detailLastRow = detailFirstRow + sortedTransactions.length - 1
+      const detailMoneyCols = [3, 4, 6, 7, 8, 9, 10, 11, 12]
+      for (let row = detailFirstRow; row <= detailLastRow; row++) {
+        detailMoneyCols.forEach((c) => {
+          const cellRef = XLSX.utils.encode_cell({ r: row - 1, c })
           if (retailerSheet[cellRef]) {
-            retailerSheet[cellRef].s = { font: { bold: true } }
+            mergeCellStyle(retailerSheet, cellRef, {
+              numFmt: currencyFormat,
+              alignment: { horizontal: 'right', vertical: 'center' }
+            })
           }
-        }
+        })
+      }
 
-        // Format TOTAL row in Customer Summary
-        const customerTotalRow = customerSummaryHeaders + sortedCustomers.length + 1
-        for (let col = 0; col < 4; col++) {
-          const cellRef = XLSX.utils.encode_cell({ r: customerTotalRow - 1, c: col })
-          if (retailerSheet[cellRef]) {
-            retailerSheet[cellRef].s = { font: { bold: true } }
-          }
-        }
-
-        // Set currency format for monetary columns
-        const customerSummaryStartRow = customerSummaryHeaders + 1
-        const customerSummaryEndRow = customerTotalRow
-        for (let row = customerSummaryStartRow; row <= customerSummaryEndRow; row++) {
-          for (let col = 1; col <= 3; col++) {
-            const cellRef = XLSX.utils.encode_cell({ r: row - 1, c: col })
-            if (retailerSheet[cellRef]) {
-              retailerSheet[cellRef].z = currencyFormat
-            }
-          }
-        }
-
-        const detailedTransactionsStartRow = detailedTransactionsHeaders + 1
-        const detailedTransactionsEndRow = detailedTransactionsStartRow + sortedTransactions.length - 1
-        for (let row = detailedTransactionsStartRow; row <= detailedTransactionsEndRow; row++) {
-          for (let col = 3; col <= 6; col++) {
-            const cellRef = XLSX.utils.encode_cell({ r: row - 1, c: col })
-            if (retailerSheet[cellRef]) {
-              retailerSheet[cellRef].z = currencyFormat
-            }
-          }
-        }
-
-        // Calculate and set column widths based on content
-        retailerSheet['!cols'] = [
-          { wch: calculateColumnWidth(retailerSheet, 0, 10, 15) }, // Date
-          { wch: calculateColumnWidth(retailerSheet, 1, 15, 40) }, // Customer
-          { wch: calculateColumnWidth(retailerSheet, 2, 12, 20) }, // Order Number
-          { wch: calculateColumnWidth(retailerSheet, 3, 12, 20) }, // Subtotal
-          { wch: calculateColumnWidth(retailerSheet, 4, 12, 25) }, // Bevvi Marketing Fee
-          { wch: calculateColumnWidth(retailerSheet, 5, 12, 20) }, // Service Fee Tax
-          { wch: calculateColumnWidth(retailerSheet, 6, 12, 20) }  // Total
-        ]
+      retailerSheet['!cols'] = Array.from({ length: 14 }, (_, c) => ({
+        wch: calculateColumnWidth(retailerSheet, c, 12, 40)
+      }))
 
       XLSX.utils.book_append_sheet(wb, retailerSheet, sanitizeSheetName(retailerName))
 

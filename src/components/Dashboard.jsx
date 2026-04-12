@@ -7,7 +7,13 @@ import DeliveryFilter from './DeliveryFilter'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
-import { filterOrdersByCalendarRange, resolveOrderTimeZone } from '../utils/orderDates'
+import {
+  filterOrdersByCalendarRange,
+  getDeliveryYmdForDashboard,
+  getOrderYmdForDashboard,
+  isDeliveryDateAfterOrderDate,
+  resolveOrderTimeZone
+} from '../utils/orderDates'
 import pkg from '../../package.json'
 
 const Dashboard = ({ onSwitchToAI }) => {
@@ -440,6 +446,11 @@ const Dashboard = ({ onSwitchToAI }) => {
     ]
     if (tenPercentRetailers.includes(normalizedRetailer)) {
       return 0.10
+    }
+
+    // Priority 3b: All stores starting with GoPuff (15%)
+    if (normalizedRetailer.startsWith('gopuff')) {
+      return 0.15
     }
     
     // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
@@ -1635,6 +1646,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                           </colgroup>
                           <tbody className="bg-white divide-y divide-gray-200">
                         {sortedOrders.map((order) => {
+                          const deliveryFuture = isDeliveryDateAfterOrderDate(order)
+                          const deliveryCellClass = deliveryFuture ? 'text-bevvi-primary-700 font-medium' : 'text-gray-900'
                           return (
                             <React.Fragment key={order.id}>
                               <tr className="hover:bg-gray-50">
@@ -1656,21 +1669,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={`Raw: orderDate="${order.orderDate}", orderDateTime="${order.orderDateTime || 'null'}"`}>
-                              {order.orderDate ? (() => {
-                                // If we have orderDateTime, use it to get local date
-                                if (order.orderDateTime) {
-                                  try {
-                                    const date = parseLocalDateTime(order.orderDateTime)
-                                    // Convert to local date string
-                                    return date.getFullYear() + '-' + 
-                                           String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-                                           String(date.getDate()).padStart(2, '0')
-                                  } catch (e) {
-                                    return order.orderDate
-                                  }
-                                }
-                                return order.orderDate
-                              })() : 'N/A'}
+                              {order.orderDate ? getOrderYmdForDashboard(order) : 'N/A'}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
@@ -1684,23 +1683,12 @@ const Dashboard = ({ onSwitchToAI }) => {
                                 'N/A'}
                             </div>
                           </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
+                          <td className={`px-3 py-4 text-sm ${deliveryCellClass}`}>
                             <div className="truncate" title={`Raw: deliveryDate="${order.deliveryDate}", deliveryDateTime="${order.deliveryDateTime || 'null'}"`}>
-                              {(() => {
-                                // Convert UTC delivery date to local date for display
-                                if (order.deliveryDate === 'N/A') return 'N/A'
-                                if (order.deliveryDateTime) {
-                                  const localDateTime = parseLocalDateTime(order.deliveryDateTime)
-                                  const localDate = localDateTime.getFullYear() + '-' + 
-                                                   String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
-                                                   String(localDateTime.getDate()).padStart(2, '0')
-                                  return localDate
-                                }
-                                return order.deliveryDate
-                              })()}
+                              {order.deliveryDate === 'N/A' ? 'N/A' : getDeliveryYmdForDashboard(order)}
                             </div>
                           </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
+                          <td className={`px-3 py-4 text-sm ${deliveryCellClass}`}>
                             <div className="truncate" title={`Raw deliveryDateTime: "${order.deliveryDateTime || 'null'}"`}>
                               {order.deliveryDateTime ? 
                                 parseLocalDateTime(order.deliveryDateTime).toLocaleTimeString('en-US', { 
@@ -1769,16 +1757,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                   {/* Mobile Card View - Hidden on desktop */}
                   <div className="md:hidden space-y-3">
                     {sortedOrders.map((order) => {
-                      const deliveryDateDisplay = (() => {
-                        if (order.deliveryDate === 'N/A') return 'N/A'
-                        if (order.deliveryDateTime) {
-                          const localDateTime = parseLocalDateTime(order.deliveryDateTime)
-                          return localDateTime.getFullYear() + '-' + 
-                                 String(localDateTime.getMonth() + 1).padStart(2, '0') + '-' + 
-                                 String(localDateTime.getDate()).padStart(2, '0')
-                        }
-                        return order.deliveryDate
-                      })()
+                      const deliveryDateDisplay =
+                        order.deliveryDate === 'N/A' ? 'N/A' : getDeliveryYmdForDashboard(order)
                       
                       const deliveryTimeDisplay = order.deliveryDateTime ? 
                         parseLocalDateTime(order.deliveryDateTime).toLocaleTimeString('en-US', { 
@@ -1786,6 +1766,9 @@ const Dashboard = ({ onSwitchToAI }) => {
                           minute: '2-digit',
                           hour12: true 
                         }) : 'N/A'
+
+                      const deliveryFuture = isDeliveryDateAfterOrderDate(order)
+                      const deliveryValueClass = deliveryFuture ? 'text-bevvi-primary-700 font-medium' : 'text-gray-900'
 
                       const orderTimeDisplay = order.orderDateTime ? 
                         parseLocalDateTime(order.orderDateTime).toLocaleTimeString('en-US', { 
@@ -1832,21 +1815,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Order Date</p>
                               <p className="text-sm font-medium text-gray-900">
-                                {order.orderDate ? (() => {
-                                  // If we have orderDateTime, use it to get local date
-                                  if (order.orderDateTime) {
-                                    try {
-                                      const date = parseLocalDateTime(order.orderDateTime)
-                                      // Convert to local date string
-                                      return date.getFullYear() + '-' + 
-                                             String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-                                             String(date.getDate()).padStart(2, '0')
-                                    } catch (e) {
-                                      return order.orderDate
-                                    }
-                                  }
-                                  return order.orderDate
-                                })() : 'N/A'}
+                                {order.orderDate ? getOrderYmdForDashboard(order) : 'N/A'}
                               </p>
                             </div>
                             <div>
@@ -1855,11 +1824,11 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Delivery Date</p>
-                              <p className="text-sm font-medium text-gray-900">{deliveryDateDisplay}</p>
+                              <p className={`text-sm font-medium ${deliveryValueClass}`}>{deliveryDateDisplay}</p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Delivery Time</p>
-                              <p className="text-sm font-medium text-gray-900">{deliveryTimeDisplay}</p>
+                              <p className={`text-sm font-medium ${deliveryValueClass}`}>{deliveryTimeDisplay}</p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Service Fee</p>
