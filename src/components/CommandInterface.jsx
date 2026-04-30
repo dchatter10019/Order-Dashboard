@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2, Download, Plus } from 'lucide-react'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch } from '../utils/api'
+import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 
 const CommandInterface = ({ 
   orders, 
@@ -82,6 +83,13 @@ const CommandInterface = ({
     
     // Cap at 3 minutes for very large ranges
     return Math.min(timeout, 180000)
+  }
+
+  const getDateRangeLimitMessage = (range) => {
+    if (!range?.startDate || !range?.endDate) return ''
+    const inclusiveDays = getInclusiveDateRangeDays(range.startDate, range.endDate)
+    if (inclusiveDays <= MAX_ORDER_DATE_RANGE_DAYS) return ''
+    return `❌ Date range cannot exceed ${MAX_ORDER_DATE_RANGE_DAYS} days.\n\nRequested: ${range.startDate} to ${range.endDate} (${inclusiveDays} days)\n\nPlease ask for a shorter date range.`
   }
 
   // Parse natural language date expressions
@@ -782,6 +790,14 @@ const CommandInterface = ({
       })
       
       if (dateRangeForQuery && onDateRangeChange && onFetchOrders) {
+        const rangeLimitMessage = getDateRangeLimitMessage(dateRangeForQuery)
+        if (rangeLimitMessage) {
+          return {
+            type: 'assistant',
+            content: rangeLimitMessage
+          }
+        }
+
         // Check if current dateRange matches the query dateRange
         const needsFetch = !currentDateRange || 
           currentDateRange.startDate !== dateRangeForQuery.startDate || 
@@ -2647,6 +2663,15 @@ const CommandInterface = ({
     // before processing any command (including customer filters). This ensures we have the
     // correct data before filtering by customer.
     if (dateRange && onDateRangeChange && onFetchOrders && !needsBrandData) {
+      const rangeLimitMessage = getDateRangeLimitMessage(dateRange)
+      if (rangeLimitMessage) {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: rangeLimitMessage
+        }])
+        return
+      }
+
       console.log('📅 Date range detected in query - will fetch orders FIRST, then process command')
       console.log(`   Requested date range: ${dateRange.startDate} to ${dateRange.endDate}`)
       console.log(`   Current date range: ${currentDateRange?.startDate} to ${currentDateRange?.endDate}`)
@@ -2807,6 +2832,15 @@ const CommandInterface = ({
     // 1. A date range is detected
     // 2. AND it's NOT a query with specific filters (those use existing data)
     if (dateRange && onDateRangeChange && onFetchOrders && !hasSpecificFilter) {
+      const rangeLimitMessage = getDateRangeLimitMessage(dateRange)
+      if (rangeLimitMessage) {
+        setMessages(prev => [...prev, {
+          type: 'assistant',
+          content: rangeLimitMessage
+        }])
+        return // Exit early - don't fetch
+      }
+
       console.log('🔍 Date range detected, fetching data:', dateRange)
       
       // Validate date range - check if dates are too far in the future

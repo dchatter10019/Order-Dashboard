@@ -14,7 +14,54 @@ import {
   isDeliveryDateAfterOrderDate,
   resolveOrderTimeZone
 } from '../utils/orderDates'
+import { getOrderRowAlertTier } from '../utils/orderRowAlerts'
+import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 import pkg from '../../package.json'
+
+/** Full-row emphasis for time-sensitive statuses (desktop <tr> / mobile card). */
+const ORDER_ROW_ALERT_TR_CLASS = {
+  pending_stale:
+    'bg-rose-50 border-l-4 border-l-rose-500 shadow-sm hover:bg-rose-100/90',
+  accepted_deadline:
+    'bg-amber-50 border-l-4 border-l-amber-500 shadow-sm hover:bg-amber-100/90',
+  transit_deadline:
+    'bg-indigo-50 border-l-4 border-l-indigo-500 shadow-sm hover:bg-indigo-100/90'
+}
+
+const ORDER_ROW_ALERT_CARD_CLASS = {
+  pending_stale:
+    'border-rose-300 bg-rose-50 shadow-md ring-2 ring-rose-200/90',
+  accepted_deadline:
+    'border-amber-300 bg-amber-50 shadow-md ring-2 ring-amber-200/90',
+  transit_deadline:
+    'border-indigo-300 bg-indigo-50 shadow-md ring-2 ring-indigo-200/90'
+}
+
+const getOrderDateRangeError = (dateRange) => {
+  if (!dateRange.startDate || !dateRange.endDate) return null
+
+  const start = new Date(`${dateRange.startDate}T00:00:00`)
+  const end = new Date(`${dateRange.endDate}T23:59:59`)
+
+  if (start > end) {
+    return {
+      message: 'Invalid date range',
+      status: 'Validation Error',
+      details: 'Start date must be less than or equal to end date'
+    }
+  }
+
+  const inclusiveDays = getInclusiveDateRangeDays(dateRange.startDate, dateRange.endDate)
+  if (inclusiveDays > MAX_ORDER_DATE_RANGE_DAYS) {
+    return {
+      message: 'Invalid date range',
+      status: 'Validation Error',
+      details: `Date range cannot exceed ${MAX_ORDER_DATE_RANGE_DAYS} days. Please select a shorter range.`
+    }
+  }
+
+  return null
+}
 
 const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
@@ -57,6 +104,13 @@ const Dashboard = ({ onSwitchToAI }) => {
   })
   /** Below md: user can collapse the pending/accepted banner to a single row; desktop always shows full banner. */
   const [mobilePendingAlertMinimized, setMobilePendingAlertMinimized] = useState(false)
+
+  /** Recompute row alert highlights periodically so 15m / 30m windows update without a full refresh. */
+  const [alertNowMs, setAlertNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setAlertNowMs(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   // Parse API date/time into local time
   const parseLocalDateTime = useCallback((dateTimeValue) => {
@@ -544,18 +598,11 @@ const Dashboard = ({ onSwitchToAI }) => {
   const fetchOrders = useCallback(async () => {
     try {
       // Validate date range before making API call
-      if (dateRange.startDate && dateRange.endDate) {
-        const start = new Date(dateRange.startDate)
-        const end = new Date(dateRange.endDate)
-        
-        if (start > end) {
-          setApiError({
-            message: 'Invalid date range',
-            status: 'Validation Error',
-            details: 'Start date must be less than or equal to end date'
-          })
-          return
-        }
+      const dateRangeError = getOrderDateRangeError(dateRange)
+      if (dateRangeError) {
+        setApiError(dateRangeError)
+        setIsLoading(false)
+        return
       }
       
       setIsLoading(true)
@@ -640,14 +687,11 @@ const Dashboard = ({ onSwitchToAI }) => {
       // Start auto-refresh with current date range
       try {
         // Validate date range before starting auto-refresh
-        if (dateRange.startDate && dateRange.endDate) {
-          const start = new Date(dateRange.startDate)
-          const end = new Date(dateRange.endDate)
-          
-          if (start > end) {
-            console.error('Cannot start auto-refresh: Invalid date range')
-            return
-          }
+        const dateRangeError = getOrderDateRangeError(dateRange)
+        if (dateRangeError) {
+          setApiError(dateRangeError)
+          console.error('Cannot start auto-refresh: Invalid date range')
+          return
         }
         
         const response = await apiFetch('/api/auto-refresh/start', {
@@ -702,14 +746,11 @@ const Dashboard = ({ onSwitchToAI }) => {
       const updateBackendAutoRefresh = async () => {
         try {
           // Validate date range before updating backend auto-refresh
-          if (dateRange.startDate && dateRange.endDate) {
-            const start = new Date(dateRange.startDate)
-            const end = new Date(dateRange.endDate)
-            
-            if (start > end) {
-              console.error('Cannot update backend auto-refresh: Invalid date range')
-              return
-            }
+          const dateRangeError = getOrderDateRangeError(dateRange)
+          if (dateRangeError) {
+            setApiError(dateRangeError)
+            console.error('Cannot update backend auto-refresh: Invalid date range')
+            return
           }
           
           await apiFetch('/api/auto-refresh/start', {
@@ -854,6 +895,13 @@ const Dashboard = ({ onSwitchToAI }) => {
       // Start backend auto-refresh with current date range
       const startBackendAutoRefresh = async () => {
         try {
+          const dateRangeError = getOrderDateRangeError(dateRange)
+          if (dateRangeError) {
+            setApiError(dateRangeError)
+            console.error('Cannot start backend auto-refresh: Invalid date range')
+            return
+          }
+
           const response = await apiFetch('/api/auto-refresh/start', {
             method: 'POST',
             headers: {
@@ -1089,6 +1137,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 dateRange={dateRange}
                 onDateRangeChange={setDateRange}
                 onFetchOrders={fetchOrders}
+                maxRangeDays={MAX_ORDER_DATE_RANGE_DAYS}
               />
             )}
           </div>
@@ -1648,9 +1697,13 @@ const Dashboard = ({ onSwitchToAI }) => {
                         {sortedOrders.map((order) => {
                           const deliveryFuture = isDeliveryDateAfterOrderDate(order)
                           const deliveryCellClass = deliveryFuture ? 'text-bevvi-primary-700 font-medium' : 'text-gray-900'
+                          const rowAlertTier = getOrderRowAlertTier(order, new Date(alertNowMs))
+                          const trAlertClass = rowAlertTier
+                            ? ORDER_ROW_ALERT_TR_CLASS[rowAlertTier]
+                            : 'hover:bg-gray-50'
                           return (
                             <React.Fragment key={order.id}>
-                              <tr className="hover:bg-gray-50">
+                              <tr className={trAlertClass}>
                                 <td className="pl-2 pr-3 py-4 text-sm font-medium text-gray-900">
                                   <button
                                     type="button"
@@ -1777,10 +1830,17 @@ const Dashboard = ({ onSwitchToAI }) => {
                           hour12: true 
                         }) : 'N/A'
 
+                      const cardAlertTier = getOrderRowAlertTier(order, new Date(alertNowMs))
+                      const cardSurfaceClass = cardAlertTier
+                        ? ORDER_ROW_ALERT_CARD_CLASS[cardAlertTier]
+                        : 'bg-white border-gray-200'
+
                       return (
                         <div 
                           key={order.id} 
-                          className="bg-white border border-gray-200 rounded-lg shadow-sm p-4 hover:shadow-md transition-shadow"
+                          className={`border rounded-lg p-4 transition-shadow ${cardSurfaceClass} ${
+                            cardAlertTier ? 'hover:shadow-lg' : 'shadow-sm hover:shadow-md'
+                          }`}
                         >
                           {/* Header Row */}
                           <div className="flex items-start justify-between mb-3 pb-3 border-b border-gray-100">

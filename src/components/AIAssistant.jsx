@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import CommandInterface from './CommandInterface'
+import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 
 const AIAssistant = ({ persistedState, onStateChange }) => {
   const [isLoading, setIsLoading] = useState(false)
@@ -46,6 +47,21 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   const fetchOrders = async (useStateEnrichment = false) => {
     const requestedRange = { ...dateRange }
     try {
+      const inclusiveDays = getInclusiveDateRangeDays(requestedRange.startDate, requestedRange.endDate)
+      if (inclusiveDays > MAX_ORDER_DATE_RANGE_DAYS) {
+        const errorMessage = `Date range cannot exceed ${MAX_ORDER_DATE_RANGE_DAYS} days. Please select a shorter range.`
+        setOrders([])
+        setLastFetchedRange(null)
+        setMessages(prev => {
+          const filtered = prev.filter(m => !m.loading)
+          return [...filtered, {
+            type: 'assistant',
+            content: `❌ ${errorMessage}\n\nRequested date range: ${requestedRange.startDate} to ${requestedRange.endDate}`
+          }]
+        })
+        return
+      }
+
       console.log(`🔍 AI Assistant fetching orders${useStateEnrichment ? ' WITH STATE DATA' : ''}: ${requestedRange.startDate} to ${requestedRange.endDate}`)
       setIsLoading(true)
       // Clear existing orders so we don't process with stale data

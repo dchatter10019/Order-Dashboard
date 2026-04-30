@@ -39,16 +39,6 @@ const MainDashboard = ({ onLogout }) => {
     ]
   })
   
-  // Debug logging for tab switches
-  useEffect(() => {
-    console.log('📑 MainDashboard - Tab changed to:', activeTab)
-    console.log('📑 MainDashboard - AI State:', {
-      messagesCount: aiAssistantState.messages.length,
-      ordersCount: aiAssistantState.orders.length,
-      dateRange: aiAssistantState.dateRange
-    })
-  }, [activeTab, aiAssistantState])
-
   useEffect(() => {
     document.body.style.overflow = isMobileMenuOpen ? 'hidden' : ''
     return () => {
@@ -193,14 +183,19 @@ const MainDashboard = ({ onLogout }) => {
         </div>
       </div>
 
-      {/* Tab Content */}
+      {/* Tab content: keep all panels mounted so filters, scroll, and form state survive tab switches */}
       <main className="max-w-7xl mx-auto">
-        {activeTab === 'orders' && <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />}
-        {activeTab === 'products' && <ProductManagement />}
-        {activeTab === 'retailers' && <RetailerManagement />}
-        {/* Always render AIAssistant to preserve state, just hide it */}
-        <div style={{ display: activeTab === 'ai-assistant' ? 'block' : 'none' }}>
-          <AIAssistant 
+        <div className={activeTab === 'orders' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'orders'}>
+          <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />
+        </div>
+        <div className={activeTab === 'products' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'products'}>
+          <ProductManagement />
+        </div>
+        <div className={activeTab === 'retailers' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'retailers'}>
+          <RetailerManagement />
+        </div>
+        <div className={activeTab === 'ai-assistant' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'ai-assistant'}>
+          <AIAssistant
             persistedState={aiAssistantState}
             onStateChange={setAIAssistantState}
           />

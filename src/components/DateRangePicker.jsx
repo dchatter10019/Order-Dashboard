@@ -1,7 +1,20 @@
 import React from 'react'
 import { Calendar, RefreshCw } from 'lucide-react'
+import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 
-const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshInfo }) => {
+const getLocalDateString = (date) => {
+  return date.getFullYear() + '-' +
+    String(date.getMonth() + 1).padStart(2, '0') + '-' +
+    String(date.getDate()).padStart(2, '0')
+}
+
+const DateRangePicker = ({
+  dateRange,
+  onDateRangeChange,
+  onFetchOrders,
+  refreshInfo,
+  maxRangeDays = MAX_ORDER_DATE_RANGE_DAYS
+}) => {
   const [validationError, setValidationError] = React.useState('')
   
   const validateDateRange = (startDate, endDate) => {
@@ -21,11 +34,26 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
     if (start > end) {
       setValidationError('Start date must be less than or equal to end date')
       return false
-    } else {
-      setValidationError('')
-      return true
     }
+
+    const inclusiveDays = getInclusiveDateRangeDays(startDate, endDate)
+    if (inclusiveDays > maxRangeDays) {
+      setValidationError(`Date range cannot exceed ${maxRangeDays} days. Please select a shorter range.`)
+      return false
+    }
+
+    setValidationError('')
+    return true
   }
+
+  const todayString = getLocalDateString(new Date())
+  const endDateMax = React.useMemo(() => {
+    if (!dateRange.startDate) return todayString
+    const maxEndDate = new Date(`${dateRange.startDate}T00:00:00`)
+    if (isNaN(maxEndDate.getTime())) return todayString
+    maxEndDate.setDate(maxEndDate.getDate() + maxRangeDays - 1)
+    return getLocalDateString(maxEndDate) < todayString ? getLocalDateString(maxEndDate) : todayString
+  }, [dateRange.startDate, maxRangeDays, todayString])
   
   const handleDateChange = (field, value) => {
     const newDateRange = {
@@ -79,12 +107,7 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
           <input
             id="startDate"
             type="date"
-            max={(() => {
-              const today = new Date()
-              return today.getFullYear() + '-' + 
-                     String(today.getMonth() + 1).padStart(2, '0') + '-' + 
-                     String(today.getDate()).padStart(2, '0')
-            })()}
+            max={todayString}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-bevvi-primary-500 transition-all duration-200 bg-gray-50 text-gray-900 text-sm"
             value={dateRange.startDate}
             onChange={(e) => handleDateChange('startDate', e.target.value)}
@@ -98,12 +121,7 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
           <input
             id="endDate"
             type="date"
-            max={(() => {
-              const today = new Date()
-              return today.getFullYear() + '-' + 
-                     String(today.getMonth() + 1).padStart(2, '0') + '-' + 
-                     String(today.getDate()).padStart(2, '0')
-            })()}
+            max={endDateMax}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-bevvi-primary-500 transition-all duration-200 bg-gray-50 text-gray-900 text-sm"
             value={dateRange.endDate}
             onChange={(e) => handleDateChange('endDate', e.target.value)}
@@ -121,7 +139,7 @@ const DateRangePicker = ({ dateRange, onDateRangeChange, onFetchOrders, refreshI
       
       <div className="mt-4 text-sm text-gray-600">
         <p>Selected range: <span className="font-medium">{dateRange.startDate}</span> to <span className="font-medium">{dateRange.endDate}</span></p>
-        <p className="mt-1 text-xs text-gray-500">Click "Fetch Orders" to call the Bevvi API with these dates</p>
+        <p className="mt-1 text-xs text-gray-500">Select up to {maxRangeDays} days, then click "Fetch Orders" to call the Bevvi API with these dates</p>
       </div>
         
         {/* Refresh Timing Information removed as requested */}

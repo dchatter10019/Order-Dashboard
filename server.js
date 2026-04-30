@@ -7,6 +7,8 @@ require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 
 /** Calendar YYYY-MM-DD in a specific IANA zone (not server local / not raw UTC date). */
 const DEFAULT_ORDER_TIMEZONE = process.env.BEVVI_ORDER_TIMEZONE || 'America/New_York'
+const MAX_ORDER_DATE_RANGE_DAYS = 31
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 function getYyyyMmDdInTimeZone(dateInput, timeZone = DEFAULT_ORDER_TIMEZONE) {
   const d = dateInput instanceof Date ? dateInput : new Date(dateInput)
@@ -97,6 +99,41 @@ function bevviCsvUtcDateRange(startDate, endDate, timeZone) {
   return utcStartString <= utcEndString
     ? { utcStartString, utcEndString }
     : { utcStartString: utcEndString, utcEndString: utcStartString }
+}
+
+function parseYyyyMmDdUtc(dateString) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString || '')
+  if (!match) return null
+  const [, year, month, day] = match.map(Number)
+  const utcMs = Date.UTC(year, month - 1, day)
+  const parsed = new Date(utcMs)
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return parsed
+}
+
+function validateOrderDateRange(startDate, endDate) {
+  const start = parseYyyyMmDdUtc(startDate)
+  const end = parseYyyyMmDdUtc(endDate)
+  if (!start || !end) {
+    return 'Dates must be in YYYY-MM-DD format.'
+  }
+
+  if (start > end) {
+    return 'Start date must be less than or equal to end date.'
+  }
+
+  const inclusiveDays = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY) + 1
+  if (inclusiveDays > MAX_ORDER_DATE_RANGE_DAYS) {
+    return `Date range cannot exceed ${MAX_ORDER_DATE_RANGE_DAYS} days. Please select a shorter range.`
+  }
+
+  return null
 }
 
 const app = express()
@@ -1982,6 +2019,20 @@ app.get('/api/orders', async (req, res) => {
         error: 'Start date and end date are required' 
       })
     }
+
+    const dateRangeError = validateOrderDateRange(startDate, endDate)
+    if (dateRangeError) {
+      console.log('❌ Invalid date range:', dateRangeError)
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid date range',
+        message: dateRangeError,
+        dateRange: { startDate, endDate },
+        maxDays: MAX_ORDER_DATE_RANGE_DAYS,
+        data: [],
+        totalOrders: 0
+      })
+    }
     
     // Validate that dates are not too far in the future (allow up to 7 days ahead for delivery scheduling)
     // IMPORTANT: Allow ALL past dates - only restrict future dates
@@ -3753,6 +3804,17 @@ app.post('/api/auto-refresh/start', (req, res) => {
   if (!startDate || !endDate) {
     return res.status(400).json({
       error: 'Start date and end date are required'
+    })
+  }
+
+  const dateRangeError = validateOrderDateRange(startDate, endDate)
+  if (dateRangeError) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid date range',
+      message: dateRangeError,
+      dateRange: { startDate, endDate },
+      maxDays: MAX_ORDER_DATE_RANGE_DAYS
     })
   }
   
