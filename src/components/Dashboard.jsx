@@ -16,7 +16,6 @@ import {
 } from '../utils/orderDates'
 import { getOrderRowAlertTier } from '../utils/orderRowAlerts'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
-import pkg from '../../package.json'
 
 /** Full-row emphasis for time-sensitive statuses (desktop <tr> / mobile card). */
 const ORDER_ROW_ALERT_TR_CLASS = {
@@ -775,52 +774,6 @@ const Dashboard = ({ onSwitchToAI }) => {
     return () => clearTimeout(debounceTimer)
   }, [dateRange, autoRefresh])
 
-  // Fetch data on page visibility change (mobile app switching, tab switching, page refresh)
-  useEffect(() => {
-    let visibilityTimeout = null
-    let focusTimeout = null
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('📱 Page became visible - fetching fresh data')
-        // Clear any pending timeout
-        if (visibilityTimeout) {
-          clearTimeout(visibilityTimeout)
-        }
-        // Add small delay to ensure page is fully loaded and debounce rapid changes
-        visibilityTimeout = setTimeout(() => {
-          fetchOrders()
-        }, 300)
-      }
-    }
-
-    const handleFocus = () => {
-      console.log('📱 Window focused - fetching fresh data')
-      // Clear any pending timeout
-      if (focusTimeout) {
-        clearTimeout(focusTimeout)
-      }
-      // Debounce focus events
-      focusTimeout = setTimeout(() => {
-        fetchOrders()
-      }, 300)
-    }
-
-    // Listen for visibility changes (works on mobile)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    
-    // Listen for window focus (backup for mobile)
-    window.addEventListener('focus', handleFocus)
-
-    return () => {
-      // Cleanup timeouts
-      if (visibilityTimeout) clearTimeout(visibilityTimeout)
-      if (focusTimeout) clearTimeout(focusTimeout)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
-    }
-  }, [fetchOrders]) // Re-fetch when fetchOrders changes (which happens when dateRange changes)
-
   // Real-time updates using Server-Sent Events
   useEffect(() => {
     let eventSource = null
@@ -987,7 +940,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   return (
-    <div className="bg-gray-50 pb-20 sm:pb-16">
+    <div className="bevvi-orders-page-padding">
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Auto-Refresh Control */}
@@ -1008,24 +961,24 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* AI Assistant Promotion Banner */}
         {onSwitchToAI && (
-          <div className="mb-4 sm:mb-6 bg-gradient-to-r from-bevvi-primary-700 to-bevvi-primary-500 rounded-lg shadow-lg overflow-hidden hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+          <div className="mb-4 sm:mb-6 bevvi-gradient rounded-xl shadow-bevvi overflow-hidden hover:shadow-bevvi transition-all duration-300">
             <button
               onClick={onSwitchToAI}
               className="w-full px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between text-left group"
             >
               <div className="flex items-center min-w-0 flex-1">
-                <div className="bg-white bg-opacity-20 rounded-full p-2 sm:p-3 mr-2 sm:mr-4 group-hover:bg-opacity-30 transition-all flex-shrink-0">
+                <div className="bg-white/15 rounded-full p-2 sm:p-3 mr-2 sm:mr-4 group-hover:bg-white/25 transition-all flex-shrink-0">
                   <svg className="w-5 h-5 sm:w-6 sm:h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-white font-bold text-sm sm:text-lg">✨ Try Our AI Assistant!</h3>
-                  <p className="text-purple-100 text-xs sm:text-sm mt-1 hidden sm:block">Ask questions like "What's the revenue for October?" or "Find all delayed orders"</p>
+                  <h3 className="text-white font-display font-semibold text-sm sm:text-lg">AI-powered order insights</h3>
+                  <p className="text-white/75 text-xs sm:text-sm mt-1 hidden sm:block">Ask about revenue, delayed orders, or customers — get answers seamlessly.</p>
                 </div>
               </div>
               <div className="flex items-center flex-shrink-0 ml-2">
-                <span className="text-white font-semibold text-xs sm:text-sm mr-1 sm:mr-2 hidden sm:inline">Try It Now</span>
+                <span className="text-white font-semibold text-xs sm:text-sm mr-1 sm:mr-2 hidden sm:inline">Open assistant</span>
                 <svg className="w-4 h-4 sm:w-5 sm:h-5 text-white group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
@@ -1963,7 +1916,10 @@ const Dashboard = ({ onSwitchToAI }) => {
       </div>
 
       {/* Status Band */}
-      <div className="fixed bottom-0 left-0 right-0 bg-gray-800 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-gray-700 z-40">
+      <div
+        className="fixed left-0 right-0 bg-bevvi-900 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-bevvi-950 z-40"
+        style={{ bottom: 'var(--bevvi-footer-height)' }}
+      >
         <div className="max-w-7xl mx-auto">
           {/* Mobile Layout */}
           <div className="md:hidden text-xs">
@@ -1998,8 +1954,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 ) : (
                   <>
                     Orders: {formatNumber(ordersInDateRange.length)} | 
-                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v{pkg.version}
+                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))}
                   </>
                 )}
               </div>
@@ -2039,8 +1994,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 ) : (
                   <>
                     Orders: {formatNumber(ordersInDateRange.length)} | 
-                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))} |
-                    v{pkg.version}
+                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))}
                   </>
                 )}
               </div>

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { formatDollarAmount } from '../utils/formatCurrency'
+import PageHeader from './ui/PageHeader'
+import { TAB_COPY } from '../constants/brand'
 
 const emptyLineItem = () => ({ query: '', name: '', size: '', quantity: '1', price: '' })
 
@@ -737,22 +739,19 @@ const ManualOrderAdd = () => {
     }
   }
 
-  const inputClass =
-    'mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-bevvi-primary-500 focus:outline-none focus:ring-1 focus:ring-bevvi-primary-500'
-  const labelClass = 'block text-sm font-medium text-gray-700'
+  const inputClass = 'input-field mt-1 text-sm'
+  const labelClass = 'bevvi-label !mb-1'
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="bevvi-page-panel">
       <div className="max-w-4xl">
-        <div className="flex items-center gap-2">
-          <ShoppingCart className="w-6 h-6 text-bevvi-primary-600" aria-hidden />
-          <h2 className="text-lg font-semibold text-gray-900">Manual Order Add</h2>
-        </div>
-        <p className="mt-1 text-sm text-gray-600">
-          Add a manual order. Search products by name and size — results update as you type.
-        </p>
+        <PageHeader
+          icon={ShoppingCart}
+          title={TAB_COPY['manual-order'].title}
+          description="Search curated products, build the order, and email a seamless Stripe payment link to your customer."
+        />
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-8">
           <section className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-gray-900">Products</h3>

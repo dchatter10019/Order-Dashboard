@@ -1,6 +1,8 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Search, Plus, Store, Building, Package, RefreshCw } from 'lucide-react'
 import { apiFetch } from '../utils/api'
+import PageHeader from './ui/PageHeader'
+import { TAB_COPY } from '../constants/brand'
 
 const ProductManagement = () => {
   // State declarations first
@@ -352,21 +354,21 @@ const ProductManagement = () => {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Product Management</h1>
-        <p className="text-gray-600">Manage product inventory across stores for multiple companies</p>
-      </div>
+    <div className="bevvi-page-panel max-w-6xl mx-auto">
+      <PageHeader
+        icon={Package}
+        title={TAB_COPY.products.title}
+        description={TAB_COPY.products.description}
+      />
 
-      {/* Helpful banner */}
-      <div className="mb-6 bg-bevvi-primary-50 border border-bevvi-primary-200 rounded-lg p-4">
+      <div className="mb-6 bevvi-callout">
         <div className="flex items-start">
           <div className="flex-shrink-0">
             <Package className="h-5 w-5 text-bevvi-primary-600 mt-0.5" />
           </div>
           <div className="ml-3 flex-1">
-            <h3 className="text-sm font-medium text-bevvi-primary-800">Backend-Cached Product Search</h3>
-            <div className="mt-2 text-sm text-bevvi-primary-700">
+            <h3 className="text-sm font-semibold text-bevvi-900">AI-powered product search</h3>
+            <div className="mt-2 text-sm text-bevvi-dark-700">
               <p>All products and stores are loaded automatically!</p>
               <p className="mt-1 text-xs">✓ ALL Bevvi products cached in backend (50,000+)</p>
               <p className="mt-1 text-xs">✓ Instant search results from server memory (&lt; 10ms)</p>

@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react'
 import { ClipboardCheck, Loader2 } from 'lucide-react'
 import { apiFetch } from '../utils/api'
+import PageHeader from './ui/PageHeader'
+import { TAB_COPY } from '../constants/brand'
 
 const STEP = {
   INPUT: 'input',
@@ -164,19 +166,17 @@ const GoPuffOrderChecker = () => {
   const busy = loading !== null
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    <div className="bevvi-page-panel">
       <div className="max-w-3xl">
-        <div className="flex items-center gap-2">
-          <ClipboardCheck className="w-6 h-6 text-bevvi-primary-600" aria-hidden />
-          <h2 className="text-lg font-semibold text-gray-900">GoPuff order checker</h2>
-        </div>
-        <p className="mt-1 text-sm text-gray-600">
-          Validate a corporate order, preview what will be sent to GoPuff, submit, or resend an existing order.
-        </p>
+        <PageHeader
+          icon={ClipboardCheck}
+          title={TAB_COPY['gopuff-checker'].title}
+          description="Enter an order number, validate, preview, then submit or resend to GoPuff — three steps, done."
+        />
 
-        <div className="mt-6 space-y-4">
+        <div className="space-y-4">
           <div>
-            <label htmlFor="gopuff-order-number" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="gopuff-order-number" className="bevvi-label">
               Order number
             </label>
             <input
@@ -186,7 +186,7 @@ const GoPuffOrderChecker = () => {
               onChange={(e) => setOrderNumber(e.target.value)}
               disabled={step !== STEP.INPUT || busy}
               placeholder="Corporate order number"
-              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-bevvi-primary-500 focus:outline-none focus:ring-1 focus:ring-bevvi-primary-500 disabled:bg-gray-100 disabled:text-gray-600"
+              className="input-field text-sm disabled:bg-bevvi-dark-100 disabled:text-bevvi-dark-500"
             />
             {step !== STEP.INPUT && (
               <p className="mt-1 text-xs text-gray-500">Start over to use a different order number.</p>

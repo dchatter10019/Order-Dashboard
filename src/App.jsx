@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './components/Login'
 import MainDashboard from './components/MainDashboard'
 import OrderDetailsPage from './components/OrderDetailsPage'
+import AppFooter from './components/AppFooter'
 import './App.css'
 
 function App() {
@@ -41,7 +42,7 @@ function App() {
 
   return (
     <Router>
-      <div className="App">
+      <div className="App min-h-screen bevvi-page-bottom-padding">
         <Routes>
           <Route 
             path="/login" 
@@ -72,6 +73,7 @@ function App() {
             element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} 
           />
         </Routes>
+        <AppFooter />
       </div>
     </Router>
   )

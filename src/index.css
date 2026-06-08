@@ -3,11 +3,18 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    font-family: 'Inter', system-ui, sans-serif;
+  :root {
+    --bevvi-red: #8a1e36;
+    --bevvi-red-deep: #761c32;
+    --bevvi-cream: #faf8f6;
+    --bevvi-footer-height: 3.25rem;
+    --bevvi-orders-status-height: 3.5rem;
   }
-  
-  /* Fix for date input text truncation and alignment */
+
+  body {
+    @apply font-sans text-bevvi-dark-800 bg-bevvi-cream antialiased;
+  }
+
   input[type="date"] {
     min-width: 140px !important;
     width: 100% !important;
@@ -20,49 +27,122 @@
     box-sizing: border-box !important;
     vertical-align: top !important;
   }
-  
+
   input[type="date"]::-webkit-calendar-picker-indicator {
     cursor: pointer;
   }
 }
 
 @layer components {
+  .bevvi-tagline {
+    @apply font-display text-white/95 tracking-tight;
+  }
+
+  .bevvi-shell {
+    @apply min-h-screen flex flex-col bg-bevvi-cream;
+  }
+
+  .bevvi-shell-header {
+    @apply bg-gradient-to-r from-bevvi-900 via-bevvi-800 to-bevvi-900 text-white shadow-bevvi;
+  }
+
+  .bevvi-nav-bar {
+    @apply bg-white border-b border-bevvi-100 shadow-sm;
+  }
+
+  .bevvi-nav-tab {
+    @apply py-4 px-1 border-b-2 font-medium text-sm transition-colors;
+  }
+
+  .bevvi-nav-tab-active {
+    @apply border-bevvi-700 text-bevvi-800;
+  }
+
+  .bevvi-nav-tab-inactive {
+    @apply border-transparent text-bevvi-dark-500 hover:text-bevvi-800 hover:border-bevvi-200;
+  }
+
+  .bevvi-context-strip {
+    @apply bg-bevvi-50 border-b border-bevvi-100;
+  }
+
+  .bevvi-page-header {
+    @apply mb-8;
+  }
+
+  .bevvi-page-header-icon {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-xl bg-bevvi-100 text-bevvi-800;
+  }
+
+  .bevvi-page-title {
+    @apply font-display text-2xl sm:text-3xl font-semibold tracking-tight text-bevvi-900;
+  }
+
+  .bevvi-page-description {
+    @apply text-base text-bevvi-dark-600 leading-relaxed;
+  }
+
+  .bevvi-page-panel {
+    @apply p-4 sm:p-6 lg:p-8;
+  }
+
+  .bevvi-app-footer {
+    @apply fixed bottom-0 left-0 right-0 z-50 border-t border-bevvi-950 bg-gradient-to-r from-bevvi-900 via-bevvi-800 to-bevvi-900 text-white shadow-[0_-4px_20px_rgba(66,10,24,0.25)];
+    min-height: var(--bevvi-footer-height);
+  }
+
+  .bevvi-page-bottom-padding {
+    padding-bottom: var(--bevvi-footer-height);
+  }
+
+  .bevvi-orders-page-padding {
+    padding-bottom: calc(var(--bevvi-footer-height) + var(--bevvi-orders-status-height));
+  }
+
+  @media (min-width: 768px) {
+    :root {
+      --bevvi-orders-status-height: 3rem;
+    }
+  }
+
   .btn-primary {
-    @apply bg-bevvi-primary-600 hover:bg-bevvi-primary-700 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5;
+    @apply bg-bevvi-800 hover:bg-bevvi-900 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200 shadow-bevvi-sm hover:shadow-bevvi;
   }
-  
+
   .btn-secondary {
-    @apply bg-bevvi-dark-100 hover:bg-bevvi-dark-200 text-bevvi-dark-700 font-medium py-3 px-6 rounded-xl transition-all duration-200 border border-bevvi-dark-200 hover:border-bevvi-dark-300;
+    @apply bg-white hover:bg-bevvi-50 text-bevvi-dark-700 font-medium py-3 px-6 rounded-xl transition-all duration-200 border border-bevvi-200 hover:border-bevvi-300;
   }
-  
+
   .card {
-    @apply bg-white rounded-2xl shadow-lg border border-bevvi-dark-100 p-8 hover:shadow-xl transition-shadow duration-200;
+    @apply bg-white rounded-2xl shadow-bevvi-sm border border-bevvi-100 p-6 sm:p-8 hover:shadow-bevvi transition-shadow duration-200;
   }
-  
+
   .input-field {
-    @apply w-full px-4 py-3 border border-bevvi-dark-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:border-bevvi-primary-300 transition-all duration-200 bg-bevvi-dark-50;
+    @apply w-full px-4 py-3 border border-bevvi-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-bevvi-500/30 focus:border-bevvi-400 transition-all duration-200 bg-white;
   }
-  
+
   .bevvi-gradient {
-    @apply bg-gradient-to-br from-bevvi-primary-500 to-bevvi-primary-700;
+    @apply bg-gradient-to-br from-bevvi-800 to-bevvi-950;
   }
-  
+
   .bevvi-gradient-light {
-    @apply bg-gradient-to-br from-bevvi-primary-50 to-bevvi-accent-50;
+    @apply bg-gradient-to-br from-bevvi-50 to-white;
   }
-  
-  .bevvi-shadow {
-    @apply shadow-[0_10px_40px_-10px_rgba(225,29,72,0.3)];
+
+  .bevvi-callout {
+    @apply rounded-xl border border-bevvi-200 bg-bevvi-50/80 p-4 text-sm text-bevvi-900;
   }
-  
-  /* Hide scrollbar for Chrome, Safari and Opera */
+
+  .bevvi-label {
+    @apply block text-sm font-medium text-bevvi-dark-700 mb-2;
+  }
+
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
-  
-  /* Hide scrollbar for IE, Edge and Firefox */
+
   .scrollbar-hide {
-    -ms-overflow-style: none;  /* IE and Edge */
-    scrollbar-width: none;  /* Firefox */
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }

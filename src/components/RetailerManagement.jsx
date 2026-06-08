@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { Store, Calendar, RefreshCw, Download, ChevronUp, ChevronDown, FileSpreadsheet } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
+import PageHeader from './ui/PageHeader'
+import { TAB_COPY } from '../constants/brand'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
 import * as XLSX from 'xlsx-js-style'
@@ -855,13 +857,13 @@ const RetailerManagement = () => {
   }, [dateRange.startDate, dateRange.endDate])
 
   return (
-    <div className="bg-gray-50 pb-20 sm:pb-16">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Retailer Management</h1>
-          <p className="text-gray-600">View GMV and charges by retailer for selected date range</p>
-        </div>
+    <div>
+      <div className="bevvi-page-panel max-w-7xl mx-auto">
+        <PageHeader
+          icon={Store}
+          title={TAB_COPY.retailers.title}
+          description={TAB_COPY.retailers.description}
+        />
 
         {/* Date Range Filter */}
         <div className={`bg-white rounded-lg shadow transition-all duration-300 mb-6 ${collapsedFilters.dateRange ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
