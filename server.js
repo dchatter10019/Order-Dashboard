@@ -140,6 +140,19 @@ const app = express()
 const PORT = process.env.PORT || 3001
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL
 const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY
+const STRIPE_PAYMENT_SUCCESS_URL =
+  process.env.STRIPE_PAYMENT_SUCCESS_URL || 'https://getbevvi.com/?payment=success&session_id={CHECKOUT_SESSION_ID}'
+const STRIPE_PAYMENT_CANCEL_URL =
+  process.env.STRIPE_PAYMENT_CANCEL_URL || 'https://getbevvi.com/?payment=cancelled'
+
+let stripe = null
+if (STRIPE_SECRET_KEY) {
+  stripe = require('stripe')(STRIPE_SECRET_KEY)
+} else {
+  console.warn('⚠️ STRIPE_SECRET_KEY not set; manual order payment links will be disabled.')
+}
 
 const OPTIONAL_PRODUCT_FIELDS = [
   'imageFileName',
@@ -2728,29 +2741,290 @@ async function loadAllProducts() {
 }
 
 // Function to search cached products
+function productSearchHaystack(product) {
+  const sizePart = product.size == null || product.size === ''
+    ? String(product.units || '')
+    : `${product.size} ${product.units || ''}`.trim()
+  return [
+    product.name,
+    product.upc,
+    product.brandinfo,
+    product.parentBrand,
+    sizePart
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
 function searchProducts(searchTerm) {
   if (!searchTerm || searchTerm.length < 3) {
     return []
   }
-  
-  const searchLower = searchTerm.toLowerCase()
+
+  const searchLower = searchTerm.toLowerCase().trim()
+  const tokens = searchLower.split(/\s+/).filter(Boolean)
+
   const results = productsCache.filter(product => {
-    const name = (product.name || '').toLowerCase()
+    const haystack = productSearchHaystack(product)
     const upc = (product.upc || '').toLowerCase()
-    return name.includes(searchLower) || upc.includes(searchLower)
+
+    if (haystack.includes(searchLower) || upc.includes(searchLower)) {
+      return true
+    }
+
+    if (tokens.length > 1) {
+      return tokens.every(token => haystack.includes(token) || upc.includes(token))
+    }
+
+    return haystack.includes(searchLower) || upc.includes(searchLower)
   })
-  
+
+  const scored = results.map(product => {
+    const haystack = productSearchHaystack(product)
+    let score = 0
+    if (haystack.includes(searchLower)) score += 100
+    for (const token of tokens) {
+      if (haystack.includes(token)) score += 20
+      const sizeLabel = productSizeLabel(product)
+      if (sizeLabel.includes(token)) score += 25
+      if (/^\d+(?:\.\d+)?$/.test(token) && String(product.size ?? '') === token) score += 30
+    }
+    return { product, score }
+  })
+
+  scored.sort((a, b) => b.score - a.score)
+
   // Deduplicate by UPC
   const seen = new Set()
-  const deduped = results.filter(p => {
-    const upc = p.upc
+  const deduped = scored.filter(({ product }) => {
+    const upc = product.upc
     if (!upc || seen.has(upc)) return false
     seen.add(upc)
     return true
   })
-  
+
   // Limit to 100 results for performance
-  return deduped.slice(0, 100)
+  return deduped.slice(0, 100).map(entry => entry.product)
+}
+
+function normalizeSizeToken(str) {
+  return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function stripSizeSuffixFromName(name) {
+  return normalizeSizeToken(name).replace(/\s*-\s*\d+(?:\.\d+)?(?:\s*(?:ml|l|oz|cl|g|lb|pk|pack|lt|liter|litre))?\s*$/i, '').trim()
+}
+
+function parseSizeFromCombinedName(name) {
+  const match = String(name || '').match(/\s*-\s*(\d+(?:\.\d+)?)\s*(ML|L|OZ|CL|G|LB|PK|PACK|LT|LITER|LITRE)?\s*$/i)
+  if (!match) return null
+  const sizeNum = match[1]
+  const units = (match[2] || 'ML').toUpperCase()
+  return `${sizeNum} ${units}`
+}
+
+function productSizeLabel(product) {
+  const size = product.size
+  const units = product.units || ''
+  if (size === null || size === undefined || size === '') return normalizeSizeToken(units)
+  return normalizeSizeToken(`${size} ${units}`.trim())
+}
+
+function sizeTokensMatch(product, sizeInput) {
+  const inputNorm = normalizeSizeToken(sizeInput)
+  if (!inputNorm) return true
+
+  const productSize = productSizeLabel(product)
+  if (!productSize) return false
+  if (productSize === inputNorm || productSize.includes(inputNorm) || inputNorm.includes(productSize)) {
+    return true
+  }
+
+  const inputNum = inputNorm.match(/^(\d+(?:\.\d+)?)/)?.[1]
+  const productNum = String(product.size ?? '').trim()
+  if (inputNum && productNum && inputNum === productNum) {
+    const inputUnit = inputNorm.slice(inputNum.length).trim()
+    const productUnit = normalizeSizeToken(product.units || '')
+    if (!inputUnit) return true
+    if (!productUnit) return true
+    return productUnit.startsWith(inputUnit) || inputUnit.startsWith(productUnit)
+  }
+
+  return false
+}
+
+function nameTokensMatch(product, nameInput) {
+  const inputNorm = normalizeSizeToken(nameInput)
+  if (!inputNorm) return false
+
+  const fullName = normalizeSizeToken(product.name)
+  const productBase = stripSizeSuffixFromName(product.name)
+  const inputBase = stripSizeSuffixFromName(nameInput)
+
+  if (fullName === inputNorm) return true
+  if (productBase && inputBase && productBase === inputBase) return true
+  if (fullName.includes(inputNorm) || inputNorm.includes(fullName)) return true
+  if (productBase && inputBase && (productBase.includes(inputBase) || inputBase.includes(productBase))) {
+    return true
+  }
+
+  return false
+}
+
+function scoreProductMatch(product, nameInput, sizeInput) {
+  let score = 0
+  const inputNorm = normalizeSizeToken(nameInput)
+  const fullName = normalizeSizeToken(product.name)
+  const productBase = stripSizeSuffixFromName(product.name)
+  const inputBase = stripSizeSuffixFromName(nameInput)
+
+  if (fullName === inputNorm) score += 120
+  if (productBase && inputBase && productBase === inputBase) score += 100
+  if (productBase && inputBase && productBase.startsWith(inputBase)) score += 60
+  if (productBase && inputBase && inputBase.startsWith(productBase)) score += 50
+  if (fullName.includes(inputNorm)) score += 40
+  if (productBase && inputBase && productBase.includes(inputBase)) score += 30
+  if (sizeTokensMatch(product, sizeInput)) score += 35
+
+  return score
+}
+
+function buildManualOrderProductName(product) {
+  const name = (product.name || '').trim()
+  const sizeLabel = `${product.size || ''} ${product.units || ''}`.trim()
+  if (!sizeLabel) return name
+  if (name.toLowerCase().includes(sizeLabel.toLowerCase())) return name
+  return `${name} - ${sizeLabel}`
+}
+
+function findProductInCache(productName, sizeInput) {
+  let nameInput = String(productName || '').trim()
+  let sizeInputValue = String(sizeInput || '').trim()
+
+  if (!sizeInputValue) {
+    const parsedSize = parseSizeFromCombinedName(nameInput)
+    if (parsedSize) sizeInputValue = parsedSize
+  }
+
+  if (!nameInput) return null
+
+  const scored = productsCache
+    .map(product => ({ product, score: scoreProductMatch(product, nameInput, sizeInputValue) }))
+    .filter(entry => entry.score >= 70)
+    .sort((a, b) => b.score - a.score)
+
+  if (scored.length === 0) return null
+
+  const topScore = scored[0].score
+  const topMatches = scored.filter(entry => entry.score >= topScore - 5)
+  return topMatches[0].product
+}
+
+function formatManualOrderMoney(value) {
+  const num = parseFloat(value)
+  if (Number.isNaN(num)) return '0.00'
+  return num.toFixed(2)
+}
+
+function formatManualOrderDate(value) {
+  const date = value ? new Date(value) : new Date()
+  if (Number.isNaN(date.getTime())) return formatManualOrderDate(new Date())
+  return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`
+}
+
+function extractManualOrderNumber(apiData) {
+  if (apiData == null) return null
+  const objects = [apiData]
+  if (typeof apiData === 'object' && apiData.data != null) objects.push(apiData.data)
+  if (typeof apiData === 'object' && apiData.result != null) objects.push(apiData.result)
+
+  const keys = [
+    'orderNumber',
+    'orderNum',
+    'ordernum',
+    'corpOrderNum',
+    'corpOrderNumber',
+    'orderId',
+    'order_id',
+    'id'
+  ]
+
+  for (const obj of objects) {
+    if (!obj || typeof obj !== 'object') continue
+    for (const key of keys) {
+      const value = obj[key]
+      if (value != null && String(value).trim()) return String(value).trim()
+    }
+  }
+  return null
+}
+
+async function createStripePaymentLinkForManualOrder({
+  orderNumber,
+  email,
+  customerName,
+  storeName,
+  totalAmount,
+  matchedProducts
+}) {
+  if (!stripe) {
+    return { skipped: true, reason: 'Stripe is not configured on the server' }
+  }
+
+  const amount = parseFloat(totalAmount)
+  if (Number.isNaN(amount) || amount < 0.5) {
+    return { skipped: true, reason: 'Order total is below the Stripe minimum ($0.50)' }
+  }
+
+  const productSummary = (matchedProducts || [])
+    .map((p) => `${p.quantity}x ${p.name}`)
+    .join(', ')
+    .slice(0, 500)
+
+  const productName = orderNumber
+    ? `Bevvi Order ${orderNumber}`
+    : `Bevvi order — ${storeName || 'Manual'}`
+
+  const price = await stripe.prices.create({
+    currency: 'usd',
+    unit_amount: Math.round(amount * 100),
+    product_data: {
+      name: productName,
+      description: productSummary || `Manual order for ${customerName || 'customer'}`
+    }
+  })
+
+  const paymentLink = await stripe.paymentLinks.create({
+    line_items: [{ price: price.id, quantity: 1 }],
+    metadata: {
+      source: 'manual-order',
+      orderNumber: orderNumber || '',
+      storeName: storeName || '',
+      customerEmail: email || '',
+      customerName: customerName || ''
+    },
+    after_completion: {
+      type: 'redirect',
+      redirect: { url: STRIPE_PAYMENT_SUCCESS_URL.replace('{CHECKOUT_SESSION_ID}', '') }
+    }
+  })
+
+  return {
+    url: paymentLink.url,
+    paymentLinkId: paymentLink.id,
+    totalAmount: amount,
+    orderNumber: orderNumber || null,
+    customerEmail: String(email || '').trim() || null
+  }
+}
+
+function splitCustomerName(fullName) {
+  const trimmed = String(fullName || '').trim()
+  if (!trimmed) return { firstName: '', lastName: '' }
+  const parts = trimmed.split(/\s+/)
+  if (parts.length === 1) return { firstName: parts[0], lastName: '' }
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
 }
 
 // Product search endpoint - searches cached products
@@ -2829,6 +3103,364 @@ app.get('/api/products/status', (req, res) => {
     cacheExpired: !productsCacheTimestamp || cacheAge > PRODUCTS_CACHE_DURATION,
     lastUpdated: productsCacheTimestamp ? new Date(productsCacheTimestamp).toISOString() : null
   })
+})
+
+const GOOGLE_PLACES_NEW_BASE = 'https://places.googleapis.com/v1'
+
+function googlePlacesNewHeaders(fieldMask) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': GOOGLE_MAPS_API_KEY
+  }
+  if (fieldMask) headers['X-Goog-FieldMask'] = fieldMask
+  return headers
+}
+
+function normalizeGooglePlaceId(placeId) {
+  const raw = String(placeId || '').trim()
+  if (!raw) return ''
+  return raw.startsWith('places/') ? raw.slice('places/'.length) : raw
+}
+
+function parseGoogleAddressComponents(components) {
+  let streetNumber = ''
+  let route = ''
+  let city = ''
+  let state = ''
+  let zip = ''
+
+  for (const component of components || []) {
+    const types = component.types || []
+    const longName = component.longText ?? component.long_name ?? ''
+    const shortName = component.shortText ?? component.short_name ?? ''
+    if (types.includes('street_number')) streetNumber = longName
+    if (types.includes('route')) route = longName
+    if (types.includes('locality')) city = longName
+    if (!city && types.includes('postal_town')) city = longName
+    if (!city && types.includes('sublocality')) city = longName
+    if (types.includes('administrative_area_level_1')) state = shortName
+    if (types.includes('postal_code')) zip = longName
+  }
+
+  return {
+    streetAddress: [streetNumber, route].filter(Boolean).join(' ').trim(),
+    city,
+    state,
+    zip
+  }
+}
+
+function googlePlacesNewErrorMessage(data, fallback) {
+  if (!data) return fallback
+  if (typeof data === 'string' && data.trim()) return data.trim()
+  if (typeof data.error === 'string') return data.error
+  if (data.error?.message) return data.error.message
+  if (data.message) return data.message
+  return fallback
+}
+
+app.get('/api/address/config', (req, res) => {
+  res.json({ enabled: !!GOOGLE_MAPS_API_KEY })
+})
+
+app.get('/api/address/autocomplete', async (req, res) => {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return res.status(503).json({
+      success: false,
+      error: 'Google Maps API key not configured',
+      message: 'Set GOOGLE_MAPS_API_KEY in the server environment to enable address lookup.'
+    })
+  }
+
+  const { input } = req.query
+  if (!input || String(input).trim().length < 3) {
+    return res.json({ success: true, predictions: [] })
+  }
+
+  try {
+    const response = await axios.post(
+      `${GOOGLE_PLACES_NEW_BASE}/places:autocomplete`,
+      {
+        input: String(input).trim(),
+        includedRegionCodes: ['us'],
+        includedPrimaryTypes: ['street_address', 'premise', 'subpremise']
+      },
+      {
+        headers: googlePlacesNewHeaders(
+          'suggestions.placePrediction.placeId,suggestions.placePrediction.text'
+        ),
+        timeout: 10000
+      }
+    )
+
+    const predictions = (response.data?.suggestions || [])
+      .map((s) => s.placePrediction)
+      .filter(Boolean)
+      .map((p) => ({
+        description: p.text?.text || '',
+        placeId: p.placeId || normalizeGooglePlaceId(p.place)
+      }))
+      .filter((p) => p.description && p.placeId)
+
+    res.json({ success: true, predictions })
+  } catch (error) {
+    console.error('Address autocomplete error:', error.message)
+    const status = error.response?.status || 500
+    const message = googlePlacesNewErrorMessage(
+      error.response?.data,
+      error.message || 'Address autocomplete failed'
+    )
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: message,
+      message
+    })
+  }
+})
+
+app.get('/api/address/details', async (req, res) => {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return res.status(503).json({ success: false, error: 'Google Maps API key not configured' })
+  }
+
+  const { placeId } = req.query
+  if (!placeId) {
+    return res.status(400).json({ success: false, error: 'placeId is required' })
+  }
+
+  try {
+    const id = normalizeGooglePlaceId(placeId)
+    const response = await axios.get(`${GOOGLE_PLACES_NEW_BASE}/places/${encodeURIComponent(id)}`, {
+      headers: googlePlacesNewHeaders('formattedAddress,addressComponents'),
+      timeout: 10000
+    })
+
+    const result = response.data || {}
+    const parsed = parseGoogleAddressComponents(result.addressComponents)
+    res.json({
+      success: true,
+      formattedAddress: result.formattedAddress || '',
+      ...parsed
+    })
+  } catch (error) {
+    console.error('Address details error:', error.message)
+    const status = error.response?.status || 500
+    const message = googlePlacesNewErrorMessage(
+      error.response?.data,
+      error.message || 'Address details failed'
+    )
+    res.status(status >= 400 && status < 600 ? status : 500).json({
+      success: false,
+      error: message,
+      message
+    })
+  }
+})
+
+app.get('/api/address/geocode', async (req, res) => {
+  if (!GOOGLE_MAPS_API_KEY) {
+    return res.status(503).json({ success: false, error: 'Google Maps API key not configured' })
+  }
+
+  const { address } = req.query
+  if (!address || !String(address).trim()) {
+    return res.status(400).json({ success: false, error: 'address is required' })
+  }
+
+  try {
+    const url = 'https://maps.googleapis.com/maps/api/geocode/json'
+    const response = await axios.get(url, {
+      params: {
+        address: String(address).trim(),
+        components: 'country:US',
+        key: GOOGLE_MAPS_API_KEY
+      },
+      timeout: 10000
+    })
+
+    const status = response.data?.status
+    if (status !== 'OK' || !response.data.results?.length) {
+      return res.status(404).json({
+        success: false,
+        error: response.data?.error_message || status || 'Address not found'
+      })
+    }
+
+    const top = response.data.results[0]
+    const parsed = parseGoogleAddressComponents(top.address_components)
+    res.json({
+      success: true,
+      formattedAddress: top.formatted_address || String(address).trim(),
+      ...parsed
+    })
+  } catch (error) {
+    console.error('Address geocode error:', error.message)
+    res.status(500).json({ success: false, error: 'Address geocode failed', message: error.message })
+  }
+})
+
+// Submit manual order to Bevvi after validating products against cache
+app.post('/api/manual-order', async (req, res) => {
+  try {
+    await ensureProductsCacheLoaded()
+
+    const {
+      products: lineItems,
+      storeName,
+      companyName,
+      customerName,
+      firstName: firstNameInput,
+      lastName: lastNameInput,
+      email,
+      streetAddress,
+      city,
+      state,
+      zip,
+      orderDate,
+      delivery = 0,
+      discount = 0,
+      engraving = 0,
+      salesTax = 0,
+      service = 0,
+      serviceChargeTax = 0,
+      shipping = 0,
+      tip = 0
+    } = req.body || {}
+
+    if (!Array.isArray(lineItems) || lineItems.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one product is required' })
+    }
+    if (!storeName || !email || !streetAddress || !city || !state || !zip) {
+      return res.status(400).json({
+        success: false,
+        error: 'storeName, email, streetAddress, city, state, and zip are required'
+      })
+    }
+
+    const splitName = splitCustomerName(customerName)
+    const firstName = (firstNameInput || splitName.firstName || '').trim()
+    const lastName = (lastNameInput || splitName.lastName || '').trim()
+    if (!firstName) {
+      return res.status(400).json({ success: false, error: 'Customer name is required' })
+    }
+
+    const matchedProducts = []
+    const productErrors = []
+    for (let i = 0; i < lineItems.length; i++) {
+      const item = lineItems[i] || {}
+      const name = String(item.name || '').trim()
+      const size = String(item.size || '').trim()
+      const quantity = parseInt(item.quantity, 10)
+      const price = parseFloat(item.price)
+      const effectiveSize = size || parseSizeFromCombinedName(name) || ''
+
+      if (!name || !effectiveSize || !quantity || quantity < 1 || Number.isNaN(price) || price < 0) {
+        productErrors.push({ index: i, name, size, message: 'Each product needs name, size, quantity, and price' })
+        continue
+      }
+
+      const matched = findProductInCache(name, size || effectiveSize)
+      if (!matched) {
+        productErrors.push({ index: i, name, size, message: 'Product not found in master list (name + size)' })
+        continue
+      }
+
+      matchedProducts.push({
+        name: buildManualOrderProductName(matched),
+        price,
+        quantity
+      })
+    }
+
+    if (productErrors.length > 0) {
+      return res.status(400).json({ success: false, error: 'Product validation failed', productErrors })
+    }
+
+    const subTotal = matchedProducts.reduce((sum, p) => sum + p.price * p.quantity, 0)
+    const total =
+      subTotal +
+      parseFloat(delivery || 0) +
+      parseFloat(salesTax || 0) +
+      parseFloat(service || 0) +
+      parseFloat(serviceChargeTax || 0) +
+      parseFloat(shipping || 0) +
+      parseFloat(tip || 0) +
+      parseFloat(engraving || 0) -
+      parseFloat(discount || 0)
+
+    const payload = {
+      city: String(city).trim(),
+      companyName: String(companyName || '').trim(),
+      delivery: formatManualOrderMoney(delivery),
+      discount: formatManualOrderMoney(discount),
+      engraving: formatManualOrderMoney(engraving),
+      firstName,
+      lastName,
+      orderDate: formatManualOrderDate(orderDate),
+      products: JSON.stringify(matchedProducts),
+      salesTax: formatManualOrderMoney(salesTax),
+      service: formatManualOrderMoney(service),
+      serviceChargeTax: formatManualOrderMoney(serviceChargeTax),
+      shipping: formatManualOrderMoney(shipping),
+      state: String(state).trim(),
+      storeName: String(storeName).trim(),
+      streetAddress: String(streetAddress).trim(),
+      subTotal: formatManualOrderMoney(subTotal),
+      tip: formatManualOrderMoney(tip),
+      total: formatManualOrderMoney(total),
+      zip: String(zip).trim(),
+      email: String(email).trim()
+    }
+
+    console.log('📤 Submitting manual order:', { storeName: payload.storeName, email: payload.email, products: matchedProducts.length })
+
+    const response = await axios.post('https://api.getbevvi.com/api/shopifyorders/manualOrderAPI', payload, {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 30000
+    })
+
+    const orderNumber = extractManualOrderNumber(response.data)
+    let paymentLink = null
+    let paymentLinkError = null
+    try {
+      paymentLink = await createStripePaymentLinkForManualOrder({
+        orderNumber,
+        email: payload.email,
+        customerName: `${firstName} ${lastName}`.trim(),
+        storeName: payload.storeName,
+        totalAmount: total,
+        matchedProducts
+      })
+      if (paymentLink?.url) {
+        console.log('💳 Stripe payment link created:', { orderNumber, paymentLinkId: paymentLink.paymentLinkId })
+      }
+    } catch (stripeError) {
+      paymentLinkError = stripeError.message || 'Failed to create Stripe payment link'
+      console.error('❌ Stripe payment link error:', paymentLinkError)
+    }
+
+    res.json({
+      success: true,
+      data: response.data,
+      orderNumber,
+      matchedProducts,
+      payload,
+      paymentLink,
+      paymentLinkError
+    })
+  } catch (error) {
+    console.error('Error submitting manual order:', error.message)
+    const status = error.response?.status || 500
+    res.status(status).json({
+      success: false,
+      error: 'Failed to submit manual order',
+      message: error.response?.data?.message || error.message,
+      details: error.response?.data || null
+    })
+  }
 })
 
 // Add product via UPC enrichment + external API
@@ -3050,6 +3682,133 @@ app.get('/api/gopuff/order-status/:orderNumber', async (req, res) => {
       error: 'Failed to fetch GoPuff order status',
       message: error.message
     })
+  }
+})
+
+// GoPuff order checker: validate → preview → submit (proxies Bevmo corp APIs)
+function requireOrderNumberQuery(req, res) {
+  const raw = req.query.orderNumber
+  const orderNumber = raw === undefined || raw === null ? '' : String(raw).trim()
+  if (!orderNumber) {
+    res.status(400).json({
+      error: 'Bad Request',
+      message: 'Order number is required'
+    })
+    return null
+  }
+  return orderNumber
+}
+
+function sendBevmoGoPuffProxyError(res, error, logLabel) {
+  console.error(`❌ ${logLabel}:`, error.message, error.response?.status)
+  if (error.response) {
+    const status = error.response.status
+    const data = error.response.data
+    let message = `Request failed with status ${status}`
+    if (data != null && typeof data === 'object' && !Array.isArray(data)) {
+      message =
+        data.message ||
+        data.error ||
+        data.msg ||
+        message
+      if (Array.isArray(data.errors)) {
+        const parts = data.errors.map((e) =>
+          typeof e === 'string' ? e : e?.message || JSON.stringify(e)
+        )
+        if (parts.length) message = parts.join('; ')
+      }
+    } else if (typeof data === 'string' && data.trim()) {
+      message = data.trim()
+    }
+    return res.status(status).json({
+      error: 'Bevmo API error',
+      message,
+      response: data
+    })
+  }
+  const code = error.code
+  if (
+    error.request ||
+    code === 'ECONNREFUSED' ||
+    code === 'ENOTFOUND' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNABORTED' ||
+    code === 'ECONNRESET'
+  ) {
+    return res.status(503).json({
+      error: 'Service Unavailable',
+      message: "Can't reach Bevmo. Try again later."
+    })
+  }
+  return res.status(500).json({
+    error: 'Internal Server Error',
+    message: error.message || 'An unexpected error occurred'
+  })
+}
+
+const BEVMO_GOPUFF_JSON_HEADERS = {
+  Accept: 'application/json',
+  'Content-Type': 'application/json'
+}
+const BEVMO_GOPUFF_REQUEST_TIMEOUT_MS = 30000
+
+app.get('/api/validate-order', async (req, res) => {
+  const orderNumber = requireOrderNumberQuery(req, res)
+  if (!orderNumber) return
+  try {
+    const url = `https://api.getbevvi.com/api/gopuff/validateCorpGoPuffOrder?corpOrderNum=${encodeURIComponent(orderNumber)}`
+    const response = await axios.get(url, {
+      headers: BEVMO_GOPUFF_JSON_HEADERS,
+      timeout: BEVMO_GOPUFF_REQUEST_TIMEOUT_MS
+    })
+    res.json(response.data)
+  } catch (error) {
+    sendBevmoGoPuffProxyError(res, error, 'validate-order')
+  }
+})
+
+app.get('/api/preview-order', async (req, res) => {
+  const orderNumber = requireOrderNumberQuery(req, res)
+  if (!orderNumber) return
+  try {
+    const url = `https://api.getbevvi.com/api/gopuff/previewCorpOrderToGoPuff?orderNumber=${encodeURIComponent(orderNumber)}`
+    const response = await axios.get(url, {
+      headers: BEVMO_GOPUFF_JSON_HEADERS,
+      timeout: BEVMO_GOPUFF_REQUEST_TIMEOUT_MS
+    })
+    res.json(response.data)
+  } catch (error) {
+    sendBevmoGoPuffProxyError(res, error, 'preview-order')
+  }
+})
+
+app.get('/api/submit-order', async (req, res) => {
+  const orderNumber = requireOrderNumberQuery(req, res)
+  if (!orderNumber) return
+  try {
+    const url = `https://api.getbevvi.com/api/gopuff/sendCorpOrderToGoPuff?corpOrderNum=${encodeURIComponent(orderNumber)}`
+    const response = await axios.get(url, {
+      headers: BEVMO_GOPUFF_JSON_HEADERS,
+      timeout: BEVMO_GOPUFF_REQUEST_TIMEOUT_MS
+    })
+    res.json(response.data)
+  } catch (error) {
+    sendBevmoGoPuffProxyError(res, error, 'submit-order')
+  }
+})
+
+app.get('/api/resend-order', async (req, res) => {
+  const orderNumber = requireOrderNumberQuery(req, res)
+  if (!orderNumber) return
+  try {
+    const url = `https://api.getbevvi.com/api/gopuff/resendCorpOrderToGoPuff?corpOrderNum=${encodeURIComponent(orderNumber)}`
+    const response = await axios.get(url, {
+      headers: BEVMO_GOPUFF_JSON_HEADERS,
+      timeout: BEVMO_GOPUFF_REQUEST_TIMEOUT_MS
+    })
+    res.json(response.data)
+  } catch (error) {
+    sendBevmoGoPuffProxyError(res, error, 'resend-order')
   }
 })
 
@@ -3999,6 +4758,14 @@ app.listen(PORT, async () => {
   console.log(`   POST /api/products/refresh - Refresh products cache`)
   console.log(`   GET  /api/products/status - Get cache status`)
   console.log(`   POST /api/products/add-from-upc - Enrich + add product`)
+  console.log(`   POST /api/manual-order - Submit manual order (validates products against cache)`)
+  console.log(`   GET  /api/address/autocomplete?input= - Google address suggestions`)
+  console.log(`   GET  /api/address/details?placeId= - Resolve Google place to street/city/state/zip`)
+  console.log(`🛵 GoPuff order checker:`)
+  console.log(`   GET  /api/validate-order?orderNumber= - Validate corp order for GoPuff`)
+  console.log(`   GET  /api/preview-order?orderNumber= - Preview order payload`)
+  console.log(`   GET  /api/submit-order?orderNumber= - Send corp order to GoPuff`)
+  console.log(`   GET  /api/resend-order?orderNumber= - Resend corp order to GoPuff`)
   console.log(``)
   
   // Orders cache disabled - always fetch fresh from API

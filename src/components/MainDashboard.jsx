@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { LogOut, Package, FileText, Sparkles, Store, Menu, X } from 'lucide-react'
+import { LogOut, Package, FileText, Sparkles, Store, Menu, X, ClipboardCheck, ShoppingCart } from 'lucide-react'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
 import RetailerManagement from './RetailerManagement'
 import AIAssistant from './AIAssistant'
+import GoPuffOrderChecker from './GoPuffOrderChecker'
+import ManualOrderAdd from './ManualOrderAdd'
 import Logo from './Logo'
 
 const MainDashboard = ({ onLogout }) => {
@@ -14,6 +16,8 @@ const MainDashboard = ({ onLogout }) => {
     { id: 'orders', label: 'Order Management', icon: FileText },
     { id: 'products', label: 'Product Management', icon: Package },
     { id: 'retailers', label: 'Retailers', icon: Store },
+    { id: 'gopuff-checker', label: 'GoPuff order checker', icon: ClipboardCheck },
+    { id: 'manual-order', label: 'Manual Order Add', icon: ShoppingCart },
     { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles }
   ]
   
@@ -193,6 +197,12 @@ const MainDashboard = ({ onLogout }) => {
         </div>
         <div className={activeTab === 'retailers' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'retailers'}>
           <RetailerManagement />
+        </div>
+        <div className={activeTab === 'gopuff-checker' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'gopuff-checker'}>
+          <GoPuffOrderChecker />
+        </div>
+        <div className={activeTab === 'manual-order' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'manual-order'}>
+          <ManualOrderAdd />
         </div>
         <div className={activeTab === 'ai-assistant' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'ai-assistant'}>
           <AIAssistant
