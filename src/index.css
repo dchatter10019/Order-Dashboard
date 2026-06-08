@@ -8,7 +8,6 @@
     --bevvi-red-deep: #761c32;
     --bevvi-cream: #faf8f6;
     --bevvi-footer-height: 3.25rem;
-    --bevvi-orders-status-height: 3.5rem;
   }
 
   body {
@@ -93,16 +92,6 @@
 
   .bevvi-page-bottom-padding {
     padding-bottom: var(--bevvi-footer-height);
-  }
-
-  .bevvi-orders-page-padding {
-    padding-bottom: calc(var(--bevvi-footer-height) + var(--bevvi-orders-status-height));
-  }
-
-  @media (min-width: 768px) {
-    :root {
-      --bevvi-orders-status-height: 3rem;
-    }
   }
 
   .btn-primary {

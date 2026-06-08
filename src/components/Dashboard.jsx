@@ -7,6 +7,7 @@ import DeliveryFilter from './DeliveryFilter'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
+import { useOrdersFooter } from '../context/OrdersFooterContext'
 import {
   filterOrdersByCalendarRange,
   getDeliveryYmdForDashboard,
@@ -63,6 +64,7 @@ const getOrderDateRangeError = (dateRange) => {
 }
 
 const Dashboard = ({ onSwitchToAI }) => {
+  const { setOrdersStatus } = useOrdersFooter()
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -206,6 +208,31 @@ const Dashboard = ({ onSwitchToAI }) => {
       orderFilterTimeZone
     )
   }, [orders, dateRange, orderFilterTimeZone])
+
+  const ordersDateRangeTotal = useMemo(
+    () => ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0),
+    [ordersInDateRange]
+  )
+
+  useEffect(() => {
+    setOrdersStatus({
+      autoRefresh,
+      isLoading,
+      lastRefreshTime,
+      nextRefreshTime,
+      orderCount: ordersInDateRange.length,
+      orderTotal: ordersDateRangeTotal
+    })
+    return () => setOrdersStatus(null)
+  }, [
+    autoRefresh,
+    isLoading,
+    lastRefreshTime,
+    nextRefreshTime,
+    ordersInDateRange.length,
+    ordersDateRangeTotal,
+    setOrdersStatus
+  ])
 
   const pendingAcceptedCounts = useMemo(() => {
     let pending = 0
@@ -940,7 +967,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   return (
-    <div className="bevvi-orders-page-padding">
+    <div className="bevvi-page-bottom-padding">
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Auto-Refresh Control */}
@@ -1915,93 +1942,6 @@ const Dashboard = ({ onSwitchToAI }) => {
         )}
       </div>
 
-      {/* Status Band */}
-      <div
-        className="fixed left-0 right-0 bg-bevvi-900 text-white py-2 sm:py-3 px-2 sm:px-4 border-t border-bevvi-950 z-40"
-        style={{ bottom: 'var(--bevvi-footer-height)' }}
-      >
-        <div className="max-w-7xl mx-auto">
-          {/* Mobile Layout */}
-          <div className="md:hidden text-xs">
-            <div className="flex items-center justify-between flex-wrap gap-1.5">
-              <div className="flex items-center space-x-2">
-                <div className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
-                <span className="text-gray-300">
-                  {autoRefresh ? 'Auto-refresh: Active (20 min)' : 'Auto-refresh: Inactive'}
-                </span>
-              </div>
-              {lastRefreshTime && !isLoading && (
-                <div className="text-gray-300">
-                  Last refresh: {lastRefreshTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                </div>
-              )}
-              {isLoading && (
-                <div className="flex items-center text-yellow-300">
-                  <div className="animate-spin rounded-full h-2 w-2 border-b-2 border-yellow-300 mr-1.5"></div>
-                  Fetching data...
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-between flex-wrap gap-1.5 mt-1">
-              {nextRefreshTime && autoRefresh && !isLoading && (
-                <div className="text-gray-300">
-                  Next refresh: {nextRefreshTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                </div>
-              )}
-              <div className="text-gray-300">
-                {isLoading ? (
-                  'Loading...'
-                ) : (
-                  <>
-                    Orders: {formatNumber(ordersInDateRange.length)} | 
-                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          
-          {/* Desktop Layout */}
-          <div className="hidden md:flex justify-between items-center text-sm">
-            <div className="flex items-center space-x-6">
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${autoRefresh ? 'bg-green-400 animate-pulse' : 'bg-gray-400'}`}></div>
-                <span className="text-gray-300">
-                  Auto-refresh: {autoRefresh ? 'Active (20 min)' : 'Inactive'}
-                </span>
-              </div>
-              {lastRefreshTime && !isLoading && (
-                <div className="text-gray-300">
-                  Last refresh: {lastRefreshTime.toLocaleTimeString()}
-                </div>
-              )}
-              {isLoading && (
-                <div className="flex items-center text-yellow-300">
-                  <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-yellow-300 mr-2"></div>
-                  Fetching data...
-                </div>
-              )}
-            </div>
-            <div className="flex items-center space-x-6">
-              {nextRefreshTime && autoRefresh && !isLoading && (
-                <div className="text-gray-300">
-                  Next refresh: {nextRefreshTime.toLocaleTimeString()}
-                </div>
-              )}
-              <div className="text-gray-300">
-                {isLoading ? (
-                  'Loading...'
-                ) : (
-                  <>
-                    Orders: {formatNumber(ordersInDateRange.length)} | 
-                    Total: {formatDollarAmount(ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0))}
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
     </div>
   )

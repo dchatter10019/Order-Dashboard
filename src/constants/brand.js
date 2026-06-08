@@ -3,7 +3,6 @@ export const BRAND = {
   tagline: 'Alcohol Made Easy.',
   platformTitle: 'Operations Platform',
   platformSubtitle: 'Seamless order management across brands, retailers, and fulfillment partners.',
-  footer: 'Made with ❤ in NYC',
   copyright: `© ${new Date().getFullYear()} Bevvi. All rights reserved.`
 }
 

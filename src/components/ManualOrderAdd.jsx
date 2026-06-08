@@ -534,6 +534,9 @@ const ManualOrderAdd = () => {
   const [submitResponse, setSubmitResponse] = useState(null)
   const [error, setError] = useState(null)
   const [paymentLinkCopied, setPaymentLinkCopied] = useState(false)
+  const [showPaymentLinkPrompt, setShowPaymentLinkPrompt] = useState(false)
+  const [creatingPaymentLink, setCreatingPaymentLink] = useState(false)
+  const [paymentLinkError, setPaymentLinkError] = useState(null)
 
   const loadStores = useCallback(async () => {
     setLoadingStores(true)
@@ -697,6 +700,8 @@ const ManualOrderAdd = () => {
     setMessage(null)
     setSubmitResponse(null)
     setPaymentLinkCopied(false)
+    setShowPaymentLinkPrompt(false)
+    setPaymentLinkError(null)
     setSubmitting(true)
     try {
       const resolvedAddress = await resolveAddressBeforeSubmit()
@@ -727,15 +732,53 @@ const ManualOrderAdd = () => {
         return
       }
       setSubmitResponse(data)
-      setMessage(
-        data.paymentLink?.url
-          ? 'Manual order submitted. Copy the payment link or open your email client to send it to the customer.'
-          : 'Manual order submitted successfully.'
-      )
+      setShowPaymentLinkPrompt(true)
+      setMessage('Manual order submitted successfully.')
     } catch (e) {
       setError({ message: e.message || 'Network error' })
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleCreatePaymentLink = async () => {
+    if (!submitResponse) return
+    setPaymentLinkError(null)
+    setCreatingPaymentLink(true)
+    try {
+      const response = await apiFetch('/api/manual-order/payment-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderNumber: submitResponse.orderNumber,
+          email: submitResponse.payload?.email || email,
+          customerName,
+          storeName: submitResponse.payload?.storeName || storeName,
+          totalAmount: submitResponse.orderTotal ?? estimatedTotal,
+          matchedProducts: submitResponse.matchedProducts || []
+        })
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) {
+        setPaymentLinkError(data.message || data.error || 'Failed to create payment link')
+        return
+      }
+      if (data.paymentLink?.skipped) {
+        setPaymentLinkError(data.paymentLink.reason || 'Payment link was not created')
+        setShowPaymentLinkPrompt(false)
+        return
+      }
+      if (!data.paymentLink?.url) {
+        setPaymentLinkError('Payment link was not returned by the server')
+        return
+      }
+      setSubmitResponse((prev) => ({ ...prev, paymentLink: data.paymentLink }))
+      setShowPaymentLinkPrompt(false)
+      setMessage('Payment link created. Email it to the customer or copy the link below.')
+    } catch (e) {
+      setPaymentLinkError(e.message || 'Network error')
+    } finally {
+      setCreatingPaymentLink(false)
     }
   }
 
@@ -966,6 +1009,48 @@ const ManualOrderAdd = () => {
             </div>
           )}
 
+          {showPaymentLinkPrompt && !submitResponse?.paymentLink?.url && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+              <p className="font-semibold">Create a Stripe payment link?</p>
+              <p className="mt-1 text-amber-800">
+                The order was submitted. Create a payment link for{' '}
+                <strong>{formatDollarAmount(submitResponse?.orderTotal ?? estimatedTotal)}</strong>
+                {submitResponse?.orderNumber ? (
+                  <> (order <strong>{submitResponse.orderNumber}</strong>)</>
+                ) : null}{' '}
+                so you can email it to the customer.
+              </p>
+              {paymentLinkError && (
+                <p className="mt-2 text-red-800" role="alert">{paymentLinkError}</p>
+              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleCreatePaymentLink}
+                  disabled={creatingPaymentLink}
+                  className="inline-flex items-center justify-center rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                >
+                  {creatingPaymentLink ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creating link…
+                    </>
+                  ) : (
+                    'Yes, create payment link'
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentLinkPrompt(false)}
+                  disabled={creatingPaymentLink}
+                  className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                >
+                  No thanks
+                </button>
+              </div>
+            </div>
+          )}
+
           {submitResponse?.paymentLink?.url && (
             <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
               <h4 className="text-sm font-semibold text-indigo-900">Payment link for customer</h4>
@@ -1027,14 +1112,10 @@ const ManualOrderAdd = () => {
             </div>
           )}
 
-          {submitResponse && !submitResponse.paymentLink?.url && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {paymentLinkError && !showPaymentLinkPrompt && !submitResponse?.paymentLink?.url && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
               <p className="font-medium">Payment link not created</p>
-              <p className="mt-1">
-                {submitResponse.paymentLinkError ||
-                  submitResponse.paymentLink?.reason ||
-                  'Stripe is not configured. Add STRIPE_SECRET_KEY to the server .env file.'}
-              </p>
+              <p className="mt-1">{paymentLinkError}</p>
             </div>
           )}
 

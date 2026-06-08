@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle, FileText, Save, ExternalLink, MessageSquare } from 'lucide-react'
 import { formatDollarAmount } from '../utils/formatCurrency'
 import { isDeliveryDateAfterOrderDate } from '../utils/orderDates'
+import { mergeOrderWithDetails } from '../utils/orderDisplay'
 
 const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, detailsError, setOrderDetails, autoFetch = true }) => {
   const [notes, setNotes] = useState('')
@@ -19,6 +20,8 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
   const [timelineError, setTimelineError] = useState(null)
 
   if (!isActive || !order) return null
+
+  const displayOrder = mergeOrderWithDetails(order, orderDetails)
 
   const isTimelineRetailer = () => {
     const name = (order?.establishment || '').trim()
@@ -567,23 +570,23 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Base Revenue</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.revenue || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.revenue || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Gift Note Charge</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.giftNoteCharge || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.giftNoteCharge || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Promo Discount</span>
-                <span className="font-semibold text-red-600">-{formatDollarAmount(order.promoDiscAmt || 0)}</span>
+                <span className="font-semibold text-red-600">-{formatDollarAmount(displayOrder.promoDiscAmt || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Tax</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.tax || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.tax || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Tip</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.tip || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.tip || 0)}</span>
               </div>
             </div>
 
@@ -591,31 +594,31 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
             <div className="space-y-3">
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Shipping Fee</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.shippingFee || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.shippingFee || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Delivery Fee</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.deliveryFee || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.deliveryFee || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Service Charge</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.serviceCharge || 0)}</span>
-                </div>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.serviceCharge || 0)}</span>
+              </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
-                <span className="text-sm font-medium text-bevvi-primary-700">Service Charge Tax</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
+                <span className="text-sm font-medium text-bevvi-primary-700">Network Service Charge</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.networkServiceCharge || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">Service Charge Tax</span>
-                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(order.serviceChargeTax || 0)}</span>
+                <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.serviceChargeTax || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
                 <span className="text-sm font-medium text-bevvi-primary-700">API Total Amount</span>
-                <span className="font-semibold text-bevvi-primary-900">${(order.totalAmount || 0).toFixed(2)}</span>
+                <span className="font-semibold text-bevvi-primary-900">${(displayOrder.totalAmount || 0).toFixed(2)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200 bg-bevvi-primary-100 p-2 rounded">
                 <span className="text-sm font-medium text-bevvi-primary-700">Calculated Total</span>
-                <span className="text-lg font-bold text-bevvi-primary-900">${order.total.toFixed(2)}</span>
+                <span className="text-lg font-bold text-bevvi-primary-900">${displayOrder.total.toFixed(2)}</span>
               </div>
             </div>
           </div>

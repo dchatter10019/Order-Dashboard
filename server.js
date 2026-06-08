@@ -3423,33 +3423,14 @@ app.post('/api/manual-order', async (req, res) => {
     })
 
     const orderNumber = extractManualOrderNumber(response.data)
-    let paymentLink = null
-    let paymentLinkError = null
-    try {
-      paymentLink = await createStripePaymentLinkForManualOrder({
-        orderNumber,
-        email: payload.email,
-        customerName: `${firstName} ${lastName}`.trim(),
-        storeName: payload.storeName,
-        totalAmount: total,
-        matchedProducts
-      })
-      if (paymentLink?.url) {
-        console.log('💳 Stripe payment link created:', { orderNumber, paymentLinkId: paymentLink.paymentLinkId })
-      }
-    } catch (stripeError) {
-      paymentLinkError = stripeError.message || 'Failed to create Stripe payment link'
-      console.error('❌ Stripe payment link error:', paymentLinkError)
-    }
 
     res.json({
       success: true,
       data: response.data,
       orderNumber,
+      orderTotal: total,
       matchedProducts,
-      payload,
-      paymentLink,
-      paymentLinkError
+      payload
     })
   } catch (error) {
     console.error('Error submitting manual order:', error.message)
@@ -3459,6 +3440,48 @@ app.post('/api/manual-order', async (req, res) => {
       error: 'Failed to submit manual order',
       message: error.response?.data?.message || error.message,
       details: error.response?.data || null
+    })
+  }
+})
+
+app.post('/api/manual-order/payment-link', async (req, res) => {
+  try {
+    const {
+      orderNumber,
+      email,
+      customerName,
+      storeName,
+      totalAmount,
+      matchedProducts
+    } = req.body || {}
+
+    if (!email || totalAmount == null) {
+      return res.status(400).json({
+        success: false,
+        error: 'email and totalAmount are required to create a payment link'
+      })
+    }
+
+    const paymentLink = await createStripePaymentLinkForManualOrder({
+      orderNumber: orderNumber || null,
+      email: String(email).trim(),
+      customerName: String(customerName || '').trim(),
+      storeName: String(storeName || '').trim(),
+      totalAmount: parseFloat(totalAmount),
+      matchedProducts: Array.isArray(matchedProducts) ? matchedProducts : []
+    })
+
+    if (paymentLink?.url) {
+      console.log('💳 Stripe payment link created:', { orderNumber, paymentLinkId: paymentLink.paymentLinkId })
+    }
+
+    res.json({ success: true, paymentLink })
+  } catch (error) {
+    console.error('❌ Stripe payment link error:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create Stripe payment link',
+      message: error.message
     })
   }
 })
@@ -4759,6 +4782,7 @@ app.listen(PORT, async () => {
   console.log(`   GET  /api/products/status - Get cache status`)
   console.log(`   POST /api/products/add-from-upc - Enrich + add product`)
   console.log(`   POST /api/manual-order - Submit manual order (validates products against cache)`)
+  console.log(`   POST /api/manual-order/payment-link - Create Stripe payment link for manual order`)
   console.log(`   GET  /api/address/autocomplete?input= - Google address suggestions`)
   console.log(`   GET  /api/address/details?placeId= - Resolve Google place to street/city/state/zip`)
   console.log(`🛵 GoPuff order checker:`)

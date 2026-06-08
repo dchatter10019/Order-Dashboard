@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import OrderDetailsContent from './OrderDetailsContent'
+import { buildOrderFromDetails, mergeOrderWithDetails } from '../utils/orderDisplay'
 
 const OrderDetailsPage = () => {
   const { orderNumber } = useParams()
@@ -39,46 +40,15 @@ const OrderDetailsPage = () => {
       })
   }, [orderNumber])
 
-  const fallbackOrder = useMemo(() => {
-    if (!orderDetails) return null
-    const recipient = Array.isArray(orderDetails.recipientorders) ? orderDetails.recipientorders[0] : null
-    const recipientName = recipient ? [recipient.firstName, recipient.lastName].filter(Boolean).join(' ') : ''
-    const addressParts = recipient
-      ? [recipient.streetAddress, recipient.aptSuiteNum, recipient.city, recipient.state, recipient.zipcode].filter(Boolean)
-      : []
-    const orderDateTime = orderDetails.createdAt || null
-    const orderDate = orderDateTime ? orderDateTime.split('T')[0] : 'N/A'
-    const deliveryDateTime = orderDetails.deliveryDate || null
-    const deliveryDate = deliveryDateTime ? deliveryDateTime.split('T')[0] : 'N/A'
-    const status = orderDetails.corpOrderStatus === 2 ? 'delivered' : 'pending'
+  const fallbackOrder = useMemo(
+    () => buildOrderFromDetails(orderDetails, orderNumber),
+    [orderDetails, orderNumber]
+  )
 
-    return {
-      id: orderDetails.corpOrderNum || orderNumber,
-      ordernum: orderDetails.corpOrderNum || orderNumber,
-      customerName: recipientName || orderDetails.corpClient || 'Unknown Customer',
-      status,
-      total: orderDetails.orderTotal || 0,
-      revenue: orderDetails.subTotal || 0,
-      tax: orderDetails.taxes || 0,
-      tip: orderDetails.tipAmt || 0,
-      shippingFee: orderDetails.shippingCharges || 0,
-      deliveryFee: orderDetails.deliveryCharge || 0,
-      serviceCharge: orderDetails.serviceCharge || 0,
-      serviceChargeTax: orderDetails.serviceChargeTax || 0,
-      giftNoteCharge: orderDetails.giftNoteCharge || 0,
-      promoDiscAmt: orderDetails.promodiscAmt || 0,
-      totalAmount: orderDetails.orderTotal || 0,
-      orderDate,
-      orderDateTime,
-      deliveryDate,
-      deliveryDateTime,
-      establishment: orderDetails.establishment?.name || '',
-      address: addressParts.join(', '),
-      phone: recipient?.phoneNum || ''
-    }
-  }, [orderDetails, orderNumber])
-
-  const order = orderFromState || fallbackOrder
+  const order = useMemo(
+    () => mergeOrderWithDetails(orderFromState || fallbackOrder, orderDetails),
+    [orderFromState, fallbackOrder, orderDetails]
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">

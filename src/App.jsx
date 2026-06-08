@@ -4,6 +4,7 @@ import Login from './components/Login'
 import MainDashboard from './components/MainDashboard'
 import OrderDetailsPage from './components/OrderDetailsPage'
 import AppFooter from './components/AppFooter'
+import { OrdersFooterProvider } from './context/OrdersFooterContext'
 import './App.css'
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
 
   return (
     <Router>
+      <OrdersFooterProvider>
       <div className="App min-h-screen bevvi-page-bottom-padding">
         <Routes>
           <Route 
@@ -75,6 +77,7 @@ function App() {
         </Routes>
         <AppFooter />
       </div>
+      </OrdersFooterProvider>
     </Router>
   )
 }
