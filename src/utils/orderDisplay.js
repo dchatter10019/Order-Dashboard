@@ -1,3 +1,15 @@
+import { parseUtcMidnightCalendarDate } from './orderDates'
+
+export function mapCorpOrderStatus(corpOrderStatus) {
+  const status = Number(corpOrderStatus)
+  if (status === 2) return 'delivered'
+  if (status === 1) return 'accepted'
+  if (status === 3) return 'in_transit'
+  if (status === 4) return 'canceled'
+  if (status === 5) return 'rejected'
+  return 'pending'
+}
+
 /** Merge list/CSV order row with getOrderInfo API payload for details display. */
 export function mergeOrderWithDetails(order, orderDetails) {
   if (!order) return null
@@ -29,16 +41,25 @@ export function buildOrderFromDetails(orderDetails, orderNumber) {
     ? [recipient.streetAddress, recipient.aptSuiteNum, recipient.city, recipient.state, recipient.zipcode].filter(Boolean)
     : []
   const orderDateTime = orderDetails.createdAt || null
-  const orderDate = orderDateTime ? orderDateTime.split('T')[0] : 'N/A'
+  const orderDate = orderDateTime
+    ? (parseUtcMidnightCalendarDate(orderDateTime) || orderDateTime.split('T')[0])
+    : 'N/A'
   const deliveryDateTime = orderDetails.deliveryDate || null
-  const deliveryDate = deliveryDateTime ? deliveryDateTime.split('T')[0] : 'N/A'
-  const status = orderDetails.corpOrderStatus === 2 ? 'delivered' : 'pending'
+  const deliveryDate = deliveryDateTime
+    ? (parseUtcMidnightCalendarDate(deliveryDateTime) || deliveryDateTime.split('T')[0])
+    : 'N/A'
+  const status = mapCorpOrderStatus(orderDetails.corpOrderStatus)
+  const customerName =
+    recipient?.companyName ||
+    orderDetails.corpClient ||
+    recipientName ||
+    'Unknown Customer'
 
   return mergeOrderWithDetails(
     {
       id: orderDetails.corpOrderNum || orderNumber,
       ordernum: orderDetails.corpOrderNum || orderNumber,
-      customerName: recipientName || orderDetails.corpClient || 'Unknown Customer',
+      customerName,
       status,
       total: orderDetails.orderTotal || 0,
       revenue: orderDetails.subTotal || 0,

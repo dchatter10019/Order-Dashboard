@@ -17,6 +17,20 @@ import {
 } from '../utils/orderDates'
 import { getOrderRowAlertTier } from '../utils/orderRowAlerts'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
+import { buildOrderFromDetails } from '../utils/orderDisplay'
+
+const formatLocalDateInput = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+const defaultOrdersDateRange = () => {
+  const today = formatLocalDateInput(new Date())
+  return {
+    startDate: today,
+    endDate: today
+  }
+}
+
+const looksLikeOrderNumber = (value) => /^BEV-/i.test(String(value || '').trim())
 
 /** Full-row emphasis for time-sensitive statuses (desktop <tr> / mobile card). */
 const ORDER_ROW_ALERT_TR_CLASS = {
@@ -68,17 +82,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
-  const [dateRange, setDateRange] = useState(() => {
-    const today = new Date()
-    // Use local date instead of UTC to avoid timezone issues
-    const todayString = today.getFullYear() + '-' + 
-                       String(today.getMonth() + 1).padStart(2, '0') + '-' + 
-                       String(today.getDate()).padStart(2, '0')
-    return {
-      startDate: todayString,
-      endDate: todayString
-    }
-  })
+  const [dateRange, setDateRange] = useState(defaultOrdersDateRange)
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected'])
   const [deliveryFilter, setDeliveryFilter] = useState([])
   
@@ -92,6 +96,8 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [lastRefreshTime, setLastRefreshTime] = useState(null)
   const [nextRefreshTime, setNextRefreshTime] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [lookedUpOrder, setLookedUpOrder] = useState(null)
+  const [orderLookupError, setOrderLookupError] = useState(null)
   const [collapsedTiles, setCollapsedTiles] = useState({
     totalOrders: false,
     totalRevenue: false,
@@ -209,6 +215,55 @@ const Dashboard = ({ onSwitchToAI }) => {
     )
   }, [orders, dateRange, orderFilterTimeZone])
 
+  useEffect(() => {
+    const term = searchTerm.trim()
+    if (!looksLikeOrderNumber(term) || term.length < 12) {
+      setLookedUpOrder(null)
+      setOrderLookupError(null)
+      return undefined
+    }
+
+    const alreadyLoaded = orders.some((order) => {
+      const id = String(order.id || order.ordernum || '').toLowerCase()
+      return id === term.toLowerCase() || id.includes(term.toLowerCase())
+    })
+    if (alreadyLoaded) {
+      setLookedUpOrder(null)
+      setOrderLookupError(null)
+      return undefined
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const response = await apiFetch(`/api/order-details/${encodeURIComponent(term)}`)
+        if (!response.ok) {
+          setLookedUpOrder(null)
+          setOrderLookupError(`No order found for ${term}`)
+          return
+        }
+        const data = await response.json()
+        if (!data?.corpOrderNum) {
+          setLookedUpOrder(null)
+          setOrderLookupError(`No order found for ${term}`)
+          return
+        }
+        const mapped = buildOrderFromDetails(data, term)
+        if (!mapped) {
+          setLookedUpOrder(null)
+          setOrderLookupError(`No order found for ${term}`)
+          return
+        }
+        setLookedUpOrder({ ...mapped, _fromLookup: true })
+        setOrderLookupError(null)
+      } catch {
+        setLookedUpOrder(null)
+        setOrderLookupError(`Could not look up ${term}`)
+      }
+    }, 350)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [searchTerm, orders])
+
   const ordersDateRangeTotal = useMemo(
     () => ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0),
     [ordersInDateRange]
@@ -265,19 +320,27 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   // Filter orders based on search term
   const filteredOrders = useMemo(() => {
-    if (!searchTerm.trim()) return ordersInDateRange
-    
-    const searchLower = searchTerm.toLowerCase()
-    const results = ordersInDateRange.filter(order => 
-      order.id?.toLowerCase().includes(searchLower) ||
-      order.customerName?.toLowerCase().includes(searchLower) ||
-      order.ordernum?.toLowerCase().includes(searchLower) ||
-      // Add search for "Delayed" keyword to show delayed orders
-      (searchLower === 'delayed' && order.deliveryStatus?.toLowerCase() === 'delayed')
-    )
-    
+    const searchLower = searchTerm.trim().toLowerCase()
+    let results = ordersInDateRange
+
+    if (searchLower) {
+      results = ordersInDateRange.filter(order =>
+        order.id?.toLowerCase().includes(searchLower) ||
+        order.customerName?.toLowerCase().includes(searchLower) ||
+        order.ordernum?.toLowerCase().includes(searchLower) ||
+        (searchLower === 'delayed' && order.deliveryStatus?.toLowerCase() === 'delayed')
+      )
+    }
+
+    if (
+      lookedUpOrder &&
+      !results.some((order) => String(order.id || order.ordernum || '').toLowerCase() === String(lookedUpOrder.id || '').toLowerCase())
+    ) {
+      results = [lookedUpOrder, ...results]
+    }
+
     return results
-  }, [ordersInDateRange, searchTerm])
+  }, [ordersInDateRange, searchTerm, lookedUpOrder])
 
   // Filter orders based on status and delivery filters
   const filteredOrdersByStatusAndDelivery = useMemo(() => {
@@ -293,6 +356,8 @@ const Dashboard = ({ onSwitchToAI }) => {
     if (deliveryFilter.length > 0) {
       
       filtered = filtered.filter(order => {
+        if (order._fromLookup) return true
+
         // Handle "All Dates" filter first - show all orders regardless of delivery date
         if (deliveryFilter.includes('all_dates')) {
           return true
@@ -1493,7 +1558,11 @@ const Dashboard = ({ onSwitchToAI }) => {
               <p className="mt-2 text-sm font-medium text-bevvi-primary-800">
                 Found {formatNumber(filteredOrders.length)} matching {formatNumber(filteredOrders.length) === 1 ? 'order' : 'orders'}
                 {searchTerm.trim() ? ` for "${searchTerm.trim()}"` : ''}
+                {lookedUpOrder?._fromLookup ? ' (including a direct order lookup outside the current date range)' : ''}
               </p>
+            ) : null}
+            {orderLookupError && searchTerm.trim() ? (
+              <p className="mt-2 text-sm text-amber-800">{orderLookupError}</p>
             ) : null}
           </div>
 

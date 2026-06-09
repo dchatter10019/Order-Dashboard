@@ -16,6 +16,13 @@ export function resolveOrderTimeZone(raw) {
   }
 }
 
+/** Bevvi often stores calendar dates as midnight UTC — use the UTC date, not local TZ shift. */
+export function parseUtcMidnightCalendarDate(dateTimeValue) {
+  if (!dateTimeValue) return null
+  const match = String(dateTimeValue).trim().match(/^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.000)?Z$/i)
+  return match ? match[1] : null
+}
+
 /**
  * Calendar YYYY-MM-DD for an instant in an IANA timezone.
  * Mirrors server.js getYyyyMmDdInTimeZone so /api/orders and the dashboard stay aligned.
@@ -42,6 +49,8 @@ export function getYyyyMmDdInTimeZone(dateInput, timeZone) {
 
 export function getOrderLocalDate(order, timeZone) {
   if (order.orderDateTime) {
+    const utcMidnight = parseUtcMidnightCalendarDate(order.orderDateTime)
+    if (utcMidnight) return utcMidnight
     const z = getYyyyMmDdInTimeZone(order.orderDateTime, timeZone)
     if (z) return z
     try {
@@ -63,6 +72,8 @@ export function getOrderLocalDate(order, timeZone) {
 export function getOrderYmdForDashboard(order) {
   if (!order || !order.orderDate) return null
   if (order.orderDateTime) {
+    const utcMidnight = parseUtcMidnightCalendarDate(order.orderDateTime)
+    if (utcMidnight) return utcMidnight
     try {
       const date = new Date(order.orderDateTime)
       if (isNaN(date.getTime())) return order.orderDate
@@ -113,6 +124,8 @@ export function isDeliveryDateAfterOrderDate(order) {
 export function getDeliveryLocalDate(order, timeZone) {
   if (!order.deliveryDate || order.deliveryDate === 'N/A') return null
   if (order.deliveryDateTime) {
+    const utcMidnight = parseUtcMidnightCalendarDate(order.deliveryDateTime)
+    if (utcMidnight) return utcMidnight
     const z = getYyyyMmDdInTimeZone(order.deliveryDateTime, timeZone)
     if (z) return z
     try {

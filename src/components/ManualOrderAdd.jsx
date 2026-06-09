@@ -1,46 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail } from 'lucide-react'
+import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail, RefreshCw } from 'lucide-react'
 import { apiFetch } from '../utils/api'
 import { formatDollarAmount } from '../utils/formatCurrency'
+import { buildPaymentEmailMailto } from '../utils/paymentLink'
 import PageHeader from './ui/PageHeader'
 import { TAB_COPY } from '../constants/brand'
 
 const emptyLineItem = () => ({ query: '', name: '', size: '', quantity: '1', price: '' })
-
-function buildPaymentEmailMailto({ customerEmail, customerName, orderNumber, totalAmount, paymentUrl }) {
-  const to = String(customerEmail || '').trim()
-  const greeting = customerName?.trim() ? `Hi ${customerName.trim()},` : 'Hi,'
-  const orderLine = orderNumber ? `Order number: ${orderNumber}\n` : ''
-  const totalLine =
-    totalAmount != null && !Number.isNaN(Number(totalAmount))
-      ? `Order total: ${formatDollarAmount(totalAmount)}\n`
-      : ''
-
-  const body = [
-    greeting,
-    '',
-    'Your Bevvi order is ready. Please use the secure link below to complete payment:',
-    '',
-    paymentUrl,
-    '',
-    orderLine + totalLine,
-    'If you have any questions, reply to this email.',
-    '',
-    'Thank you,',
-    'Bevvi'
-  ]
-    .filter((line, index, arr) => !(line === '' && arr[index + 1] === ''))
-    .join('\n')
-
-  const subject = orderNumber
-    ? `Payment link for your Bevvi order ${orderNumber}`
-    : 'Payment link for your Bevvi order'
-
-  const params = new URLSearchParams()
-  params.set('subject', subject)
-  params.set('body', body)
-  return `${to ? `mailto:${to}` : 'mailto:'}?${params.toString()}`
-}
 
 const formatProductSize = (product) => {
   if (product.size == null || product.size === '') return (product.units || '').trim()
@@ -741,26 +707,55 @@ const ManualOrderAdd = () => {
     }
   }
 
-  const handleCreatePaymentLink = async () => {
+  const buildPaymentLinkPayload = (regenerate = false) => ({
+    orderNumber: submitResponse.orderNumber,
+    email: submitResponse.payload?.email || email,
+    customerName,
+    storeName: submitResponse.payload?.storeName || storeName,
+    totalAmount: submitResponse.orderTotal ?? estimatedTotal,
+    matchedProducts: submitResponse.matchedProducts || [],
+    streetAddress: submitResponse.payload?.streetAddress || streetAddress,
+    city: submitResponse.payload?.city || city,
+    state: submitResponse.payload?.state || state,
+    zip: submitResponse.payload?.zip || zip,
+    salesTax: submitResponse.payload?.salesTax ?? salesTax,
+    delivery: submitResponse.payload?.delivery ?? delivery,
+    shipping: submitResponse.payload?.shipping ?? shipping,
+    service: submitResponse.payload?.service ?? service,
+    serviceChargeTax: submitResponse.payload?.serviceChargeTax ?? serviceChargeTax,
+    giftNoteCharge: submitResponse.payload?.engraving ?? engraving,
+    engraving: submitResponse.payload?.engraving ?? engraving,
+    tip: submitResponse.payload?.tip ?? tip,
+    discount: submitResponse.payload?.discount ?? discount,
+    country: 'US',
+    regenerate
+  })
+
+  const handleCreatePaymentLink = async ({ regenerate = false } = {}) => {
     if (!submitResponse) return
+    if (
+      regenerate &&
+      !window.confirm(
+        'Create a new payment link using the current order details? The previous Stripe invoice/link will be voided or removed.'
+      )
+    ) {
+      return
+    }
     setPaymentLinkError(null)
     setCreatingPaymentLink(true)
     try {
       const response = await apiFetch('/api/manual-order/payment-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderNumber: submitResponse.orderNumber,
-          email: submitResponse.payload?.email || email,
-          customerName,
-          storeName: submitResponse.payload?.storeName || storeName,
-          totalAmount: submitResponse.orderTotal ?? estimatedTotal,
-          matchedProducts: submitResponse.matchedProducts || []
-        })
+        body: JSON.stringify(buildPaymentLinkPayload(regenerate))
       })
       const data = await response.json()
       if (!response.ok || !data.success) {
-        setPaymentLinkError(data.message || data.error || 'Failed to create payment link')
+        setPaymentLinkError(
+          response.status === 409
+            ? data.error || 'The previous invoice has already been paid and cannot be regenerated.'
+            : data.message || data.error || 'Failed to create payment link'
+        )
         return
       }
       if (data.paymentLink?.skipped) {
@@ -1106,6 +1101,24 @@ const ManualOrderAdd = () => {
                 >
                   <Copy className="mr-2 h-4 w-4" />
                   {paymentLinkCopied ? 'Copied!' : 'Copy link'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCreatePaymentLink({ regenerate: true })}
+                  disabled={creatingPaymentLink}
+                  className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                >
+                  {creatingPaymentLink ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Regenerating…
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Regenerate link
+                    </>
+                  )}
                 </button>
               </div>
               <p className="mt-3 break-all text-xs text-indigo-700">{submitResponse.paymentLink.url}</p>

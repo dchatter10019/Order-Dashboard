@@ -34,6 +34,9 @@ Thumbs.db
 logs
 *.log
 
+# Local payment link registry (contains customer emails)
+data/manual-order-payment-links.json
+
 # Runtime data
 pids
 *.pid

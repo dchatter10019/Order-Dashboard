@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Package, User, MapPin, Phone, Calendar, DollarSign, CheckCircle, Clock, AlertCircle, XCircle, FileText, Save, ExternalLink, MessageSquare } from 'lucide-react'
 import { formatDollarAmount } from '../utils/formatCurrency'
 import { isDeliveryDateAfterOrderDate } from '../utils/orderDates'
 import { mergeOrderWithDetails } from '../utils/orderDisplay'
+import { isManualOrder } from '../utils/paymentLink'
+import ManualOrderPaymentSection from './ManualOrderPaymentSection'
 
 const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, detailsError, setOrderDetails, autoFetch = true }) => {
   const [notes, setNotes] = useState('')
@@ -92,6 +94,26 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
   }
 
   const orderNumber = order?.ordernum || order?.id
+
+  const handleStripeTaxResolved = useCallback(
+    (stripeTaxAmount) => {
+      if (!setOrderDetails || stripeTaxAmount == null) return
+      setOrderDetails((prev) => {
+        if (!prev) return prev
+        const currentTax = parseFloat(prev.taxes ?? prev.salesTax ?? 0) || 0
+        if (Math.abs(currentTax - stripeTaxAmount) < 0.005) {
+          return prev
+        }
+        return {
+          ...prev,
+          taxes: stripeTaxAmount,
+          salesTax: stripeTaxAmount,
+          stripeTaxPopulated: true
+        }
+      })
+    },
+    [setOrderDetails]
+  )
 
   // Auto-trigger API call when panel opens
   useEffect(() => {
@@ -581,7 +603,12 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
                 <span className="font-semibold text-red-600">-{formatDollarAmount(displayOrder.promoDiscAmt || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
-                <span className="text-sm font-medium text-bevvi-primary-700">Tax</span>
+                <span className="text-sm font-medium text-bevvi-primary-700">
+                  Tax
+                  {orderDetails?.stripeTaxPopulated ? (
+                    <span className="ml-1 text-xs font-normal text-bevvi-primary-600">(from Stripe invoice)</span>
+                  ) : null}
+                </span>
                 <span className="font-semibold text-bevvi-primary-900">{formatDollarAmount(displayOrder.tax || 0)}</span>
               </div>
               <div className="flex justify-between items-center py-2 border-b border-bevvi-primary-200">
@@ -624,6 +651,15 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
           </div>
         </div>
       </div>
+
+      {isManualOrder(order, orderDetails) || isManualOrder(order, null) ? (
+        <ManualOrderPaymentSection
+          order={order}
+          orderDetails={orderDetails}
+          isActive={isActive}
+          onStripeTaxResolved={handleStripeTaxResolved}
+        />
+      ) : null}
 
       {/* Additional Metadata */}
       <div className="space-y-4">

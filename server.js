@@ -1,6 +1,7 @@
 const express = require('express')
 const cors = require('cors')
 const axios = require('axios')
+const fs = require('fs').promises
 const path = require('path')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
@@ -9,6 +10,13 @@ require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 const DEFAULT_ORDER_TIMEZONE = process.env.BEVVI_ORDER_TIMEZONE || 'America/New_York'
 const MAX_ORDER_DATE_RANGE_DAYS = 31
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/** Bevvi often stores calendar dates as midnight UTC — use the UTC date, not local TZ shift. */
+function parseUtcMidnightCalendarDate(dateTimeValue) {
+  if (!dateTimeValue) return null
+  const match = String(dateTimeValue).trim().match(/^(\d{4}-\d{2}-\d{2})T00:00:00(?:\.000)?Z$/i)
+  return match ? match[1] : null
+}
 
 function getYyyyMmDdInTimeZone(dateInput, timeZone = DEFAULT_ORDER_TIMEZONE) {
   const d = dateInput instanceof Date ? dateInput : new Date(dateInput)
@@ -1930,6 +1938,8 @@ async function enrichOrdersWithState(orders, startDate, endDate) {
 // Helper: calendar date in client/business timezone (YYYY-MM-DD)
 function getOrderLocalDate(order, timeZone = DEFAULT_ORDER_TIMEZONE) {
   if (order.orderDateTime) {
+    const utcMidnight = parseUtcMidnightCalendarDate(order.orderDateTime)
+    if (utcMidnight) return utcMidnight
     const z = getYyyyMmDdInTimeZone(order.orderDateTime, timeZone)
     if (z) return z
     try {
@@ -1952,6 +1962,8 @@ function getDeliveryLocalDate(order, timeZone = DEFAULT_ORDER_TIMEZONE) {
   }
 
   if (order.deliveryDateTime) {
+    const utcMidnight = parseUtcMidnightCalendarDate(order.deliveryDateTime)
+    if (utcMidnight) return utcMidnight
     const z = getYyyyMmDdInTimeZone(order.deliveryDateTime, timeZone)
     if (z) return z
     try {
@@ -2960,22 +2972,630 @@ function extractManualOrderNumber(apiData) {
   return null
 }
 
+const MANUAL_ORDER_PAYMENT_LINKS_PATH = path.join(__dirname, 'data', 'manual-order-payment-links.json')
+
+async function readManualOrderPaymentLinks() {
+  try {
+    const raw = await fs.readFile(MANUAL_ORDER_PAYMENT_LINKS_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+async function saveManualOrderPaymentLinks(store) {
+  await fs.mkdir(path.dirname(MANUAL_ORDER_PAYMENT_LINKS_PATH), { recursive: true })
+  await fs.writeFile(MANUAL_ORDER_PAYMENT_LINKS_PATH, JSON.stringify(store, null, 2))
+}
+
+async function saveManualOrderPaymentLink(orderNumber, paymentLink) {
+  if (!orderNumber || !paymentLink?.url) return
+  const store = await readManualOrderPaymentLinks()
+  store[orderNumber] = {
+    ...paymentLink,
+    orderNumber,
+    savedAt: new Date().toISOString()
+  }
+  await saveManualOrderPaymentLinks(store)
+}
+
+async function clearManualOrderPaymentLink(orderNumber) {
+  if (!orderNumber) return
+  const store = await readManualOrderPaymentLinks()
+  if (!store[orderNumber]) return
+  delete store[orderNumber]
+  await saveManualOrderPaymentLinks(store)
+}
+
+function buildStripeDashboardUrl(type, id, livemode) {
+  const prefix = livemode ? 'https://dashboard.stripe.com' : 'https://dashboard.stripe.com/test'
+  if (type === 'invoice') return `${prefix}/invoices/${id}`
+  if (type === 'payment_link') return `${prefix}/payment-links/${id}`
+  return null
+}
+
+function appendPrefilledEmailToPaymentUrl(url, email) {
+  const customerEmail = String(email || '').trim()
+  if (!customerEmail) return url
+  return `${url}${url.includes('?') ? '&' : '?'}prefilled_email=${encodeURIComponent(customerEmail)}`
+}
+
+function extractStripeInvoiceTaxDollars(invoice) {
+  if (!invoice) return null
+
+  if (Array.isArray(invoice.total_taxes) && invoice.total_taxes.length > 0) {
+    const cents = invoice.total_taxes.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0)
+    if (cents > 0) return Math.round(cents) / 100
+  }
+
+  if (typeof invoice.tax === 'number' && invoice.tax > 0) {
+    return invoice.tax / 100
+  }
+
+  return null
+}
+
+async function getStripeInvoiceRecordForOrder(orderNumber) {
+  if (!stripe || !orderNumber) return null
+
+  const invoices = await findStripeInvoicesForOrder(orderNumber)
+  const preferred =
+    invoices.find((invoice) => invoice.status === 'open') ||
+    invoices.find((invoice) => invoice.status === 'paid') ||
+    invoices[0]
+
+  if (!preferred) return null
+
+  if (Array.isArray(preferred.total_taxes) || typeof preferred.tax === 'number') {
+    return preferred
+  }
+
+  return stripe.invoices.retrieve(preferred.id)
+}
+
+async function getStripeInvoiceTaxForOrder(orderNumber) {
+  try {
+    const invoice = await getStripeInvoiceRecordForOrder(orderNumber)
+    return extractStripeInvoiceTaxDollars(invoice)
+  } catch (error) {
+    console.warn('Could not read Stripe invoice tax:', orderNumber, error.message)
+    return null
+  }
+}
+
+async function enrichPaymentLinkWithInvoiceTax(paymentLink) {
+  if (!paymentLink || !stripe) return paymentLink
+
+  const invoiceId =
+    paymentLink.invoiceId ||
+    (String(paymentLink.paymentLinkId || '').startsWith('in_') ? paymentLink.paymentLinkId : null)
+
+  if (!invoiceId) return paymentLink
+
+  try {
+    const invoice = await stripe.invoices.retrieve(invoiceId)
+    const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
+    if (stripeTaxAmount == null) return paymentLink
+    return { ...paymentLink, stripeTaxAmount }
+  } catch (error) {
+    console.warn('Could not enrich payment link with Stripe tax:', invoiceId, error.message)
+    return paymentLink
+  }
+}
+
+async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
+  if (!cached?.url) return null
+  if (!stripe) return cached
+
+  const storedId = cached.paymentLinkId || cached.invoiceId || null
+  if (!storedId) return cached
+
+  try {
+    if (String(storedId).startsWith('plink_')) {
+      const link = await stripe.paymentLinks.retrieve(storedId)
+      if (link.active) {
+        const customerEmail = cached.customerEmail || link.metadata?.customerEmail || null
+        return {
+          ...cached,
+          url: appendPrefilledEmailToPaymentUrl(link.url, customerEmail),
+          paymentLinkId: link.id,
+          paymentType: 'payment_link',
+          livemode: link.livemode,
+          stripeDashboardUrl: buildStripeDashboardUrl('payment_link', link.id, link.livemode),
+          orderNumber,
+          customerEmail,
+          automaticTax: cached.automaticTax ?? link.metadata?.automaticTax === 'true',
+          recipientZip: cached.recipientZip || link.metadata?.recipientZip || null
+        }
+      }
+      await clearManualOrderPaymentLink(orderNumber)
+      return null
+    }
+
+    if (String(storedId).startsWith('in_')) {
+      const invoice = await stripe.invoices.retrieve(storedId)
+      if (invoice.status === 'open' && invoice.hosted_invoice_url) {
+        return {
+          ...cached,
+          url: invoice.hosted_invoice_url,
+          invoiceId: invoice.id,
+          paymentLinkId: invoice.id,
+          paymentType: 'invoice',
+          livemode: invoice.livemode,
+          stripeDashboardUrl: buildStripeDashboardUrl('invoice', invoice.id, invoice.livemode),
+          orderNumber,
+          customerEmail: cached.customerEmail || invoice.customer_email || invoice.metadata?.customerEmail || null,
+          automaticTax: cached.automaticTax ?? invoice.metadata?.automaticTax === 'true',
+          recipientZip: cached.recipientZip || invoice.metadata?.recipientZip || null,
+          stripeTaxAmount: extractStripeInvoiceTaxDollars(invoice)
+        }
+      }
+      await clearManualOrderPaymentLink(orderNumber)
+      return null
+    }
+  } catch (error) {
+    console.warn('Could not validate stored payment resource:', storedId, error.message)
+    await clearManualOrderPaymentLink(orderNumber)
+  }
+
+  return null
+}
+
+function parseMoneyValue(value) {
+  const parsed = parseFloat(String(value ?? '').replace(/,/g, '').trim())
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function getTaxableAmountForStripe(totalAmount, salesTax) {
+  const total = parseFloat(totalAmount)
+  const tax = parseMoneyValue(salesTax)
+  if (Number.isNaN(total)) return null
+  if (tax > 0) return Math.max(0, total - tax)
+  return total
+}
+
+function sumManualOrderLineItems(lines) {
+  return (lines || []).reduce((sum, line) => sum + line.unitAmount * line.quantity, 0)
+}
+
+function buildManualOrderStripeLineItems({
+  matchedProducts = [],
+  delivery = 0,
+  shipping = 0,
+  service = 0,
+  serviceChargeTax = 0,
+  networkServiceCharge = 0,
+  giftNoteCharge = 0,
+  engraving = 0,
+  tip = 0,
+  salesTax = 0,
+  useAutomaticTax = false
+}) {
+  const lines = []
+
+  for (const product of matchedProducts) {
+    const quantity = parseInt(product.quantity, 10) || 1
+    const unitAmount = parseFloat(product.price)
+    if (Number.isNaN(unitAmount) || unitAmount < 0) continue
+    lines.push({
+      type: 'product',
+      name: String(product.name || 'Product').trim().slice(0, 250) || 'Product',
+      unitAmount,
+      quantity
+    })
+  }
+
+  const feeLines = [
+    ['Delivery Fee', delivery],
+    ['Shipping Fee', shipping],
+    ['Service Charge', service],
+    ['Service Charge Tax', serviceChargeTax],
+    ['Network Service Charge', networkServiceCharge],
+    ['Gift Note / Engraving', giftNoteCharge || engraving],
+    ['Tip', tip]
+  ]
+
+  for (const [name, amount] of feeLines) {
+    const value = parseMoneyValue(amount)
+    if (value > 0) {
+      lines.push({ type: 'fee', name, unitAmount: value, quantity: 1 })
+    }
+  }
+
+  if (!useAutomaticTax) {
+    const taxAmount = parseMoneyValue(salesTax)
+    if (taxAmount > 0) {
+      lines.push({ type: 'fee', name: 'Sales Tax', unitAmount: taxAmount, quantity: 1 })
+    }
+  }
+
+  return lines
+}
+
+function reconcileManualOrderLineItems(lines, discount, expectedPayable) {
+  if (expectedPayable == null || Number.isNaN(expectedPayable)) {
+    return { lines: [...lines], discount }
+  }
+
+  const normalizedDiscount = Math.max(0, parseMoneyValue(discount))
+  const subtotal = sumManualOrderLineItems(lines)
+  const diff = Math.round((subtotal - normalizedDiscount - expectedPayable) * 100) / 100
+
+  if (Math.abs(diff) <= 0.02) {
+    return { lines: [...lines], discount: normalizedDiscount }
+  }
+
+  if (diff > 0) {
+    return { lines: [...lines], discount: normalizedDiscount + diff }
+  }
+
+  return {
+    lines: [
+      ...lines,
+      {
+        type: 'fee',
+        name: 'Order adjustment',
+        unitAmount: Math.abs(diff),
+        quantity: 1
+      }
+    ],
+    discount: normalizedDiscount
+  }
+}
+
+function toStripeCheckoutLineItems(lines, useAutomaticTax) {
+  return lines.map((line) => ({
+    price_data: {
+      currency: 'usd',
+      unit_amount: Math.round(line.unitAmount * 100),
+      ...(useAutomaticTax ? { tax_behavior: 'exclusive' } : {}),
+      product_data: {
+        name: line.name.slice(0, 250),
+        metadata: {
+          lineType: line.type || 'fee'
+        }
+      }
+    },
+    quantity: line.quantity
+  }))
+}
+
+async function createStripeDiscountCoupon(discountAmount, orderNumber) {
+  const amountOff = Math.round(parseMoneyValue(discountAmount) * 100)
+  if (amountOff <= 0) return null
+
+  return stripe.coupons.create({
+    amount_off: amountOff,
+    currency: 'usd',
+    duration: 'once',
+    name: orderNumber ? `Discount — ${orderNumber}` : 'Order discount',
+    metadata: {
+      source: 'manual-order',
+      orderNumber: orderNumber || ''
+    }
+  })
+}
+
+function buildStripeShippingAddress({ streetAddress, city, state, zip, country = 'US' }) {
+  const postalCode = String(zip || '').trim()
+  if (!postalCode) return null
+
+  const address = {
+    line1: String(streetAddress || '').trim() || 'Address on file',
+    postal_code: postalCode,
+    country: String(country || 'US').trim().toUpperCase() || 'US'
+  }
+
+  const cityValue = String(city || '').trim()
+  const stateValue = String(state || '').trim()
+  if (cityValue) address.city = cityValue
+  if (stateValue) address.state = stateValue
+
+  return address
+}
+
+async function findStripePaymentLinkForOrder(orderNumber) {
+  if (!stripe || !orderNumber) return null
+
+  let startingAfter = null
+  for (let page = 0; page < 5; page++) {
+    const params = { limit: 100, active: true }
+    if (startingAfter) params.starting_after = startingAfter
+
+    const result = await stripe.paymentLinks.list(params)
+    const match = result.data.find((link) => link.metadata?.orderNumber === orderNumber)
+    if (match) {
+      const customerEmail = match.metadata?.customerEmail || null
+      return {
+        url: appendPrefilledEmailToPaymentUrl(match.url, customerEmail),
+        paymentLinkId: match.id,
+        paymentType: 'payment_link',
+        livemode: match.livemode,
+        stripeDashboardUrl: buildStripeDashboardUrl('payment_link', match.id, match.livemode),
+        orderNumber,
+        customerEmail,
+        automaticTax: match.metadata?.automaticTax === 'true',
+        recipientZip: match.metadata?.recipientZip || null
+      }
+    }
+
+    if (!result.has_more || result.data.length === 0) break
+    startingAfter = result.data[result.data.length - 1].id
+  }
+
+  return null
+}
+
+async function findStripeCheckoutSessionForOrder(orderNumber) {
+  if (!stripe || !orderNumber) return null
+
+  let startingAfter = null
+  for (let page = 0; page < 5; page++) {
+    const params = { limit: 100 }
+    if (startingAfter) params.starting_after = startingAfter
+
+    const result = await stripe.checkout.sessions.list(params)
+    const match = result.data.find(
+      (session) =>
+        session.metadata?.orderNumber === orderNumber &&
+        session.status === 'open' &&
+        session.url
+    )
+    if (match) {
+      return {
+        url: match.url,
+        paymentLinkId: match.id,
+        sessionId: match.id,
+        orderNumber,
+        customerEmail: match.customer_details?.email || match.metadata?.customerEmail || null,
+        automaticTax: match.metadata?.automaticTax === 'true',
+        recipientZip: match.metadata?.recipientZip || null
+      }
+    }
+
+    if (!result.has_more || result.data.length === 0) break
+    startingAfter = result.data[result.data.length - 1].id
+  }
+
+  return null
+}
+
+async function findStripeInvoicesForOrder(orderNumber) {
+  if (!stripe || !orderNumber) return []
+
+  const matches = []
+  const seen = new Set()
+
+  try {
+    const searchResult = await stripe.invoices.search({
+      query: `metadata['orderNumber']:'${orderNumber}'`,
+      limit: 20
+    })
+    for (const invoice of searchResult.data || []) {
+      if (invoice.metadata?.source === 'manual-order' && !seen.has(invoice.id)) {
+        seen.add(invoice.id)
+        matches.push(invoice)
+      }
+    }
+    if (matches.length > 0) return matches
+  } catch (error) {
+    console.warn('Stripe invoice search unavailable, falling back to list:', error.message)
+  }
+
+  let startingAfter = null
+  for (let page = 0; page < 5; page++) {
+    const params = { limit: 100 }
+    if (startingAfter) params.starting_after = startingAfter
+
+    const result = await stripe.invoices.list(params)
+    for (const invoice of result.data) {
+      if (invoice.metadata?.orderNumber === orderNumber && invoice.metadata?.source === 'manual-order') {
+        if (!seen.has(invoice.id)) {
+          seen.add(invoice.id)
+          matches.push(invoice)
+        }
+      }
+    }
+
+    if (!result.has_more || result.data.length === 0) break
+    startingAfter = result.data[result.data.length - 1].id
+  }
+
+  return matches
+}
+
+async function findStripeInvoiceForOrder(orderNumber) {
+  const invoices = await findStripeInvoicesForOrder(orderNumber)
+  const openInvoice = invoices.find(
+    (invoice) => invoice.status === 'open' && invoice.hosted_invoice_url
+  )
+  if (!openInvoice) return null
+
+  const stripeTaxAmount = extractStripeInvoiceTaxDollars(openInvoice)
+
+  return {
+    url: openInvoice.hosted_invoice_url,
+    paymentLinkId: openInvoice.id,
+    invoiceId: openInvoice.id,
+    paymentType: 'invoice',
+    livemode: openInvoice.livemode,
+    stripeDashboardUrl: openInvoice.livemode
+      ? `https://dashboard.stripe.com/invoices/${openInvoice.id}`
+      : `https://dashboard.stripe.com/test/invoices/${openInvoice.id}`,
+    orderNumber,
+    customerEmail: openInvoice.customer_email || openInvoice.metadata?.customerEmail || null,
+    automaticTax: openInvoice.metadata?.automaticTax === 'true',
+    recipientZip: openInvoice.metadata?.recipientZip || null,
+    stripeTaxAmount
+  }
+}
+
+async function archiveManualOrderStripeInvoice(invoiceId) {
+  const invoice = await stripe.invoices.retrieve(invoiceId)
+
+  if (invoice.status === 'paid') {
+    const error = new Error('Cannot regenerate: the previous invoice has already been paid.')
+    error.code = 'INVOICE_ALREADY_PAID'
+    throw error
+  }
+
+  if (invoice.status === 'draft') {
+    await stripe.invoices.del(invoiceId)
+    return 'deleted'
+  }
+
+  if (invoice.status === 'open') {
+    await stripe.invoices.voidInvoice(invoiceId)
+    return 'voided'
+  }
+
+  return 'skipped'
+}
+
+async function archiveManualOrderStripePaymentResources(existingRecord, orderNumber) {
+  if (!stripe || !orderNumber) return []
+
+  const actions = []
+  const handledInvoiceIds = new Set()
+
+  const archiveInvoice = async (invoiceId, source) => {
+    if (!invoiceId || handledInvoiceIds.has(invoiceId)) return
+    handledInvoiceIds.add(invoiceId)
+    const result = await archiveManualOrderStripeInvoice(invoiceId)
+    actions.push({ type: 'invoice', id: invoiceId, result, source })
+  }
+
+  const sessionId =
+    existingRecord?.sessionId ||
+    (String(existingRecord?.paymentLinkId || '').startsWith('cs_') ? existingRecord.paymentLinkId : null)
+
+  if (sessionId) {
+    try {
+      const session = await stripe.checkout.sessions.retrieve(sessionId)
+      if (session.invoice) {
+        await archiveInvoice(session.invoice, 'checkout_session')
+      }
+      if (session.status === 'open') {
+        await stripe.checkout.sessions.expire(sessionId)
+        actions.push({ type: 'checkout_session', id: sessionId, result: 'expired' })
+      }
+    } catch (error) {
+      if (error.code === 'INVOICE_ALREADY_PAID') throw error
+      console.warn('Could not archive checkout session:', sessionId, error.message)
+    }
+  }
+
+  const paymentLinkId = String(existingRecord?.paymentLinkId || '').startsWith('plink_')
+    ? existingRecord.paymentLinkId
+    : null
+  if (paymentLinkId) {
+    try {
+      await stripe.paymentLinks.update(paymentLinkId, { active: false })
+      actions.push({ type: 'payment_link', id: paymentLinkId, result: 'deactivated' })
+    } catch (error) {
+      console.warn('Could not deactivate payment link:', paymentLinkId, error.message)
+    }
+  }
+
+  if (existingRecord?.invoiceId) {
+    await archiveInvoice(existingRecord.invoiceId, 'stored_record')
+  }
+
+  const invoices = await findStripeInvoicesForOrder(orderNumber)
+  for (const invoice of invoices) {
+    if (['draft', 'open'].includes(invoice.status)) {
+      await archiveInvoice(invoice.id, 'order_lookup')
+    }
+  }
+
+  return actions
+}
+
+async function createManualOrderStripeInvoiceItems(customerId, lines, useAutomaticTax) {
+  for (const line of lines) {
+    await stripe.invoiceItems.create({
+      customer: customerId,
+      description: line.name.slice(0, 250),
+      quantity: line.quantity,
+      currency: 'usd',
+      unit_amount_decimal: String(Math.round(line.unitAmount * 100)),
+      ...(useAutomaticTax ? { tax_behavior: 'exclusive' } : {}),
+      metadata: {
+        lineType: line.type || 'fee'
+      }
+    })
+  }
+}
+
+async function getManualOrderPaymentLink(orderNumber) {
+  let paymentLink = null
+
+  const store = await readManualOrderPaymentLinks()
+  const cached = store[orderNumber]
+  if (cached?.url) {
+    const resolved = await resolveStoredManualOrderPaymentLink(cached, orderNumber)
+    if (resolved) paymentLink = resolved
+  }
+
+  if (!paymentLink) {
+    const fromInvoice = await findStripeInvoiceForOrder(orderNumber)
+    if (fromInvoice) {
+      await saveManualOrderPaymentLink(orderNumber, fromInvoice)
+      paymentLink = fromInvoice
+    }
+  }
+
+  if (!paymentLink) {
+    const fromPaymentLink = await findStripePaymentLinkForOrder(orderNumber)
+    if (fromPaymentLink) {
+      await saveManualOrderPaymentLink(orderNumber, fromPaymentLink)
+      paymentLink = fromPaymentLink
+    }
+  }
+
+  if (!paymentLink) return null
+  return enrichPaymentLinkWithInvoiceTax(paymentLink)
+}
+
 async function createStripePaymentLinkForManualOrder({
   orderNumber,
   email,
   customerName,
   storeName,
   totalAmount,
-  matchedProducts
+  matchedProducts,
+  streetAddress,
+  city,
+  state,
+  zip,
+  salesTax,
+  delivery = 0,
+  shipping = 0,
+  service = 0,
+  serviceChargeTax = 0,
+  networkServiceCharge = 0,
+  giftNoteCharge = 0,
+  engraving = 0,
+  tip = 0,
+  discount = 0,
+  country = 'US'
 }) {
   if (!stripe) {
     return { skipped: true, reason: 'Stripe is not configured on the server' }
   }
 
-  const amount = parseFloat(totalAmount)
-  if (Number.isNaN(amount) || amount < 0.5) {
-    return { skipped: true, reason: 'Order total is below the Stripe minimum ($0.50)' }
-  }
+  const shippingAddress = buildStripeShippingAddress({
+    streetAddress,
+    city,
+    state,
+    zip,
+    country
+  })
+  const useAutomaticTax = Boolean(shippingAddress)
+  const expectedPayable = useAutomaticTax
+    ? getTaxableAmountForStripe(totalAmount, salesTax)
+    : parseFloat(totalAmount)
 
   const productSummary = (matchedProducts || [])
     .map((p) => `${p.quantity}x ${p.name}`)
@@ -2986,36 +3606,137 @@ async function createStripePaymentLinkForManualOrder({
     ? `Bevvi Order ${orderNumber}`
     : `Bevvi order — ${storeName || 'Manual'}`
 
-  const price = await stripe.prices.create({
-    currency: 'usd',
-    unit_amount: Math.round(amount * 100),
-    product_data: {
-      name: productName,
-      description: productSummary || `Manual order for ${customerName || 'customer'}`
-    }
-  })
+  const sharedMetadata = {
+    source: 'manual-order',
+    orderNumber: orderNumber || '',
+    storeName: storeName || '',
+    customerEmail: email || '',
+    customerName: customerName || '',
+    productSummary: productSummary || '',
+    automaticTax: useAutomaticTax ? 'true' : 'false',
+    recipientZip: shippingAddress?.postal_code || ''
+  }
 
-  const paymentLink = await stripe.paymentLinks.create({
-    line_items: [{ price: price.id, quantity: 1 }],
+  let { lines, discount: normalizedDiscount } = reconcileManualOrderLineItems(
+    buildManualOrderStripeLineItems({
+      matchedProducts,
+      delivery,
+      shipping,
+      service,
+      serviceChargeTax,
+      networkServiceCharge,
+      giftNoteCharge,
+      engraving,
+      tip,
+      salesTax,
+      useAutomaticTax
+    }),
+    discount,
+    expectedPayable
+  )
+
+  if (lines.length === 0) {
+    return { skipped: true, reason: 'No line items available to create a payment link' }
+  }
+
+  const payableBeforeTax = Math.max(0, sumManualOrderLineItems(lines) - normalizedDiscount)
+  if (payableBeforeTax < 0.5) {
+    return { skipped: true, reason: 'Order total is below the Stripe minimum ($0.50)' }
+  }
+
+  const stripeLineItems = toStripeCheckoutLineItems(lines, useAutomaticTax)
+  const discountCoupon =
+    normalizedDiscount > 0 ? await createStripeDiscountCoupon(normalizedDiscount, orderNumber) : null
+  const customerEmail = String(email || '').trim()
+
+  if (useAutomaticTax) {
+    const customer = await stripe.customers.create({
+      email: customerEmail || undefined,
+      name: customerName || undefined,
+      shipping: {
+        name: customerName || 'Customer',
+        address: shippingAddress
+      },
+      tax: { validate_location: 'immediately' },
+      metadata: {
+        source: 'manual-order',
+        orderNumber: orderNumber || ''
+      }
+    })
+
+    await createManualOrderStripeInvoiceItems(customer.id, lines, true)
+
+    const invoiceParams = {
+      customer: customer.id,
+      automatic_tax: { enabled: true },
+      collection_method: 'send_invoice',
+      days_until_due: 30,
+      metadata: sharedMetadata,
+      description: productName
+    }
+
+    if (discountCoupon) {
+      invoiceParams.discounts = [{ coupon: discountCoupon.id }]
+    }
+
+    const draftInvoice = await stripe.invoices.create({
+      ...invoiceParams,
+      pending_invoice_items_behavior: 'include'
+    })
+    const invoice = await stripe.invoices.finalizeInvoice(draftInvoice.id)
+    const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
+
+    return {
+      url: invoice.hosted_invoice_url,
+      paymentLinkId: invoice.id,
+      invoiceId: invoice.id,
+      paymentType: 'invoice',
+      livemode: invoice.livemode,
+      stripeDashboardUrl: buildStripeDashboardUrl('invoice', invoice.id, invoice.livemode),
+      totalAmount: parseFloat(totalAmount),
+      taxableAmount: payableBeforeTax,
+      lineItemCount: lines.length,
+      automaticTax: true,
+      recipientZip: shippingAddress.postal_code,
+      orderNumber: orderNumber || null,
+      customerEmail: customerEmail || null,
+      stripeTaxAmount
+    }
+  }
+
+  const paymentLinkParams = {
+    line_items: stripeLineItems,
     metadata: {
-      source: 'manual-order',
-      orderNumber: orderNumber || '',
-      storeName: storeName || '',
-      customerEmail: email || '',
-      customerName: customerName || ''
+      ...sharedMetadata,
+      paymentType: 'payment_link',
+      productName
     },
     after_completion: {
       type: 'redirect',
       redirect: { url: STRIPE_PAYMENT_SUCCESS_URL.replace('{CHECKOUT_SESSION_ID}', '') }
     }
-  })
+  }
+
+  if (discountCoupon) {
+    paymentLinkParams.discounts = [{ coupon: discountCoupon.id }]
+  }
+
+  const paymentLink = await stripe.paymentLinks.create(paymentLinkParams)
+  const paymentUrl = appendPrefilledEmailToPaymentUrl(paymentLink.url, customerEmail)
 
   return {
-    url: paymentLink.url,
+    url: paymentUrl,
     paymentLinkId: paymentLink.id,
-    totalAmount: amount,
+    paymentType: 'payment_link',
+    livemode: paymentLink.livemode,
+    stripeDashboardUrl: buildStripeDashboardUrl('payment_link', paymentLink.id, paymentLink.livemode),
+    totalAmount: parseFloat(totalAmount),
+    taxableAmount: payableBeforeTax,
+    lineItemCount: lines.length,
+    automaticTax: false,
+    recipientZip: null,
     orderNumber: orderNumber || null,
-    customerEmail: String(email || '').trim() || null
+    customerEmail: customerEmail || null
   }
 }
 
@@ -3444,6 +4165,40 @@ app.post('/api/manual-order', async (req, res) => {
   }
 })
 
+app.get('/api/manual-order/payment-link', async (req, res) => {
+  try {
+    const orderNumber = String(req.query.orderNumber || '').trim()
+    if (!orderNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'orderNumber query parameter is required'
+      })
+    }
+
+    if (!stripe) {
+      return res.json({
+        success: true,
+        configured: false,
+        paymentLink: null
+      })
+    }
+
+    const paymentLink = await getManualOrderPaymentLink(orderNumber)
+    res.json({
+      success: true,
+      configured: true,
+      paymentLink
+    })
+  } catch (error) {
+    console.error('❌ Manual order payment link lookup error:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to look up payment link',
+      message: error.message
+    })
+  }
+})
+
 app.post('/api/manual-order/payment-link', async (req, res) => {
   try {
     const {
@@ -3452,7 +4207,23 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       customerName,
       storeName,
       totalAmount,
-      matchedProducts
+      matchedProducts,
+      streetAddress,
+      city,
+      state,
+      zip,
+      salesTax,
+      delivery,
+      shipping,
+      service,
+      serviceChargeTax,
+      networkServiceCharge,
+      giftNoteCharge,
+      engraving,
+      tip,
+      discount,
+      country,
+      regenerate = false
     } = req.body || {}
 
     if (!email || totalAmount == null) {
@@ -3462,20 +4233,78 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       })
     }
 
+    const normalizedOrderNumber = String(orderNumber || '').trim() || null
+    const shouldRegenerate = regenerate === true || regenerate === 'true'
+    const existingLink =
+      !shouldRegenerate && normalizedOrderNumber
+        ? await getManualOrderPaymentLink(normalizedOrderNumber)
+        : null
+    if (existingLink?.url) {
+      return res.json({ success: true, paymentLink: existingLink, existing: true })
+    }
+
+    if (shouldRegenerate && normalizedOrderNumber) {
+      try {
+        const store = await readManualOrderPaymentLinks()
+        await clearManualOrderPaymentLink(normalizedOrderNumber)
+        const archiveActions = await archiveManualOrderStripePaymentResources(
+          store[normalizedOrderNumber],
+          normalizedOrderNumber
+        )
+        if (archiveActions.length > 0) {
+          console.log('🗑️ Archived previous Stripe payment resources:', {
+            orderNumber: normalizedOrderNumber,
+            archiveActions
+          })
+        }
+      } catch (error) {
+        if (error.code === 'INVOICE_ALREADY_PAID') {
+          return res.status(409).json({
+            success: false,
+            error: error.message
+          })
+        }
+        throw error
+      }
+    }
+
     const paymentLink = await createStripePaymentLinkForManualOrder({
-      orderNumber: orderNumber || null,
+      orderNumber: normalizedOrderNumber,
       email: String(email).trim(),
       customerName: String(customerName || '').trim(),
       storeName: String(storeName || '').trim(),
       totalAmount: parseFloat(totalAmount),
-      matchedProducts: Array.isArray(matchedProducts) ? matchedProducts : []
+      matchedProducts: Array.isArray(matchedProducts) ? matchedProducts : [],
+      streetAddress: String(streetAddress || '').trim(),
+      city: String(city || '').trim(),
+      state: String(state || '').trim(),
+      zip: String(zip || '').trim(),
+      salesTax,
+      delivery,
+      shipping,
+      service,
+      serviceChargeTax,
+      networkServiceCharge,
+      giftNoteCharge,
+      engraving,
+      tip,
+      discount,
+      country: String(country || 'US').trim() || 'US'
     })
 
-    if (paymentLink?.url) {
-      console.log('💳 Stripe payment link created:', { orderNumber, paymentLinkId: paymentLink.paymentLinkId })
+    if (paymentLink?.url && normalizedOrderNumber) {
+      await saveManualOrderPaymentLink(normalizedOrderNumber, paymentLink)
+      console.log(
+        shouldRegenerate ? '💳 Stripe payment link regenerated:' : '💳 Stripe payment link created:',
+        { orderNumber: normalizedOrderNumber, paymentLinkId: paymentLink.paymentLinkId }
+      )
     }
 
-    res.json({ success: true, paymentLink })
+    res.json({
+      success: true,
+      paymentLink,
+      regenerated: shouldRegenerate && Boolean(paymentLink?.url)
+    })
   } catch (error) {
     console.error('❌ Stripe payment link error:', error.message)
     res.status(500).json({
@@ -3676,7 +4505,22 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
     console.log('📊 Order details response status:', response.status)
     console.log('📊 Order details response data:', response.data)
 
-    res.json(response.data)
+    const data = response.data
+    const isManualOrder =
+      /^BEV-MAN-/i.test(String(orderNumber)) ||
+      data?.isManualOrder ||
+      data?.recipientorders?.[0]?.isManualOrder
+
+    if (isManualOrder && stripe) {
+      const stripeTaxAmount = await getStripeInvoiceTaxForOrder(orderNumber)
+      if (stripeTaxAmount != null) {
+        data.taxes = stripeTaxAmount
+        data.salesTax = stripeTaxAmount
+        data.stripeTaxPopulated = true
+      }
+    }
+
+    res.json(data)
   } catch (error) {
     console.error('❌ Error proxying order details:', error.message)
     res.status(500).json({
@@ -4782,6 +5626,7 @@ app.listen(PORT, async () => {
   console.log(`   GET  /api/products/status - Get cache status`)
   console.log(`   POST /api/products/add-from-upc - Enrich + add product`)
   console.log(`   POST /api/manual-order - Submit manual order (validates products against cache)`)
+  console.log(`   GET  /api/manual-order/payment-link?orderNumber= - Look up Stripe payment link for manual order`)
   console.log(`   POST /api/manual-order/payment-link - Create Stripe payment link for manual order`)
   console.log(`   GET  /api/address/autocomplete?input= - Google address suggestions`)
   console.log(`   GET  /api/address/details?placeId= - Resolve Google place to street/city/state/zip`)
