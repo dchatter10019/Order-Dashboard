@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail, RefreshCw } from 'lucide-react'
-import { apiFetch } from '../utils/api'
+import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail, RefreshCw, Upload, FileText, ScanLine } from 'lucide-react'
+import { apiFetch, parseApiJsonResponse } from '../utils/api'
 import { formatDollarAmount } from '../utils/formatCurrency'
 import { buildPaymentEmailMailto } from '../utils/paymentLink'
 import PageHeader from './ui/PageHeader'
@@ -312,6 +312,11 @@ function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, 
     if (googleEnabled === false) {
       return undefined
     }
+    if (resolvedLabel && term === resolvedLabel.trim()) {
+      setPredictions([])
+      setShowDropdown(false)
+      return undefined
+    }
 
     searchTimeoutRef.current = setTimeout(async () => {
       setIsSearching(true)
@@ -344,17 +349,20 @@ function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, 
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
     }
-  }, [value, googleEnabled])
+  }, [value, googleEnabled, resolvedLabel])
 
   const applyResolvedAddress = (parsed) => {
     if (parsed.formattedAddress) onChange(parsed.formattedAddress)
     onResolved(parsed)
     setResolvedLabel(parsed.formattedAddress || value)
+    setPredictions([])
     setLookupError(null)
     setShowDropdown(false)
   }
 
   const handleSelectPrediction = async (prediction) => {
+    setShowDropdown(false)
+    setPredictions([])
     setIsSearching(true)
     setLookupError(null)
     try {
@@ -408,7 +416,11 @@ function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, 
             setLookupError(null)
             setShowDropdown(true)
           }}
-          onFocus={() => setShowDropdown(true)}
+          onFocus={() => {
+            if (!(resolvedLabel && value.trim() === resolvedLabel.trim())) {
+              setShowDropdown(true)
+            }
+          }}
           onBlur={() => {
             window.setTimeout(() => {
               if (googleEnabled && value.trim().length >= 5 && !resolvedLabel) {
@@ -467,9 +479,324 @@ function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, 
   )
 }
 
+const getStoreName = (store) => store.name || store.Name || store.storeName || ''
+
+function RetailerCombobox({ stores, loading, value, onChange, onReload, inputClass, labelClass }) {
+  const [query, setQuery] = useState(value || '')
+  const [showDropdown, setShowDropdown] = useState(false)
+  const containerRef = useRef(null)
+
+  const storeNames = useMemo(() => {
+    const names = stores.map(getStoreName).filter(Boolean)
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b))
+  }, [stores])
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const list = q
+      ? storeNames.filter((name) => name.toLowerCase().includes(q))
+      : storeNames
+    return list.slice(0, 100)
+  }, [query, storeNames])
+
+  useEffect(() => {
+    setQuery(value || '')
+  }, [value])
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (containerRef.current && !containerRef.current.contains(event.target)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const selectStore = (name) => {
+    setQuery(name)
+    onChange(name)
+    setShowDropdown(false)
+  }
+
+  const handleBlur = () => {
+    setTimeout(() => {
+      const exact = storeNames.find(
+        (name) => name.toLowerCase() === query.trim().toLowerCase()
+      )
+      if (exact) selectStore(exact)
+    }, 150)
+  }
+
+  const isSelected = Boolean(value && value === query)
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label htmlFor="storeName" className={labelClass}>Retailer name</label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+        <input
+          id="storeName"
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            if (value) onChange('')
+            setShowDropdown(true)
+          }}
+          onFocus={() => setShowDropdown(true)}
+          onBlur={handleBlur}
+          placeholder={loading ? 'Loading retailers…' : 'Type to search retailers…'}
+          disabled={loading}
+          autoComplete="off"
+          className={`${inputClass} pl-9 ${isSelected ? 'border-green-400 ring-1 ring-green-300' : ''}`}
+        />
+        <input
+          tabIndex={-1}
+          className="sr-only"
+          value={value}
+          onChange={() => {}}
+          required
+          aria-hidden="true"
+        />
+      </div>
+      {showDropdown && !loading && (
+        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-200 bg-white shadow-lg">
+          {filtered.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-gray-500">No matching retailers</div>
+          ) : (
+            filtered.map((name) => (
+              <button
+                key={name}
+                type="button"
+                className="block w-full px-3 py-2 text-left text-sm hover:bg-bevvi-primary-50"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => selectStore(name)}
+              >
+                {name}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+      {stores.length === 0 && !loading && (
+        <button
+          type="button"
+          onClick={onReload}
+          className="mt-2 text-sm text-bevvi-primary-600 hover:underline"
+        >
+          Reload retailers
+        </button>
+      )}
+      <p className="mt-1 text-xs text-gray-500">
+        Type to filter the retailer list, then select one.
+      </p>
+    </div>
+  )
+}
+
 const todayInputValue = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result || '')
+      resolve(result.includes(',') ? result.split(',')[1] : result)
+    }
+    reader.onerror = () => reject(new Error('Could not read the file'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function matchRetailerFromList(target, stores) {
+  const needle = String(target || '').trim().toLowerCase()
+  if (!needle) return ''
+  const names = stores
+    .map((store) => store.name || store.Name || store.storeName || '')
+    .filter(Boolean)
+  const exact = names.find((name) => name.toLowerCase() === needle)
+  if (exact) return exact
+  const partial = names.find(
+    (name) => name.toLowerCase().includes(needle) || needle.includes(name.toLowerCase())
+  )
+  return partial || String(target || '').trim()
+}
+
+function formatReceiptMoney(value) {
+  if (value == null || value === '') return null
+  const parsed = parseFloat(value)
+  if (Number.isNaN(parsed)) return null
+  return parsed === 0 ? '0' : parsed.toFixed(2)
+}
+
+function inferReceiptMimeType(file) {
+  if (file.type) return file.type
+  const lower = String(file.name || '').toLowerCase()
+  if (lower.endsWith('.pdf')) return 'application/pdf'
+  if (lower.endsWith('.png')) return 'image/png'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  return ''
+}
+
+function ReceiptScanSection({ onParsed, stores, disabled }) {
+  const fileInputRef = useRef(null)
+  const [scanning, setScanning] = useState(false)
+  const [error, setError] = useState(null)
+  const [fileName, setFileName] = useState('')
+  const [dragActive, setDragActive] = useState(false)
+
+  const scanFile = async (file) => {
+    if (!file || disabled) return
+
+    const mimeType = inferReceiptMimeType(file)
+    const allowedTypes = new Set([
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'application/pdf'
+    ])
+    if (!allowedTypes.has(mimeType)) {
+      setError('Upload a JPEG, PNG, WebP, GIF, or PDF file.')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File must be under 10 MB.')
+      return
+    }
+
+    setScanning(true)
+    setError(null)
+    setFileName(file.name)
+
+    try {
+      const dataBase64 = await readFileAsBase64(file)
+      const response = await apiFetch('/api/manual-order/parse-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        timeoutMs: 180000,
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType,
+          dataBase64
+        })
+      })
+      const data = await parseApiJsonResponse(response)
+      if (!response.ok || !data.success || !data.parsed) {
+        throw new Error(data.message || data.error || 'Could not scan receipt')
+      }
+      onParsed(data.parsed, { stores })
+      setError(null)
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        setError('Receipt scan timed out. Try a smaller file or a screenshot of the receipt.')
+      } else if (e.message === 'Failed to fetch' || e instanceof TypeError) {
+        setError(
+          'Could not reach the server. Start the backend (npm run server on port 3001) and, for local dev, the frontend (npm run dev on port 3000).'
+        )
+      } else {
+        setError(e.message || 'Could not scan receipt')
+      }
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  const handleInputChange = (event) => {
+    const file = event.target.files?.[0]
+    if (file) scanFile(file)
+    event.target.value = ''
+  }
+
+  const handleDrop = (event) => {
+    event.preventDefault()
+    setDragActive(false)
+    const file = event.dataTransfer.files?.[0]
+    if (file) scanFile(file)
+  }
+
+  return (
+    <section className="rounded-lg border border-dashed border-bevvi-primary-200 bg-bevvi-primary-50/40 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900">
+            <ScanLine className="h-4 w-4 text-bevvi-primary-600" />
+            Scan receipt or invoice
+          </h3>
+          <p className="mt-1 text-sm text-gray-600">
+            Upload a photo or PDF and we&apos;ll fill in products, customer, address, and fees.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled || scanning}
+          className="inline-flex items-center rounded-md border border-bevvi-primary-300 bg-white px-3 py-1.5 text-sm font-medium text-bevvi-primary-700 hover:bg-bevvi-primary-50 disabled:opacity-60"
+        >
+          {scanning ? (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          ) : (
+            <Upload className="mr-1.5 h-4 w-4" />
+          )}
+          {scanning ? 'Scanning…' : 'Choose file'}
+        </button>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+        className="sr-only"
+        onChange={handleInputChange}
+      />
+
+      <div
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') fileInputRef.current?.click()
+        }}
+        onClick={() => !scanning && fileInputRef.current?.click()}
+        onDragEnter={(event) => {
+          event.preventDefault()
+          setDragActive(true)
+        }}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setDragActive(true)
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault()
+          setDragActive(false)
+        }}
+        onDrop={handleDrop}
+        className={`mt-3 cursor-pointer rounded-md border px-4 py-6 text-center transition-colors ${
+          dragActive
+            ? 'border-bevvi-primary-400 bg-white'
+            : 'border-gray-200 bg-white/80 hover:border-bevvi-primary-300'
+        } ${scanning ? 'pointer-events-none opacity-70' : ''}`}
+      >
+        <FileText className="mx-auto h-8 w-8 text-gray-400" />
+        <p className="mt-2 text-sm text-gray-700">
+          Drag and drop a receipt image or PDF here
+        </p>
+        <p className="mt-1 text-xs text-gray-500">JPEG, PNG, WebP, GIF, or PDF up to 10 MB</p>
+        {fileName && !scanning && (
+          <p className="mt-2 text-xs text-gray-600">Last file: {fileName}</p>
+        )}
+      </div>
+
+      {error && (
+        <p className="mt-3 text-sm text-red-700" role="alert">{error}</p>
+      )}
+    </section>
+  )
 }
 
 const ManualOrderAdd = () => {
@@ -489,6 +816,9 @@ const ManualOrderAdd = () => {
   const [discount, setDiscount] = useState('0')
   const [engraving, setEngraving] = useState('0')
   const [salesTax, setSalesTax] = useState('0')
+  const [salesTaxFromStripe, setSalesTaxFromStripe] = useState(false)
+  const [salesTaxLoading, setSalesTaxLoading] = useState(false)
+  const [salesTaxError, setSalesTaxError] = useState(null)
   const [service, setService] = useState('0')
   const [serviceChargeTax, setServiceChargeTax] = useState('0')
   const [shipping, setShipping] = useState('0')
@@ -503,6 +833,78 @@ const ManualOrderAdd = () => {
   const [showPaymentLinkPrompt, setShowPaymentLinkPrompt] = useState(false)
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false)
   const [paymentLinkError, setPaymentLinkError] = useState(null)
+
+  const applyParsedReceipt = useCallback((parsed, { stores: storeList = stores } = {}) => {
+    setValidationResults(null)
+    setError(null)
+    setSubmitResponse(null)
+    setSalesTaxFromStripe(false)
+    setSalesTaxError(null)
+
+    if (parsed.storeName) {
+      setStoreName(matchRetailerFromList(parsed.storeName, storeList))
+    }
+    if (parsed.companyName) setCompanyName(parsed.companyName)
+    if (parsed.customerName) setCustomerName(parsed.customerName)
+    if (parsed.email) setEmail(parsed.email)
+    if (parsed.orderDate) setOrderDate(parsed.orderDate)
+
+    const applyMoney = (value, setter) => {
+      const formatted = formatReceiptMoney(value)
+      if (formatted != null) setter(formatted)
+    }
+
+    applyMoney(parsed.delivery, setDelivery)
+    applyMoney(parsed.discount, setDiscount)
+    applyMoney(parsed.engraving, setEngraving)
+    applyMoney(parsed.salesTax, setSalesTax)
+    applyMoney(parsed.service, setService)
+    applyMoney(parsed.serviceChargeTax, setServiceChargeTax)
+    applyMoney(parsed.shipping, setShipping)
+    applyMoney(parsed.tip, setTip)
+
+    if (Array.isArray(parsed.products) && parsed.products.length > 0) {
+      setLineItems(
+        parsed.products.map((product) => ({
+          query: product.query || `${product.name || ''}${product.size ? ` ${product.size}` : ''}`.trim(),
+          name: product.catalogMatched ? (product.name || '') : '',
+          size: product.catalogMatched ? (product.size || '') : '',
+          quantity: String(product.quantity || 1),
+          price: product.price != null ? String(product.price) : ''
+        }))
+      )
+    }
+
+    if (parsed.streetAddress || parsed.city || parsed.state || parsed.zip) {
+      const formattedAddress = [
+        parsed.streetAddress,
+        parsed.city,
+        parsed.state,
+        parsed.zip
+      ].filter(Boolean).join(', ')
+      setAddressInput(formattedAddress)
+      setStreetAddress(parsed.streetAddress || '')
+      setCity(parsed.city || '')
+      setState(parsed.state || '')
+      setZip(parsed.zip || '')
+    }
+
+    const matchedCount = (parsed.products || []).filter((product) => product.catalogMatched).length
+    const productCount = parsed.products?.length || 0
+    let summary = 'Receipt scanned — review the fields below before submitting.'
+    if (productCount > 0) {
+      summary += ` Found ${productCount} product${productCount === 1 ? '' : 's'}`
+      if (matchedCount > 0) {
+        summary += ` (${matchedCount} matched to the master catalog).`
+      } else {
+        summary += '.'
+      }
+    }
+    if (parsed.confidenceNotes) {
+      summary += ` Note: ${parsed.confidenceNotes}`
+    }
+    setMessage(summary)
+  }, [stores])
 
   const loadStores = useCallback(async () => {
     setLoadingStores(true)
@@ -605,6 +1007,111 @@ const ManualOrderAdd = () => {
     return parseQueryToNameAndSize(item.query)
   }
 
+  const taxCalculationInput = useMemo(() => ({
+    zip: zip.trim(),
+    streetAddress: streetAddress.trim(),
+    city: city.trim(),
+    state: state.trim(),
+    products: lineItems.map((item) => {
+      const { name, size } = resolveLineItemForApi(item)
+      return { name, size, quantity: item.quantity, price: item.price }
+    }),
+    delivery,
+    shipping,
+    service,
+    serviceChargeTax,
+    engraving,
+    tip,
+    subTotal
+  }), [
+    zip,
+    streetAddress,
+    city,
+    state,
+    lineItems,
+    delivery,
+    shipping,
+    service,
+    serviceChargeTax,
+    engraving,
+    tip,
+    subTotal
+  ])
+
+  useEffect(() => {
+    if (!taxCalculationInput.zip) {
+      setSalesTaxFromStripe(false)
+      setSalesTaxError(null)
+      return undefined
+    }
+
+    const hasTaxableProducts = taxCalculationInput.products.some((product) => {
+      const price = parseFloat(product.price)
+      const quantity = parseInt(product.quantity, 10)
+      const label = `${product.name || ''} ${product.size || ''}`.trim()
+      return label && !Number.isNaN(price) && price >= 0 && quantity > 0
+    })
+
+    if (!hasTaxableProducts || taxCalculationInput.subTotal <= 0) {
+      setSalesTax('0')
+      setSalesTaxFromStripe(false)
+      setSalesTaxError(null)
+      return undefined
+    }
+
+    let cancelled = false
+    const timeoutId = window.setTimeout(async () => {
+      setSalesTaxLoading(true)
+      setSalesTaxError(null)
+      try {
+        const response = await apiFetch('/api/manual-order/calculate-tax', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            products: lineItems.map((item) => {
+              const { name, size } = resolveLineItemForApi(item)
+              return {
+                name,
+                size,
+                quantity: item.quantity,
+                price: item.price
+              }
+            }),
+            streetAddress: taxCalculationInput.streetAddress,
+            city: taxCalculationInput.city,
+            state: taxCalculationInput.state,
+            zip: taxCalculationInput.zip,
+            delivery: taxCalculationInput.delivery,
+            shipping: taxCalculationInput.shipping,
+            service: taxCalculationInput.service,
+            serviceChargeTax: taxCalculationInput.serviceChargeTax,
+            engraving: taxCalculationInput.engraving,
+            tip: taxCalculationInput.tip
+          })
+        })
+        const data = await parseApiJsonResponse(response)
+        if (cancelled) return
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || data.error || 'Could not calculate sales tax')
+        }
+        const taxAmount = data.salesTax ?? 0
+        setSalesTax(taxAmount === 0 ? '0' : taxAmount.toFixed(2))
+        setSalesTaxFromStripe(true)
+      } catch (e) {
+        if (cancelled) return
+        setSalesTaxError(e.message || 'Could not calculate sales tax')
+        setSalesTaxFromStripe(false)
+      } finally {
+        if (!cancelled) setSalesTaxLoading(false)
+      }
+    }, 450)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [taxCalculationInput])
+
   const resolveAddressBeforeSubmit = async () => {
     if (streetAddress && city && state && zip) {
       return { streetAddress, city, state, zip }
@@ -662,6 +1169,7 @@ const ManualOrderAdd = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    if (submitResponse) return
     setError(null)
     setMessage(null)
     setSubmitResponse(null)
@@ -789,19 +1297,15 @@ const ManualOrderAdd = () => {
           description="Search curated products, build the order, and email a seamless Stripe payment link to your customer."
         />
 
+        <ReceiptScanSection
+          onParsed={applyParsedReceipt}
+          stores={stores}
+          disabled={submitting}
+        />
+
         <form onSubmit={handleSubmit} className="space-y-8">
           <section className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold text-gray-900">Products</h3>
-              <button
-                type="button"
-                onClick={addLineItem}
-                className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                <Plus className="mr-1 h-4 w-4" />
-                Add product
-              </button>
-            </div>
+            <h3 className="text-base font-semibold text-gray-900">Products</h3>
 
             {lineItems.map((item, index) => (
               <ProductLineRow
@@ -818,6 +1322,15 @@ const ManualOrderAdd = () => {
                 }
               />
             ))}
+
+            <button
+              type="button"
+              onClick={addLineItem}
+              className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <Plus className="mr-1 h-4 w-4" />
+              Add product
+            </button>
 
             <div className="rounded-lg border border-gray-200 bg-white p-4">
               <h4 className="text-sm font-semibold text-gray-900">Subtotal</h4>
@@ -851,38 +1364,15 @@ const ManualOrderAdd = () => {
           <section className="space-y-4">
             <h3 className="text-base font-semibold text-gray-900">Retailer</h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label htmlFor="storeName" className={labelClass}>Retailer name</label>
-                <select
-                  id="storeName"
-                  value={storeName}
-                  onChange={(e) => setStoreName(e.target.value)}
-                  className={inputClass}
-                  required
-                  disabled={loadingStores}
-                >
-                  <option value="">
-                    {loadingStores ? 'Loading retailers…' : 'Select a retailer'}
-                  </option>
-                  {stores.map((store, i) => {
-                    const name = store.name || store.Name || store.storeName || ''
-                    return (
-                      <option key={`${name}-${i}`} value={name}>
-                        {name}
-                      </option>
-                    )
-                  })}
-                </select>
-                {stores.length === 0 && !loadingStores && (
-                  <button
-                    type="button"
-                    onClick={loadStores}
-                    className="mt-2 text-sm text-bevvi-primary-600 hover:underline"
-                  >
-                    Reload retailers
-                  </button>
-                )}
-              </div>
+              <RetailerCombobox
+                stores={stores}
+                loading={loadingStores}
+                value={storeName}
+                onChange={setStoreName}
+                onReload={loadStores}
+                inputClass={inputClass}
+                labelClass={labelClass}
+              />
               <div>
                 <label htmlFor="companyName" className={labelClass}>Company name</label>
                 <input
@@ -962,7 +1452,6 @@ const ManualOrderAdd = () => {
                 ['delivery', delivery, setDelivery, 'Delivery'],
                 ['discount', discount, setDiscount, 'Discount'],
                 ['engraving', engraving, setEngraving, 'Engraving'],
-                ['salesTax', salesTax, setSalesTax, 'Sales tax'],
                 ['service', service, setService, 'Service (10% of subtotal)'],
                 ['serviceChargeTax', serviceChargeTax, setServiceChargeTax, 'Service charge tax'],
                 ['shipping', shipping, setShipping, 'Shipping'],
@@ -983,6 +1472,39 @@ const ManualOrderAdd = () => {
                   />
                 </div>
               ))}
+              <div>
+                <label htmlFor="salesTax" className={labelClass}>
+                  Sales tax
+                  {salesTaxFromStripe && (
+                    <span className="ml-1 text-xs font-normal text-gray-500">(from Stripe)</span>
+                  )}
+                  {salesTaxLoading && (
+                    <Loader2 className="ml-1 inline h-3.5 w-3.5 animate-spin text-bevvi-primary-600" aria-hidden="true" />
+                  )}
+                </label>
+                <input
+                  id="salesTax"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={salesTax}
+                  onChange={(e) => {
+                    setSalesTax(e.target.value)
+                    setSalesTaxFromStripe(false)
+                    setSalesTaxError(null)
+                  }}
+                  readOnly={salesTaxFromStripe && Boolean(zip?.trim())}
+                  className={`${inputClass} ${salesTaxFromStripe ? 'bg-gray-50 text-gray-700' : ''}`}
+                />
+                {salesTaxError && (
+                  <p className="mt-1 text-xs text-amber-700">{salesTaxError}</p>
+                )}
+                {!zip?.trim() && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Add a delivery address to calculate tax automatically.
+                  </p>
+                )}
+              </div>
             </div>
             <p className="text-sm text-gray-600">
               Estimated total: <strong>{formatDollarAmount(estimatedTotal)}</strong>
@@ -1143,14 +1665,16 @@ const ManualOrderAdd = () => {
 
           <button
             type="submit"
-            disabled={submitting}
-            className="inline-flex items-center rounded-md bg-bevvi-primary-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:opacity-50"
+            disabled={submitting || Boolean(submitResponse)}
+            className="inline-flex items-center rounded-md bg-bevvi-primary-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Submitting order…
               </>
+            ) : submitResponse ? (
+              'Order submitted'
             ) : (
               'Submit manual order'
             )}

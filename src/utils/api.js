@@ -26,12 +26,49 @@ export const getApiBaseUrl = () => {
  * @returns {Promise<Response>}
  */
 export const apiFetch = async (endpoint, options = {}) => {
+  const { timeoutMs, ...fetchOptions } = options
   const baseUrl = getApiBaseUrl()
   const url = `${baseUrl}${endpoint}`
-  
+
   console.log(`🌐 API Request: ${url}`)
-  
-  return fetch(url, options)
+
+  if (!timeoutMs) {
+    return fetch(url, fetchOptions)
+  }
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...fetchOptions, signal: controller.signal })
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+/**
+ * Parse a fetch Response as JSON, with a clear error when the server returns HTML/text.
+ */
+export async function parseApiJsonResponse(response) {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    return response.json()
+  }
+
+  const text = await response.text()
+  if (text.trimStart().startsWith('<!DOCTYPE') || text.trimStart().startsWith('<html')) {
+    if (response.status === 404) {
+      throw new Error(
+        'Tax API not found — restart the backend server (npm run server) so the latest routes are loaded.'
+      )
+    }
+    throw new Error('Server returned an HTML page instead of JSON. Is the backend running on port 3001?')
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new Error(text.slice(0, 200) || `Unexpected response (${response.status})`)
+  }
 }
 
 /**

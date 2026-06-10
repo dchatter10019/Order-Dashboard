@@ -4,7 +4,9 @@ import react from '@vitejs/plugin-react'
 const apiProxy = {
   '/api': {
     target: 'http://localhost:3001',
-    changeOrigin: true
+    changeOrigin: true,
+    timeout: 180000,
+    proxyTimeout: 180000
   }
 }
 

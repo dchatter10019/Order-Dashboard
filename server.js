@@ -591,6 +591,195 @@ upc, name, description, category, subcategory, varietal, region, appellation, co
   }
 }
 
+function parseJsonFromAiContent(content) {
+  if (!content || typeof content !== 'string') return null
+  try {
+    return JSON.parse(content)
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/)
+    if (!match) return null
+    try {
+      return JSON.parse(match[0])
+    } catch {
+      return null
+    }
+  }
+}
+
+function normalizeReceiptMoneyValue(value) {
+  if (value == null || value === '') return null
+  const parsed = parseFloat(String(value).replace(/[$,]/g, '').trim())
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function normalizeReceiptDate(value) {
+  if (!value) return null
+  const str = String(value).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str
+  const slashMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slashMatch) {
+    const [, month, day, year] = slashMatch
+    return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`
+  }
+  const parsed = new Date(str)
+  if (Number.isNaN(parsed.getTime())) return null
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`
+}
+
+function formatCatalogProductSize(product) {
+  if (product.size == null || product.size === '') return String(product.units || '').trim()
+  return `${product.size} ${product.units || ''}`.trim()
+}
+
+function normalizeManualOrderReceiptParse(raw) {
+  if (!raw || typeof raw !== 'object') return null
+
+  const products = (Array.isArray(raw.products) ? raw.products : [])
+    .map((product) => ({
+      name: String(product?.name || '').trim(),
+      size: String(product?.size || '').trim(),
+      quantity: Math.max(1, parseInt(product?.quantity, 10) || 1),
+      price: normalizeReceiptMoneyValue(product?.price)
+    }))
+    .filter((product) => product.name)
+
+  return {
+    storeName: String(raw.storeName || '').trim() || null,
+    companyName: String(raw.companyName || '').trim() || null,
+    customerName: String(raw.customerName || '').trim() || null,
+    email: String(raw.email || '').trim() || null,
+    streetAddress: String(raw.streetAddress || '').trim() || null,
+    city: String(raw.city || '').trim() || null,
+    state: String(raw.state || '').trim().toUpperCase().slice(0, 2) || null,
+    zip: String(raw.zip || '').trim().replace(/[^\d-]/g, '').slice(0, 10) || null,
+    orderDate: normalizeReceiptDate(raw.orderDate),
+    products,
+    delivery: normalizeReceiptMoneyValue(raw.delivery),
+    discount: normalizeReceiptMoneyValue(raw.discount),
+    engraving: normalizeReceiptMoneyValue(raw.engraving),
+    salesTax: normalizeReceiptMoneyValue(raw.salesTax),
+    service: normalizeReceiptMoneyValue(raw.service),
+    serviceChargeTax: normalizeReceiptMoneyValue(raw.serviceChargeTax),
+    shipping: normalizeReceiptMoneyValue(raw.shipping),
+    tip: normalizeReceiptMoneyValue(raw.tip),
+    confidenceNotes: String(raw.confidenceNotes || '').trim() || null
+  }
+}
+
+async function enrichParsedReceiptProducts(products = []) {
+  await ensureProductsCacheLoaded()
+  return products.map((product) => {
+    const size = product.size || parseSizeFromCombinedName(product.name) || ''
+    const cached = findProductInCache(product.name, size)
+    if (cached) {
+      const catalogSize = formatCatalogProductSize(cached)
+      const displayName = buildManualOrderProductName(cached)
+      return {
+        ...product,
+        name: String(cached.name || product.name).replace(/\s*-\s*\d+(?:\.\d+)?(?:\s*(?:ML|L|OZ|CL|G|LB|PK|PACK|LT|LITER|LITRE))?\s*$/i, '').trim() || product.name,
+        size: catalogSize || product.size,
+        query: displayName,
+        catalogMatched: true
+      }
+    }
+    return {
+      ...product,
+      query: `${product.name}${product.size ? ` ${product.size}` : ''}`.trim(),
+      catalogMatched: false
+    }
+  })
+}
+
+async function parseManualOrderReceiptWithAI({ mimeType, dataBase64, fileName }) {
+  if (!openai) {
+    return { skipped: true, reason: 'OpenAI is not configured on the server' }
+  }
+
+  const normalizedMime = String(mimeType || '').trim().toLowerCase()
+  const allowedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+  if (normalizedMime !== 'application/pdf' && !allowedImageTypes.has(normalizedMime)) {
+    return { skipped: true, reason: 'Unsupported file type. Upload a JPEG, PNG, WebP, GIF, or PDF.' }
+  }
+
+  const systemPrompt = `You extract structured order data from Bevvi liquor/wine retail receipts, invoices, purchase orders, or delivery documents.
+Read all visible text carefully. Extract only values that are clearly present — never invent data.
+Products are typically wine, beer, or spirits with sizes like 750 ML, 1 L, 1.75 L, 375 ML, 12 OZ.
+Return numeric money amounts without currency symbols. Use null for missing optional fields.
+Dates must be YYYY-MM-DD when possible.
+US state as 2-letter code. Zip as 5 or 9 digits.
+
+Return ONLY valid JSON with this shape:
+{
+  "storeName": null,
+  "companyName": null,
+  "customerName": null,
+  "email": null,
+  "streetAddress": null,
+  "city": null,
+  "state": null,
+  "zip": null,
+  "orderDate": null,
+  "products": [{ "name": "", "size": "", "quantity": 1, "price": null }],
+  "delivery": null,
+  "discount": null,
+  "engraving": null,
+  "salesTax": null,
+  "service": null,
+  "serviceChargeTax": null,
+  "shipping": null,
+  "tip": null,
+  "confidenceNotes": ""
+}`
+
+  const dataUrl = `data:${normalizedMime};base64,${dataBase64}`
+  const userContent = []
+
+  if (normalizedMime === 'application/pdf') {
+    userContent.push({
+      type: 'file',
+      file: {
+        filename: fileName || 'receipt.pdf',
+        file_data: dataUrl
+      }
+    })
+  } else {
+    userContent.push({
+      type: 'image_url',
+      image_url: { url: dataUrl, detail: 'high' }
+    })
+  }
+
+  userContent.push({
+    type: 'text',
+    text: 'Extract all order fields from this receipt/document for a manual liquor delivery order.'
+  })
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
+      ],
+      temperature: 0.1,
+      max_tokens: 2500,
+      response_format: { type: 'json_object' }
+    })
+
+    const parsed = parseJsonFromAiContent(completion.choices?.[0]?.message?.content)
+    const normalized = normalizeManualOrderReceiptParse(parsed)
+    if (!normalized) {
+      return { success: false, error: 'Could not parse receipt contents' }
+    }
+
+    normalized.products = await enrichParsedReceiptProducts(normalized.products)
+    return { success: true, parsed: normalized }
+  } catch (error) {
+    console.error('Receipt scan failed:', error.message)
+    return { success: false, error: 'Failed to scan receipt', message: error.message }
+  }
+}
+
 function expandWineSearchQuery(name) {
   if (!name || typeof name !== 'string') return name
   // "Opus 2022" is commonly Opus One; expand for better wine-specific results
@@ -904,10 +1093,21 @@ app.use(cors({
   credentials: true
 }))
 app.use(express.json({
+  limit: '25mb',
   verify: (req, res, buf) => {
     req.rawBody = buf
   }
 }))
+
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      error: 'Upload is too large. Use a file under 10 MB.'
+    })
+  }
+  next(err)
+})
 
 // Add some debugging
 app.use((req, res, next) => {
@@ -3036,6 +3236,84 @@ function extractStripeInvoiceTaxDollars(invoice) {
   return null
 }
 
+function extractStripeTaxCalculationDollars(calculation) {
+  if (!calculation) return null
+
+  if (typeof calculation.tax_amount_exclusive === 'number' && calculation.tax_amount_exclusive > 0) {
+    return Math.round(calculation.tax_amount_exclusive) / 100
+  }
+
+  if (Array.isArray(calculation.tax_breakdown)) {
+    const cents = calculation.tax_breakdown.reduce(
+      (sum, entry) => sum + (Number(entry.amount) || 0),
+      0
+    )
+    if (cents > 0) return Math.round(cents) / 100
+  }
+
+  return 0
+}
+
+async function calculateManualOrderStripeTax({
+  matchedProducts = [],
+  streetAddress,
+  city,
+  state,
+  zip,
+  country = 'US',
+  delivery = 0,
+  shipping = 0,
+  service = 0,
+  serviceChargeTax = 0,
+  engraving = 0,
+  tip = 0
+}) {
+  if (!stripe) {
+    return { skipped: true, reason: 'Stripe is not configured on the server' }
+  }
+
+  const shippingAddress = buildStripeShippingAddress({
+    streetAddress,
+    city,
+    state,
+    zip,
+    country
+  })
+  if (!shippingAddress) {
+    return { skipped: true, reason: 'Recipient zip is required to calculate tax' }
+  }
+
+  const lines = buildManualOrderStripeLineItems({
+    matchedProducts,
+    delivery,
+    shipping,
+    service,
+    serviceChargeTax,
+    engraving,
+    tip,
+    salesTax: 0,
+    useAutomaticTax: true
+  })
+
+  if (lines.length === 0) {
+    return { success: true, salesTax: 0, taxableSubtotal: 0 }
+  }
+
+  const taxRequest = buildStripeTaxCalculationRequest(lines, shippingAddress)
+  if (taxRequest.line_items.length === 0 && !taxRequest.shipping_cost) {
+    return { success: true, salesTax: 0, taxableSubtotal: 0 }
+  }
+
+  const calculation = await stripe.tax.calculations.create(taxRequest)
+
+  return {
+    success: true,
+    salesTax: extractStripeTaxCalculationDollars(calculation) ?? 0,
+    taxableSubtotal: sumManualOrderLineItems(lines),
+    calculationId: calculation.id
+  }
+}
+
 async function getStripeInvoiceRecordForOrder(orderNumber) {
   if (!stripe || !orderNumber) return null
 
@@ -3159,6 +3437,128 @@ function sumManualOrderLineItems(lines) {
   return (lines || []).reduce((sum, line) => sum + line.unitAmount * line.quantity, 0)
 }
 
+const STRIPE_TAX_CODES = {
+  NON_TAXABLE: 'txcd_00000000',
+  GENERAL_TANGIBLE: 'txcd_99999999',
+  GENERAL_SERVICE: 'txcd_20030000',
+  ALCOHOL_BEER: 'txcd_41020001',
+  ALCOHOL_SPIRITS: 'txcd_41020002',
+  ALCOHOL_WINE: 'txcd_41020003',
+  NON_ALCOHOLIC_BEVERAGE: 'txcd_41040008',
+  GRATUITY: 'txcd_90020001',
+  SHIPPING: 'txcd_92010001'
+}
+
+function resolveStripeTaxCodeForCatalogProduct(product) {
+  const category = String(product?.category || '').trim().toLowerCase()
+  const subCategory = String(product?.subCategory || '').trim().toLowerCase()
+
+  if (category === 'wine') return STRIPE_TAX_CODES.ALCOHOL_WINE
+  if (category === 'beer') return STRIPE_TAX_CODES.ALCOHOL_BEER
+  if (category === 'mixer') return STRIPE_TAX_CODES.NON_ALCOHOLIC_BEVERAGE
+
+  if (category === 'liquor') {
+    if (subCategory.includes('ready-to-drink') || subCategory.includes('ready to drink')) {
+      return STRIPE_TAX_CODES.ALCOHOL_SPIRITS
+    }
+    if (
+      subCategory.includes('vermouth') ||
+      subCategory.includes('aperitif') ||
+      subCategory.includes('dessert') ||
+      subCategory.includes('fortified')
+    ) {
+      return STRIPE_TAX_CODES.ALCOHOL_WINE
+    }
+    return STRIPE_TAX_CODES.ALCOHOL_SPIRITS
+  }
+
+  return STRIPE_TAX_CODES.ALCOHOL_SPIRITS
+}
+
+function resolveStripeTaxCodeFromProductName(name) {
+  const label = String(name || '').toLowerCase()
+  if (/\b(beer|lager|ale|cider|ipa|stout|pilsner|hefeweizen)\b/.test(label)) {
+    return STRIPE_TAX_CODES.ALCOHOL_BEER
+  }
+  if (
+    /\b(wine|champagne|prosecco|pinot|cabernet|merlot|chardonnay|sauvignon|ros[eé]|sake|shochu)\b/.test(
+      label
+    )
+  ) {
+    return STRIPE_TAX_CODES.ALCOHOL_WINE
+  }
+  if (/\b(mixer|juice|soda|tonic|bitters|cola|puree|grenadine|sweet & sour)\b/.test(label)) {
+    return STRIPE_TAX_CODES.NON_ALCOHOLIC_BEVERAGE
+  }
+  if (
+    /\b(vodka|gin|rum|tequila|whiskey|whisky|bourbon|scotch|mezcal|cognac|brandy|liqueur|spirit|soju|grappa)\b/.test(
+      label
+    )
+  ) {
+    return STRIPE_TAX_CODES.ALCOHOL_SPIRITS
+  }
+  return STRIPE_TAX_CODES.ALCOHOL_SPIRITS
+}
+
+function resolveStripeTaxCodeForFeeType(feeType) {
+  switch (feeType) {
+    case 'delivery':
+    case 'shipping':
+      return STRIPE_TAX_CODES.SHIPPING
+    case 'tip':
+      return STRIPE_TAX_CODES.GRATUITY
+    case 'serviceChargeTax':
+      return STRIPE_TAX_CODES.NON_TAXABLE
+    case 'service':
+    case 'networkServiceCharge':
+    case 'engraving':
+    case 'giftNoteCharge':
+      return STRIPE_TAX_CODES.GENERAL_SERVICE
+    default:
+      return STRIPE_TAX_CODES.GENERAL_SERVICE
+  }
+}
+
+function resolveManualOrderProductTaxCode({ name, size, taxCode, category, subCategory }) {
+  if (taxCode) return taxCode
+  if (category || subCategory) {
+    return resolveStripeTaxCodeForCatalogProduct({ category, subCategory })
+  }
+  const cached = findProductInCache(name, size)
+  if (cached) return resolveStripeTaxCodeForCatalogProduct(cached)
+  return resolveStripeTaxCodeFromProductName(`${name} ${size}`.trim())
+}
+
+function enrichManualOrderProductsForTax(productInputs = []) {
+  return productInputs
+    .map((item) => {
+      const name = String(item.name || '').trim()
+      const size = String(item.size || '').trim()
+      const quantity = parseInt(item.quantity, 10) || 1
+      const price = parseFloat(item.price)
+      if (!name || Number.isNaN(price) || price < 0 || quantity <= 0) return null
+
+      const cached = findProductInCache(name, size || parseSizeFromCombinedName(name) || '')
+      const displayName = cached ? buildManualOrderProductName(cached) : `${name}${size ? ` ${size}` : ''}`.trim()
+
+      return {
+        name: displayName,
+        quantity,
+        price,
+        category: cached?.category || item.category,
+        subCategory: cached?.subCategory || item.subCategory,
+        taxCode: resolveManualOrderProductTaxCode({
+          name,
+          size,
+          taxCode: item.taxCode,
+          category: cached?.category || item.category,
+          subCategory: cached?.subCategory || item.subCategory
+        })
+      }
+    })
+    .filter(Boolean)
+}
+
 function buildManualOrderStripeLineItems({
   matchedProducts = [],
   delivery = 0,
@@ -3182,24 +3582,32 @@ function buildManualOrderStripeLineItems({
       type: 'product',
       name: String(product.name || 'Product').trim().slice(0, 250) || 'Product',
       unitAmount,
-      quantity
+      quantity,
+      taxCode: resolveManualOrderProductTaxCode(product)
     })
   }
 
   const feeLines = [
-    ['Delivery Fee', delivery],
-    ['Shipping Fee', shipping],
-    ['Service Charge', service],
-    ['Service Charge Tax', serviceChargeTax],
-    ['Network Service Charge', networkServiceCharge],
-    ['Gift Note / Engraving', giftNoteCharge || engraving],
-    ['Tip', tip]
+    ['delivery', 'Delivery Fee', delivery],
+    ['shipping', 'Shipping Fee', shipping],
+    ['service', 'Service Charge', service],
+    ['serviceChargeTax', 'Service Charge Tax', serviceChargeTax],
+    ['networkServiceCharge', 'Network Service Charge', networkServiceCharge],
+    ['engraving', 'Gift Note / Engraving', giftNoteCharge || engraving],
+    ['tip', 'Tip', tip]
   ]
 
-  for (const [name, amount] of feeLines) {
+  for (const [feeType, name, amount] of feeLines) {
     const value = parseMoneyValue(amount)
     if (value > 0) {
-      lines.push({ type: 'fee', name, unitAmount: value, quantity: 1 })
+      lines.push({
+        type: 'fee',
+        feeType,
+        name,
+        unitAmount: value,
+        quantity: 1,
+        taxCode: resolveStripeTaxCodeForFeeType(feeType)
+      })
     }
   }
 
@@ -3237,10 +3645,77 @@ function reconcileManualOrderLineItems(lines, discount, expectedPayable) {
         type: 'fee',
         name: 'Order adjustment',
         unitAmount: Math.abs(diff),
-        quantity: 1
+        quantity: 1,
+        taxCode: STRIPE_TAX_CODES.GENERAL_TANGIBLE
       }
     ],
     discount: normalizedDiscount
+  }
+}
+
+function toStripeTaxCalculationLineItem(line, index) {
+  return {
+    amount: Math.max(0, Math.round(line.unitAmount * line.quantity * 100)),
+    reference: `manual-line-${index}`,
+    tax_behavior: 'exclusive',
+    tax_code: line.taxCode || STRIPE_TAX_CODES.GENERAL_TANGIBLE
+  }
+}
+
+function partitionManualOrderLinesForAutomaticTax(lines = []) {
+  const taxableLines = []
+  let shippingCents = 0
+
+  for (const line of lines) {
+    if (line.feeType === 'delivery' || line.feeType === 'shipping') {
+      shippingCents += Math.max(0, Math.round(line.unitAmount * line.quantity * 100))
+      continue
+    }
+    taxableLines.push(line)
+  }
+
+  return { taxableLines, shippingCents }
+}
+
+function buildStripeTaxCalculationRequest(lines, shippingAddress) {
+  const { taxableLines, shippingCents } = partitionManualOrderLinesForAutomaticTax(lines)
+  const stripeLineItems = taxableLines
+    .map((line, index) => toStripeTaxCalculationLineItem(line, index))
+    .filter((line) => line.amount > 0)
+
+  const request = {
+    currency: 'usd',
+    line_items: stripeLineItems,
+    customer_details: {
+      address: shippingAddress,
+      address_source: 'shipping'
+    }
+  }
+
+  if (shippingCents > 0) {
+    request.shipping_cost = {
+      amount: shippingCents,
+      tax_code: STRIPE_TAX_CODES.SHIPPING,
+      tax_behavior: 'exclusive'
+    }
+  }
+
+  return request
+}
+
+function buildStripeInvoiceShippingCost(shippingCents) {
+  if (shippingCents <= 0) return null
+  return {
+    shipping_rate_data: {
+      type: 'fixed_amount',
+      fixed_amount: {
+        amount: shippingCents,
+        currency: 'usd'
+      },
+      display_name: 'Delivery & shipping',
+      tax_code: STRIPE_TAX_CODES.SHIPPING,
+      tax_behavior: 'exclusive'
+    }
   }
 }
 
@@ -3252,8 +3727,12 @@ function toStripeCheckoutLineItems(lines, useAutomaticTax) {
       ...(useAutomaticTax ? { tax_behavior: 'exclusive' } : {}),
       product_data: {
         name: line.name.slice(0, 250),
+        ...(useAutomaticTax
+          ? { tax_code: line.taxCode || STRIPE_TAX_CODES.GENERAL_TANGIBLE }
+          : {}),
         metadata: {
-          lineType: line.type || 'fee'
+          lineType: line.type || 'fee',
+          feeType: line.feeType || ''
         }
       }
     },
@@ -3521,8 +4000,13 @@ async function createManualOrderStripeInvoiceItems(customerId, lines, useAutomat
       currency: 'usd',
       unit_amount_decimal: String(Math.round(line.unitAmount * 100)),
       ...(useAutomaticTax ? { tax_behavior: 'exclusive' } : {}),
+      ...(useAutomaticTax
+        ? { tax_code: line.taxCode || STRIPE_TAX_CODES.GENERAL_TANGIBLE }
+        : {}),
       metadata: {
-        lineType: line.type || 'fee'
+        lineType: line.type || 'fee',
+        feeType: line.feeType || '',
+        taxCode: line.taxCode || ''
       }
     })
   }
@@ -3664,7 +4148,9 @@ async function createStripePaymentLinkForManualOrder({
       }
     })
 
-    await createManualOrderStripeInvoiceItems(customer.id, lines, true)
+    const { taxableLines, shippingCents } = partitionManualOrderLinesForAutomaticTax(lines)
+
+    await createManualOrderStripeInvoiceItems(customer.id, taxableLines, true)
 
     const invoiceParams = {
       customer: customer.id,
@@ -3673,6 +4159,11 @@ async function createStripePaymentLinkForManualOrder({
       days_until_due: 30,
       metadata: sharedMetadata,
       description: productName
+    }
+
+    const shippingCost = buildStripeInvoiceShippingCost(shippingCents)
+    if (shippingCost) {
+      invoiceParams.shipping_cost = shippingCost
     }
 
     if (discountCoupon) {
@@ -4020,6 +4511,55 @@ app.get('/api/address/geocode', async (req, res) => {
   }
 })
 
+app.post('/api/manual-order/parse-receipt', async (req, res) => {
+  req.setTimeout(180000)
+  res.setTimeout(180000)
+  try {
+    const { mimeType, dataBase64, fileName } = req.body || {}
+
+    if (!mimeType || !dataBase64) {
+      return res.status(400).json({
+        success: false,
+        error: 'mimeType and dataBase64 are required'
+      })
+    }
+
+    const byteLength = Buffer.byteLength(String(dataBase64), 'base64')
+    if (byteLength > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        error: 'File must be under 10 MB'
+      })
+    }
+
+    const result = await parseManualOrderReceiptWithAI({
+      mimeType,
+      dataBase64,
+      fileName: fileName || 'receipt'
+    })
+
+    if (result.skipped) {
+      return res.status(result.reason?.includes('OpenAI') ? 503 : 400).json({
+        success: false,
+        error: result.reason
+      })
+    }
+
+    if (!result.success) {
+      return res.status(422).json(result)
+    }
+
+    res.json(result)
+  } catch (error) {
+    console.error('Error parsing manual order receipt:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to parse receipt',
+      message: error.message
+    })
+  }
+})
+
 // Submit manual order to Bevvi after validating products against cache
 app.post('/api/manual-order', async (req, res) => {
   try {
@@ -4089,7 +4629,10 @@ app.post('/api/manual-order', async (req, res) => {
       matchedProducts.push({
         name: buildManualOrderProductName(matched),
         price,
-        quantity
+        quantity,
+        category: matched.category,
+        subCategory: matched.subCategory,
+        taxCode: resolveStripeTaxCodeForCatalogProduct(matched)
       })
     }
 
@@ -4161,6 +4704,62 @@ app.post('/api/manual-order', async (req, res) => {
       error: 'Failed to submit manual order',
       message: error.response?.data?.message || error.message,
       details: error.response?.data || null
+    })
+  }
+})
+
+app.post('/api/manual-order/calculate-tax', async (req, res) => {
+  try {
+    await ensureProductsCacheLoaded()
+
+    const {
+      products = [],
+      streetAddress,
+      city,
+      state,
+      zip,
+      country = 'US',
+      delivery = 0,
+      shipping = 0,
+      service = 0,
+      serviceChargeTax = 0,
+      engraving = 0,
+      tip = 0
+    } = req.body || {}
+
+    const matchedProducts = enrichManualOrderProductsForTax(
+      Array.isArray(products) ? products : []
+    )
+
+    const result = await calculateManualOrderStripeTax({
+      matchedProducts,
+      streetAddress,
+      city,
+      state,
+      zip,
+      country,
+      delivery,
+      shipping,
+      service,
+      serviceChargeTax,
+      engraving,
+      tip
+    })
+
+    if (result.skipped) {
+      return res.status(result.reason?.includes('zip') ? 400 : 503).json({
+        success: false,
+        error: result.reason
+      })
+    }
+
+    res.json(result)
+  } catch (error) {
+    console.error('Error calculating manual order tax:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to calculate tax',
+      message: error.message
     })
   }
 })
@@ -5626,6 +6225,8 @@ app.listen(PORT, async () => {
   console.log(`   GET  /api/products/status - Get cache status`)
   console.log(`   POST /api/products/add-from-upc - Enrich + add product`)
   console.log(`   POST /api/manual-order - Submit manual order (validates products against cache)`)
+  console.log(`   POST /api/manual-order/calculate-tax - Estimate sales tax via Stripe Tax`)
+  console.log(`   POST /api/manual-order/parse-receipt - Scan receipt image/PDF into order fields`)
   console.log(`   GET  /api/manual-order/payment-link?orderNumber= - Look up Stripe payment link for manual order`)
   console.log(`   POST /api/manual-order/payment-link - Create Stripe payment link for manual order`)
   console.log(`   GET  /api/address/autocomplete?input= - Google address suggestions`)
