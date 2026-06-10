@@ -833,6 +833,54 @@ const ManualOrderAdd = () => {
   const [showPaymentLinkPrompt, setShowPaymentLinkPrompt] = useState(false)
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false)
   const [paymentLinkError, setPaymentLinkError] = useState(null)
+  const [submitSuccessNotice, setSubmitSuccessNotice] = useState(null)
+  const resetFormTimeoutRef = useRef(null)
+
+  const resetManualOrderForm = useCallback(() => {
+    if (resetFormTimeoutRef.current) {
+      window.clearTimeout(resetFormTimeoutRef.current)
+      resetFormTimeoutRef.current = null
+    }
+    setLineItems([emptyLineItem()])
+    setStoreName('')
+    setCompanyName('')
+    setCustomerName('')
+    setEmail('')
+    setAddressInput('')
+    setStreetAddress('')
+    setCity('')
+    setState('')
+    setZip('')
+    setOrderDate(todayInputValue())
+    setDelivery('0')
+    setDiscount('0')
+    setEngraving('0')
+    setSalesTax('0')
+    setSalesTaxFromStripe(false)
+    setSalesTaxLoading(false)
+    setSalesTaxError(null)
+    setService('0')
+    setServiceChargeTax('0')
+    setShipping('0')
+    setTip('0')
+    setValidationResults(null)
+    setMessage(null)
+    setSubmitResponse(null)
+    setError(null)
+    setPaymentLinkCopied(false)
+    setShowPaymentLinkPrompt(false)
+    setCreatingPaymentLink(false)
+    setPaymentLinkError(null)
+    setSubmitSuccessNotice(null)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (resetFormTimeoutRef.current) {
+        window.clearTimeout(resetFormTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const applyParsedReceipt = useCallback((parsed, { stores: storeList = stores } = {}) => {
     setValidationResults(null)
@@ -1169,10 +1217,15 @@ const ManualOrderAdd = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (submitResponse) return
+    if (submitSuccessNotice) return
+    if (resetFormTimeoutRef.current) {
+      window.clearTimeout(resetFormTimeoutRef.current)
+      resetFormTimeoutRef.current = null
+    }
     setError(null)
     setMessage(null)
     setSubmitResponse(null)
+    setSubmitSuccessNotice(null)
     setPaymentLinkCopied(false)
     setShowPaymentLinkPrompt(false)
     setPaymentLinkError(null)
@@ -1205,9 +1258,14 @@ const ManualOrderAdd = () => {
         }
         return
       }
-      setSubmitResponse(data)
-      setShowPaymentLinkPrompt(true)
-      setMessage('Manual order submitted successfully.')
+      setSubmitSuccessNotice({
+        orderNumber: data.orderNumber,
+        orderTotal: data.orderTotal ?? estimatedTotal
+      })
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+      resetFormTimeoutRef.current = window.setTimeout(() => {
+        resetManualOrderForm()
+      }, 2500)
     } catch (e) {
       setError({ message: e.message || 'Network error' })
     } finally {
@@ -1297,13 +1355,36 @@ const ManualOrderAdd = () => {
           description="Search curated products, build the order, and email a seamless Stripe payment link to your customer."
         />
 
+        {submitSuccessNotice && (
+          <div
+            className="mb-6 rounded-lg border border-green-200 bg-green-50 px-6 py-8 text-center"
+            role="status"
+            aria-live="polite"
+          >
+            <CheckCircle className="mx-auto h-10 w-10 text-green-600" aria-hidden />
+            <p className="mt-3 text-lg font-semibold text-green-900">Order submitted successfully</p>
+            {submitSuccessNotice.orderNumber && (
+              <p className="mt-1 text-sm text-green-800">
+                Order <strong>{submitSuccessNotice.orderNumber}</strong>
+                {submitSuccessNotice.orderTotal != null && (
+                  <> · {formatDollarAmount(submitSuccessNotice.orderTotal)}</>
+                )}
+              </p>
+            )}
+            <p className="mt-2 text-xs text-green-700">Clearing the form for your next order…</p>
+          </div>
+        )}
+
         <ReceiptScanSection
           onParsed={applyParsedReceipt}
           stores={stores}
-          disabled={submitting}
+          disabled={submitting || Boolean(submitSuccessNotice)}
         />
 
-        <form onSubmit={handleSubmit} className="space-y-8">
+        <form
+          onSubmit={handleSubmit}
+          className={`space-y-8 ${submitSuccessNotice ? 'pointer-events-none opacity-40' : ''}`}
+        >
           <section className="space-y-4">
             <h3 className="text-base font-semibold text-gray-900">Products</h3>
 
@@ -1665,7 +1746,7 @@ const ManualOrderAdd = () => {
 
           <button
             type="submit"
-            disabled={submitting || Boolean(submitResponse)}
+            disabled={submitting || Boolean(submitSuccessNotice)}
             className="inline-flex items-center rounded-md bg-bevvi-primary-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? (
@@ -1673,7 +1754,7 @@ const ManualOrderAdd = () => {
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Submitting order…
               </>
-            ) : submitResponse ? (
+            ) : submitSuccessNotice ? (
               'Order submitted'
             ) : (
               'Submit manual order'

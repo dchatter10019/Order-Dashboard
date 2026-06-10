@@ -1449,10 +1449,7 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
                 }
                 
                 order.orderDateTime = datetimeValue
-                order.orderDate = getYyyyMmDdInTimeZone(parsedDateTime, displayTimeZone) ||
-                                 parsedDateTime.getFullYear() + '-' +
-                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' +
-                                 String(parsedDateTime.getDate()).padStart(2, '0')
+                order.orderDate = calendarDateFromDateTimeString(datetimeValue, parsedDateTime, displayTimeZone)
                 console.log(`✅ Found ORDER datetime in field "${header}"="${value}" -> "${datetimeValue}" for order ${order.id}`)
               }
             }
@@ -1564,10 +1561,7 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
                   
                   // Store full datetime with UTC indicator
                   order.orderDateTime = datetimeValue
-                  order.orderDate = getYyyyMmDdInTimeZone(parsedDateTime, displayTimeZone) ||
-                                   parsedDateTime.getFullYear() + '-' +
-                                   String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' +
-                                   String(parsedDateTime.getDate()).padStart(2, '0')
+                  order.orderDate = calendarDateFromDateTimeString(datetimeValue, parsedDateTime, displayTimeZone)
                   console.log(`✅ Parsed datetime "${value}" -> "${datetimeValue}" to date "${order.orderDate}" for order ${order.id}`)
                 }
               } else {
@@ -1641,7 +1635,8 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
                 
                 if (!isNaN(combinedDateTime.getTime())) {
                   order.orderDateTime = combinedDateTime.toISOString()
-                  order.orderDate = getYyyyMmDdInTimeZone(order.orderDateTime, displayTimeZone) || order.orderDate
+                  // Keep the calendar date we combined from — don't re-derive via timezone.
+                  order.orderDate = dateStr
                   console.log(`Combined date "${order.orderDate}" and time "${value}" to datetime "${order.orderDateTime}" for order ${order.id}`)
                 }
               }
@@ -1682,10 +1677,7 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
                 
                 // Store full datetime with UTC indicator
                 order.orderDateTime = datetimeValue
-                order.orderDate = getYyyyMmDdInTimeZone(parsedDateTime, displayTimeZone) ||
-                                 parsedDateTime.getFullYear() + '-' +
-                                 String(parsedDateTime.getMonth() + 1).padStart(2, '0') + '-' +
-                                 String(parsedDateTime.getDate()).padStart(2, '0')
+                order.orderDate = calendarDateFromDateTimeString(datetimeValue, parsedDateTime, displayTimeZone)
                 console.log(`✅ Parsed datetime field "${lowerHeader}"="${value}" -> "${datetimeValue}" to date "${order.orderDate}" for order ${order.id}`)
               } else {
                 order.orderDateTime = null
@@ -2178,6 +2170,21 @@ function getDeliveryLocalDate(order, timeZone = DEFAULT_ORDER_TIMEZONE) {
     }
   }
   return order.deliveryDate
+}
+
+/** Calendar YYYY-MM-DD from a datetime string/value without shifting UTC-midnight dates. */
+function calendarDateFromDateTimeString(datetimeValue, parsedDate, displayTimeZone) {
+  const utcMidnight = parseUtcMidnightCalendarDate(datetimeValue)
+  if (utcMidnight) return utcMidnight
+
+  const zoned = getYyyyMmDdInTimeZone(parsedDate, displayTimeZone)
+  if (zoned) return zoned
+
+  return (
+    `${parsedDate.getFullYear()}-` +
+    `${String(parsedDate.getMonth() + 1).padStart(2, '0')}-` +
+    `${String(parsedDate.getDate()).padStart(2, '0')}`
+  )
 }
 
 // Helper function to fetch orders for a specific date range
@@ -3140,8 +3147,31 @@ function formatManualOrderMoney(value) {
 }
 
 function formatManualOrderDate(value) {
-  const date = value ? new Date(value) : new Date()
-  if (Number.isNaN(date.getTime())) return formatManualOrderDate(new Date())
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    const d = new Date()
+    return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`
+  }
+
+  // HTML date inputs send YYYY-MM-DD — parse as calendar date, not UTC midnight.
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (isoMatch) {
+    const month = parseInt(isoMatch[2], 10)
+    const day = parseInt(isoMatch[3], 10)
+    const year = isoMatch[1]
+    return `${month}/${day}/${year}`
+  }
+
+  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (slashMatch) {
+    return `${parseInt(slashMatch[1], 10)}/${parseInt(slashMatch[2], 10)}/${slashMatch[3]}`
+  }
+
+  const date = new Date(trimmed)
+  if (Number.isNaN(date.getTime())) {
+    const d = new Date()
+    return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`
+  }
   return `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`
 }
 
