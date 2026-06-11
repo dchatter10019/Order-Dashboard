@@ -134,4 +134,15 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  @media print {
+    @page {
+      size: letter portrait;
+      margin: 0.3in;
+    }
+
+    body {
+      background: white !important;
+    }
+  }
 }

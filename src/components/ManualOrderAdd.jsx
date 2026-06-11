@@ -817,6 +817,7 @@ const ManualOrderAdd = () => {
   const [engraving, setEngraving] = useState('0')
   const [salesTax, setSalesTax] = useState('0')
   const [salesTaxFromStripe, setSalesTaxFromStripe] = useState(false)
+  const [salesTaxManualOverride, setSalesTaxManualOverride] = useState(false)
   const [salesTaxLoading, setSalesTaxLoading] = useState(false)
   const [salesTaxError, setSalesTaxError] = useState(null)
   const [service, setService] = useState('0')
@@ -857,6 +858,7 @@ const ManualOrderAdd = () => {
     setEngraving('0')
     setSalesTax('0')
     setSalesTaxFromStripe(false)
+    setSalesTaxManualOverride(false)
     setSalesTaxLoading(false)
     setSalesTaxError(null)
     setService('0')
@@ -887,6 +889,7 @@ const ManualOrderAdd = () => {
     setError(null)
     setSubmitResponse(null)
     setSalesTaxFromStripe(false)
+    setSalesTaxManualOverride(false)
     setSalesTaxError(null)
 
     if (parsed.storeName) {
@@ -1093,6 +1096,10 @@ const ManualOrderAdd = () => {
       return undefined
     }
 
+    if (salesTaxManualOverride) {
+      return undefined
+    }
+
     const hasTaxableProducts = taxCalculationInput.products.some((product) => {
       const price = parseFloat(product.price)
       const quantity = parseInt(product.quantity, 10)
@@ -1158,7 +1165,24 @@ const ManualOrderAdd = () => {
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [taxCalculationInput])
+  }, [taxCalculationInput, lineItems, salesTaxManualOverride])
+
+  useEffect(() => {
+    setSalesTaxManualOverride(false)
+  }, [
+    taxCalculationInput.zip,
+    taxCalculationInput.streetAddress,
+    taxCalculationInput.city,
+    taxCalculationInput.state,
+    taxCalculationInput.products,
+    taxCalculationInput.delivery,
+    taxCalculationInput.shipping,
+    taxCalculationInput.service,
+    taxCalculationInput.serviceChargeTax,
+    taxCalculationInput.engraving,
+    taxCalculationInput.tip,
+    taxCalculationInput.subTotal
+  ])
 
   const resolveAddressBeforeSubmit = async () => {
     if (streetAddress && city && state && zip) {
@@ -1556,8 +1580,11 @@ const ManualOrderAdd = () => {
               <div>
                 <label htmlFor="salesTax" className={labelClass}>
                   Sales tax
-                  {salesTaxFromStripe && (
+                  {salesTaxFromStripe && !salesTaxManualOverride && (
                     <span className="ml-1 text-xs font-normal text-gray-500">(from Stripe)</span>
+                  )}
+                  {salesTaxManualOverride && (
+                    <span className="ml-1 text-xs font-normal text-gray-500">(manual)</span>
                   )}
                   {salesTaxLoading && (
                     <Loader2 className="ml-1 inline h-3.5 w-3.5 animate-spin text-bevvi-primary-600" aria-hidden="true" />
@@ -1572,17 +1599,17 @@ const ManualOrderAdd = () => {
                   onChange={(e) => {
                     setSalesTax(e.target.value)
                     setSalesTaxFromStripe(false)
+                    setSalesTaxManualOverride(true)
                     setSalesTaxError(null)
                   }}
-                  readOnly={salesTaxFromStripe && Boolean(zip?.trim())}
-                  className={`${inputClass} ${salesTaxFromStripe ? 'bg-gray-50 text-gray-700' : ''}`}
+                  className={inputClass}
                 />
                 {salesTaxError && (
                   <p className="mt-1 text-xs text-amber-700">{salesTaxError}</p>
                 )}
                 {!zip?.trim() && (
                   <p className="mt-1 text-xs text-gray-500">
-                    Add a delivery address to calculate tax automatically.
+                    Add a delivery address to calculate tax automatically, or enter tax manually.
                   </p>
                 )}
               </div>

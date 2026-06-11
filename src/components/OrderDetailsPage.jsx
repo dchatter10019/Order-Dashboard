@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { X } from 'lucide-react'
 import OrderDetailsContent from './OrderDetailsContent'
+import OrderReceiptPreview from './OrderReceiptPreview'
 import { buildOrderFromDetails, mergeOrderWithDetails } from '../utils/orderDisplay'
 
 const OrderDetailsPage = () => {
@@ -52,8 +53,8 @@ const OrderDetailsPage = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="order-details-print-hide flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Order Details</h1>
             <p className="text-sm text-gray-500">Order {orderNumber}</p>
@@ -69,16 +70,21 @@ const OrderDetailsPage = () => {
         </div>
 
         {order ? (
-          <div className="bg-white rounded-xl shadow border border-gray-200">
-            <OrderDetailsContent
-              order={order}
-              orderDetails={orderDetails}
-              isActive={true}
-              isLoadingDetails={isLoadingDetails}
-              detailsError={detailsError}
-              setOrderDetails={setOrderDetails}
-              autoFetch={false}
-            />
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,480px)]">
+            <div className="order-details-print-hide bg-white rounded-xl shadow border border-gray-200 min-w-0">
+              <OrderDetailsContent
+                order={order}
+                orderDetails={orderDetails}
+                isActive={true}
+                isLoadingDetails={isLoadingDetails}
+                detailsError={detailsError}
+                setOrderDetails={setOrderDetails}
+                autoFetch={false}
+              />
+            </div>
+            <div className="order-receipt-preview-column bg-white rounded-xl shadow border border-gray-200 p-4 sm:p-5 xl:sticky xl:top-6 xl:self-start min-w-0">
+              <OrderReceiptPreview order={order} orderDetails={orderDetails} variant="fit" />
+            </div>
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow border border-gray-200 p-6 text-gray-600">
