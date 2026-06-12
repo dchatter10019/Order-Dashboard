@@ -90,6 +90,31 @@
     min-height: var(--bevvi-footer-height);
   }
 
+  .bevvi-app-footer-inner {
+    @apply py-2 text-[11px] leading-snug sm:py-0 sm:text-sm sm:leading-normal;
+    min-height: var(--bevvi-footer-height);
+    display: flex;
+    align-items: center;
+  }
+
+  .bevvi-app-footer-status {
+    @apply flex w-full flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3;
+  }
+
+  .bevvi-app-footer-meta {
+    @apply shrink-0 text-[10px] sm:text-sm;
+  }
+
+  @media (max-width: 639px) {
+    :root {
+      --bevvi-footer-height: 5rem;
+    }
+
+    .bevvi-app-footer {
+      min-height: auto;
+    }
+  }
+
   .bevvi-page-bottom-padding {
     padding-bottom: var(--bevvi-footer-height);
   }

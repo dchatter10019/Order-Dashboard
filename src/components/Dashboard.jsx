@@ -1032,7 +1032,7 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   return (
-    <div className="bevvi-page-bottom-padding">
+    <div>
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Auto-Refresh Control */}
