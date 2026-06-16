@@ -5,6 +5,9 @@ import MainDashboard from './components/MainDashboard'
 import OrderDetailsPage from './components/OrderDetailsPage'
 import AppFooter from './components/AppFooter'
 import { OrdersFooterProvider } from './context/OrdersFooterContext'
+import { OrderNotificationsProvider } from './context/OrderNotificationsContext'
+import OrderNotificationToasts from './components/OrderNotificationToasts'
+import BrowserNotificationPrompt from './components/BrowserNotificationPrompt'
 import './App.css'
 
 function App() {
@@ -44,6 +47,7 @@ function App() {
   return (
     <Router>
       <OrdersFooterProvider>
+      <OrderNotificationsProvider isAuthenticated={isAuthenticated}>
       <div className="App min-h-screen bevvi-page-bottom-padding">
         <Routes>
           <Route 
@@ -75,8 +79,11 @@ function App() {
             element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} 
           />
         </Routes>
+        <BrowserNotificationPrompt />
+        <OrderNotificationToasts />
         <AppFooter />
       </div>
+      </OrderNotificationsProvider>
       </OrdersFooterProvider>
     </Router>
   )

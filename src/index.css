@@ -171,3 +171,88 @@
     }
   }
 }
+
+@layer components {
+  .order-notification-toasts {
+    @apply fixed right-3 left-3 sm:left-auto sm:right-4 z-[60] flex flex-col gap-2 pointer-events-none;
+    bottom: calc(var(--bevvi-footer-height) + 0.75rem);
+    max-width: 24rem;
+  }
+
+  @media (min-width: 640px) {
+    .order-notification-toasts {
+      margin-left: auto;
+    }
+  }
+
+  .order-notification-toast {
+    @apply pointer-events-auto rounded-xl border border-bevvi-200 bg-white p-3 shadow-bevvi-sm;
+    animation: order-notification-enter 0.25s ease-out;
+  }
+
+  .order-notification-toast-icon {
+    @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bevvi-100 text-bevvi-800;
+  }
+
+  .order-notification-toast-title {
+    @apply text-sm font-semibold text-bevvi-900;
+  }
+
+  .order-notification-toast-body {
+    @apply mt-0.5 text-xs text-bevvi-dark-600 leading-relaxed;
+  }
+
+  .order-notification-toast-action {
+    @apply mt-1 text-[11px] font-medium text-bevvi-700;
+  }
+
+  .order-notification-toast-dismiss {
+    @apply shrink-0 rounded-md p-1 text-bevvi-dark-400 transition-colors hover:bg-bevvi-50 hover:text-bevvi-800;
+  }
+
+  @keyframes order-notification-enter {
+    from {
+      opacity: 0;
+      transform: translateY(0.75rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .browser-notification-prompt {
+    @apply fixed left-3 right-3 top-20 z-[59] rounded-xl border border-bevvi-200 bg-white p-4 shadow-bevvi;
+  }
+
+  @media (min-width: 640px) {
+    .browser-notification-prompt {
+      @apply left-auto right-4 top-24;
+      width: min(100%, 24rem);
+    }
+  }
+
+  .browser-notification-prompt-icon {
+    @apply flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-bevvi-100 text-bevvi-800;
+  }
+
+  .browser-notification-prompt-title {
+    @apply pr-6 text-sm font-semibold text-bevvi-900;
+  }
+
+  .browser-notification-prompt-body {
+    @apply mt-1 text-xs leading-relaxed text-bevvi-dark-600;
+  }
+
+  .browser-notification-prompt-primary {
+    @apply rounded-lg bg-bevvi-800 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-bevvi-900;
+  }
+
+  .browser-notification-prompt-secondary {
+    @apply rounded-lg border border-bevvi-200 bg-white px-3 py-1.5 text-xs font-medium text-bevvi-dark-700 transition-colors hover:bg-bevvi-50;
+  }
+
+  .browser-notification-prompt-close {
+    @apply absolute right-3 top-3 rounded-md p-1 text-bevvi-dark-400 transition-colors hover:bg-bevvi-50 hover:text-bevvi-800;
+  }
+}

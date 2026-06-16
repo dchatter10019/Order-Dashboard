@@ -40,6 +40,53 @@ function extractZipFromAddress(address) {
   return match ? match[1] : ''
 }
 
+function parsePaymentMoney(value) {
+  const parsed = parseFloat(String(value ?? '').replace(/,/g, '').trim())
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
+function sumProductSubtotal(products = []) {
+  return products.reduce((sum, product) => {
+    const qty = parseInt(product.quantity, 10) || 1
+    const price = parsePaymentMoney(product.price)
+    return sum + price * qty
+  }, 0)
+}
+
+function deriveDeliveryFromOrderBreakdown(orderDetails, order) {
+  const explicit = parsePaymentMoney(
+    orderDetails?.deliveryCharge ??
+      orderDetails?.deliveryFee ??
+      orderDetails?.delivery ??
+      order?.deliveryFee
+  )
+  if (explicit > 0) return explicit
+
+  const total = parsePaymentMoney(orderDetails?.orderTotal ?? order?.total)
+  if (total <= 0) return 0
+
+  const orderTax = parsePaymentMoney(
+    orderDetails?.originalSalesTax ?? orderDetails?.taxes ?? orderDetails?.salesTax ?? order?.tax
+  )
+  const preTaxTotal = orderTax > 0 ? Math.max(0, total - orderTax) : total
+  const productSubtotal =
+    sumProductSubtotal(orderDetails?.products) ||
+    parsePaymentMoney(orderDetails?.subTotal ?? order?.revenue)
+
+  const accounted =
+    productSubtotal +
+    parsePaymentMoney(orderDetails?.shippingCharges ?? order?.shippingFee) +
+    parsePaymentMoney(orderDetails?.serviceCharge ?? order?.serviceCharge) +
+    parsePaymentMoney(orderDetails?.serviceChargeTax ?? order?.serviceChargeTax) +
+    parsePaymentMoney(orderDetails?.additionalFee ?? order?.networkServiceCharge) +
+    parsePaymentMoney(orderDetails?.giftNoteCharge ?? order?.giftNoteCharge) +
+    parsePaymentMoney(orderDetails?.tipAmount ?? orderDetails?.tipAmt ?? order?.tip) -
+    parsePaymentMoney(orderDetails?.promodiscAmt ?? order?.promoDiscAmt)
+
+  const remainder = Math.round((preTaxTotal - accounted) * 100) / 100
+  return remainder > 0.02 ? remainder : 0
+}
+
 export function isManualOrder(order, orderDetails) {
   if (orderDetails?.isManualOrder) return true
   const recipient = Array.isArray(orderDetails?.recipientorders) ? orderDetails.recipientorders[0] : null
@@ -54,6 +101,11 @@ export function buildManualOrderPaymentContext(order, orderDetails) {
   const products = orderDetails?.products?.length
     ? orderDetails.products
     : recipient?.products || []
+
+  const delivery = deriveDeliveryFromOrderBreakdown(orderDetails, order)
+  const orderTax = parsePaymentMoney(
+    orderDetails?.originalSalesTax ?? orderDetails?.taxes ?? orderDetails?.salesTax ?? order?.tax
+  )
 
   return {
     orderNumber,
@@ -73,13 +125,16 @@ export function buildManualOrderPaymentContext(order, orderDetails) {
     state: recipient?.state || '',
     zip: recipient?.zipcode || recipient?.zip || extractZipFromAddress(order?.address) || '',
     country: recipient?.country || 'US',
-    salesTax: orderDetails?.salesTax ?? orderDetails?.taxes ?? order?.tax ?? null,
-    delivery: orderDetails?.deliveryCharge ?? order?.deliveryFee ?? 0,
+    salesTax: orderTax,
+    orderTax,
+    originalSalesTax: orderDetails?.originalSalesTax ?? null,
+    delivery,
     shipping: orderDetails?.shippingCharges ?? order?.shippingFee ?? 0,
     service: orderDetails?.serviceCharge ?? order?.serviceCharge ?? 0,
     serviceChargeTax: orderDetails?.serviceChargeTax ?? order?.serviceChargeTax ?? 0,
     networkServiceCharge: orderDetails?.additionalFee ?? order?.networkServiceCharge ?? 0,
     giftNoteCharge: orderDetails?.giftNoteCharge ?? order?.giftNoteCharge ?? 0,
+    engraving: orderDetails?.giftNoteCharge ?? order?.giftNoteCharge ?? 0,
     tip: orderDetails?.tipAmount ?? orderDetails?.tipAmt ?? order?.tip ?? 0,
     discount: orderDetails?.promodiscAmt ?? order?.promoDiscAmt ?? 0,
     totalAmount: orderDetails?.orderTotal ?? order?.total ?? null,

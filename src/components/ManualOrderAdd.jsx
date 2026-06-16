@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail, RefreshCw, Upload, FileText, ScanLine } from 'lucide-react'
+import { Plus, Trash2, Loader2, ShoppingCart, CheckCircle, AlertCircle, Search, MapPin, ExternalLink, Copy, Mail, RefreshCw, Upload, FileText, ScanLine, Ban } from 'lucide-react'
 import { apiFetch, parseApiJsonResponse } from '../utils/api'
 import { formatDollarAmount } from '../utils/formatCurrency'
 import { buildPaymentEmailMailto } from '../utils/paymentLink'
@@ -8,9 +8,19 @@ import { TAB_COPY } from '../constants/brand'
 
 const emptyLineItem = () => ({ query: '', name: '', size: '', quantity: '1', price: '' })
 
+const VALID_PRODUCT_SIZE_UNITS = /^(ML|L|OZ|CL|G|LB|PK|PACK|LT|LITER|LITRE)$/i
+
+function isValidProductSize(product) {
+  const units = String(product?.units || '').trim()
+  const sizeNum = parseFloat(product?.size)
+  return VALID_PRODUCT_SIZE_UNITS.test(units) && !Number.isNaN(sizeNum) && sizeNum > 0
+}
+
 const formatProductSize = (product) => {
-  if (product.size == null || product.size === '') return (product.units || '').trim()
-  return `${product.size} ${product.units || ''}`.trim()
+  if (isValidProductSize(product)) {
+    return `${product.size} ${product.units || ''}`.trim()
+  }
+  return parseQueryToNameAndSize(productFullLabel(product)).size
 }
 
 const productFullLabel = (product) => String(product.name || '').trim()
@@ -48,6 +58,7 @@ function rankProductsForQuery(products, query) {
   const tokens = q.split(/\s+/).filter(Boolean)
 
   return products
+    .filter((product) => isValidProductSize(product) || parseQueryToNameAndSize(productFullLabel(product)).size)
     .map(product => {
       const fullName = productFullLabel(product).toLowerCase()
       const sizeLabel = formatProductSize(product).toLowerCase()
@@ -123,7 +134,7 @@ function ProductLineRow({ index, item, validation, onChange, onChangeFields, onR
           return
         }
 
-        if (ranked.length === 1 && ranked[0].score >= 100) {
+        if (ranked.length === 1 && ranked[0].score >= 100 && formatProductSize(ranked[0].product)) {
           const product = ranked[0].product
           const matchName = productFullLabel(product)
           const autoKey = `${term}::${matchName}`
@@ -833,6 +844,7 @@ const ManualOrderAdd = () => {
   const [paymentLinkCopied, setPaymentLinkCopied] = useState(false)
   const [showPaymentLinkPrompt, setShowPaymentLinkPrompt] = useState(false)
   const [creatingPaymentLink, setCreatingPaymentLink] = useState(false)
+  const [voidingPaymentLink, setVoidingPaymentLink] = useState(false)
   const [paymentLinkError, setPaymentLinkError] = useState(null)
   const [submitSuccessNotice, setSubmitSuccessNotice] = useState(null)
   const resetFormTimeoutRef = useRef(null)
@@ -872,6 +884,7 @@ const ManualOrderAdd = () => {
     setPaymentLinkCopied(false)
     setShowPaymentLinkPrompt(false)
     setCreatingPaymentLink(false)
+    setVoidingPaymentLink(false)
     setPaymentLinkError(null)
     setSubmitSuccessNotice(null)
   }, [])
@@ -1282,14 +1295,36 @@ const ManualOrderAdd = () => {
         }
         return
       }
+      setSubmitResponse({
+        orderNumber: data.orderNumber,
+        orderTotal: data.orderTotal ?? estimatedTotal,
+        matchedProducts: data.matchedProducts || [],
+        payload: data.payload,
+        data: data.data,
+        paymentSnapshot: {
+          email,
+          customerName,
+          storeName,
+          streetAddress: resolvedAddress.streetAddress,
+          city: resolvedAddress.city,
+          state: resolvedAddress.state,
+          zip: resolvedAddress.zip,
+          salesTax,
+          delivery,
+          shipping,
+          service,
+          serviceChargeTax,
+          engraving,
+          tip,
+          discount
+        }
+      })
+      setShowPaymentLinkPrompt(true)
       setSubmitSuccessNotice({
         orderNumber: data.orderNumber,
         orderTotal: data.orderTotal ?? estimatedTotal
       })
       window.scrollTo({ top: 0, behavior: 'smooth' })
-      resetFormTimeoutRef.current = window.setTimeout(() => {
-        resetManualOrderForm()
-      }, 2500)
     } catch (e) {
       setError({ message: e.message || 'Network error' })
     } finally {
@@ -1297,36 +1332,46 @@ const ManualOrderAdd = () => {
     }
   }
 
-  const buildPaymentLinkPayload = (regenerate = false) => ({
-    orderNumber: submitResponse.orderNumber,
-    email: submitResponse.payload?.email || email,
-    customerName,
-    storeName: submitResponse.payload?.storeName || storeName,
-    totalAmount: submitResponse.orderTotal ?? estimatedTotal,
-    matchedProducts: submitResponse.matchedProducts || [],
-    streetAddress: submitResponse.payload?.streetAddress || streetAddress,
-    city: submitResponse.payload?.city || city,
-    state: submitResponse.payload?.state || state,
-    zip: submitResponse.payload?.zip || zip,
-    salesTax: submitResponse.payload?.salesTax ?? salesTax,
-    delivery: submitResponse.payload?.delivery ?? delivery,
-    shipping: submitResponse.payload?.shipping ?? shipping,
-    service: submitResponse.payload?.service ?? service,
-    serviceChargeTax: submitResponse.payload?.serviceChargeTax ?? serviceChargeTax,
-    giftNoteCharge: submitResponse.payload?.engraving ?? engraving,
-    engraving: submitResponse.payload?.engraving ?? engraving,
-    tip: submitResponse.payload?.tip ?? tip,
-    discount: submitResponse.payload?.discount ?? discount,
-    country: 'US',
-    regenerate
-  })
+  const buildPaymentLinkPayload = (regenerate = false) => {
+    const snapshot = submitResponse?.paymentSnapshot || {}
+    return {
+      orderNumber: submitResponse.orderNumber,
+      email: submitResponse.payload?.email || snapshot.email || email,
+      customerName: snapshot.customerName || customerName,
+      storeName: submitResponse.payload?.storeName || snapshot.storeName || storeName,
+      totalAmount: submitResponse.orderTotal ?? estimatedTotal,
+      matchedProducts: submitResponse.matchedProducts || [],
+      streetAddress: submitResponse.payload?.streetAddress || snapshot.streetAddress || streetAddress,
+      city: submitResponse.payload?.city || snapshot.city || city,
+      state: submitResponse.payload?.state || snapshot.state || state,
+      zip: submitResponse.payload?.zip || snapshot.zip || zip,
+      salesTax: submitResponse.payload?.salesTax ?? snapshot.salesTax ?? salesTax,
+      orderTax: submitResponse.payload?.salesTax ?? snapshot.salesTax ?? salesTax,
+      delivery: submitResponse.payload?.delivery ?? snapshot.delivery ?? delivery,
+      shipping: submitResponse.payload?.shipping ?? snapshot.shipping ?? shipping,
+      service: submitResponse.payload?.service ?? snapshot.service ?? service,
+      serviceChargeTax: submitResponse.payload?.serviceChargeTax ?? snapshot.serviceChargeTax ?? serviceChargeTax,
+      giftNoteCharge: submitResponse.payload?.engraving ?? snapshot.engraving ?? engraving,
+      engraving: submitResponse.payload?.engraving ?? snapshot.engraving ?? engraving,
+      tip: submitResponse.payload?.tip ?? snapshot.tip ?? tip,
+      discount: submitResponse.payload?.discount ?? snapshot.discount ?? discount,
+      country: 'US',
+      regenerate
+    }
+  }
 
   const handleCreatePaymentLink = async ({ regenerate = false } = {}) => {
     if (!submitResponse) return
+    const snapshot = submitResponse.paymentSnapshot || {}
+    const invoiceZip = submitResponse.payload?.zip || snapshot.zip || zip
+    if (!invoiceZip?.trim()) {
+      setPaymentLinkError('Recipient zip code is required so Stripe can calculate tax.')
+      return
+    }
     if (
       regenerate &&
       !window.confirm(
-        'Create a new payment link using the current order details? The previous Stripe invoice/link will be voided or removed.'
+        'Create a new Stripe invoice using the current order details? The previous invoice will be voided.'
       )
     ) {
       return
@@ -1359,11 +1404,47 @@ const ManualOrderAdd = () => {
       }
       setSubmitResponse((prev) => ({ ...prev, paymentLink: data.paymentLink }))
       setShowPaymentLinkPrompt(false)
-      setMessage('Payment link created. Email it to the customer or copy the link below.')
+      setMessage('Stripe invoice created. Email it to the customer or copy the link below.')
     } catch (e) {
       setPaymentLinkError(e.message || 'Network error')
     } finally {
       setCreatingPaymentLink(false)
+    }
+  }
+
+  const handleVoidPaymentLink = async () => {
+    if (!submitResponse?.orderNumber) return
+    if (
+      !window.confirm(
+        'Void this Stripe invoice? The customer will no longer be able to pay using the current link.'
+      )
+    ) {
+      return
+    }
+    setPaymentLinkError(null)
+    setVoidingPaymentLink(true)
+    try {
+      const response = await apiFetch('/api/manual-order/payment-link/void', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber: submitResponse.orderNumber })
+      })
+      const data = await parseApiJsonResponse(response)
+      if (!response.ok || !data.success) {
+        setPaymentLinkError(
+          response.status === 409
+            ? data.error || 'This invoice has already been paid and cannot be voided.'
+            : data.error || data.message || 'Failed to void invoice'
+        )
+        return
+      }
+      setSubmitResponse((prev) => ({ ...prev, paymentLink: null }))
+      setShowPaymentLinkPrompt(true)
+      setMessage('Stripe invoice voided. Create a new invoice if needed.')
+    } catch (e) {
+      setPaymentLinkError(e.message || 'Network error')
+    } finally {
+      setVoidingPaymentLink(false)
     }
   }
 
@@ -1395,7 +1476,175 @@ const ManualOrderAdd = () => {
                 )}
               </p>
             )}
-            <p className="mt-2 text-xs text-green-700">Clearing the form for your next order…</p>
+            <p className="mt-2 text-xs text-green-700">
+              Create a Stripe invoice below to email the customer, or start a new order when you&apos;re done.
+            </p>
+          </div>
+        )}
+
+        {submitResponse && (showPaymentLinkPrompt || submitResponse.paymentLink?.url || paymentLinkError) && (
+          <div className="mb-6 space-y-4">
+            {showPaymentLinkPrompt && !submitResponse.paymentLink?.url && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                <p className="font-semibold">Create a Stripe invoice?</p>
+                <p className="mt-1 text-amber-800">
+                  The order was submitted. Create an itemized invoice for{' '}
+                  <strong>{formatDollarAmount(submitResponse.orderTotal ?? estimatedTotal)}</strong>
+                  {submitResponse.orderNumber ? (
+                    <> (order <strong>{submitResponse.orderNumber}</strong>)</>
+                  ) : null}{' '}
+                  so you can email it to the customer.
+                </p>
+                {paymentLinkError && (
+                  <p className="mt-2 text-red-800" role="alert">{paymentLinkError}</p>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCreatePaymentLink}
+                    disabled={creatingPaymentLink}
+                    className="inline-flex items-center justify-center rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                  >
+                    {creatingPaymentLink ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Creating invoice…
+                      </>
+                    ) : (
+                      'Yes, create invoice'
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowPaymentLinkPrompt(false)}
+                    disabled={creatingPaymentLink}
+                    className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    Skip for now
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {submitResponse.paymentLink?.url && (
+              <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+                <h4 className="text-sm font-semibold text-indigo-900">Stripe invoice ready</h4>
+                <p className="mt-1 text-sm text-indigo-800">
+                  Email this invoice to the customer, or copy the link into your own message.
+                </p>
+                {(submitResponse.paymentLink.orderNumber || submitResponse.paymentLink.totalAmount != null) && (
+                  <p className="mt-2 text-sm text-indigo-900">
+                    {submitResponse.paymentLink.orderNumber && (
+                      <span className="mr-4">Order: <strong>{submitResponse.paymentLink.orderNumber}</strong></span>
+                    )}
+                    {submitResponse.paymentLink.totalAmount != null && (
+                      <span>Total: <strong>{formatDollarAmount(submitResponse.paymentLink.totalAmount)}</strong></span>
+                    )}
+                  </p>
+                )}
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                  <a
+                    href={buildPaymentEmailMailto({
+                      customerEmail: submitResponse.paymentLink.customerEmail || submitResponse.paymentSnapshot?.email || email,
+                      customerName: submitResponse.paymentSnapshot?.customerName || customerName,
+                      orderNumber: submitResponse.paymentLink.orderNumber || submitResponse.orderNumber,
+                      totalAmount: submitResponse.paymentLink.totalAmount,
+                      paymentUrl: submitResponse.paymentLink.url
+                    })}
+                    className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+                  >
+                    <Mail className="mr-2 h-4 w-4" />
+                    Email customer
+                  </a>
+                  <a
+                    href={submitResponse.paymentLink.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open invoice
+                  </a>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(submitResponse.paymentLink.url)
+                        setPaymentLinkCopied(true)
+                        setTimeout(() => setPaymentLinkCopied(false), 2000)
+                      } catch {
+                        setPaymentLinkCopied(false)
+                      }
+                    }}
+                    className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    {paymentLinkCopied ? 'Copied!' : 'Copy link'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCreatePaymentLink({ regenerate: true })}
+                    disabled={creatingPaymentLink || voidingPaymentLink}
+                    className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                  >
+                    {creatingPaymentLink ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Regenerating…
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Regenerate invoice
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleVoidPaymentLink}
+                    disabled={creatingPaymentLink || voidingPaymentLink}
+                    className="inline-flex items-center justify-center rounded-md border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-800 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {voidingPaymentLink ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Voiding…
+                      </>
+                    ) : (
+                      <>
+                        <Ban className="mr-2 h-4 w-4" />
+                        Void invoice
+                      </>
+                    )}
+                  </button>
+                </div>
+                <p className="mt-3 break-all text-xs text-indigo-700">{submitResponse.paymentLink.url}</p>
+              </div>
+            )}
+
+            {paymentLinkError && !showPaymentLinkPrompt && !submitResponse.paymentLink?.url && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
+                <p className="font-medium">Invoice not created</p>
+                <p className="mt-1">{paymentLinkError}</p>
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentLinkPrompt(true)}
+                  className="mt-2 text-sm font-medium text-red-900 underline hover:no-underline"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+
+            {submitSuccessNotice && (
+              <button
+                type="button"
+                onClick={resetManualOrderForm}
+                className="inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Start next order
+              </button>
+            )}
           </div>
         )}
 
@@ -1631,143 +1880,6 @@ const ManualOrderAdd = () => {
               {error.details && (
                 <pre className="mt-2 overflow-auto text-xs">{JSON.stringify(error.details, null, 2)}</pre>
               )}
-            </div>
-          )}
-
-          {showPaymentLinkPrompt && !submitResponse?.paymentLink?.url && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-              <p className="font-semibold">Create a Stripe payment link?</p>
-              <p className="mt-1 text-amber-800">
-                The order was submitted. Create a payment link for{' '}
-                <strong>{formatDollarAmount(submitResponse?.orderTotal ?? estimatedTotal)}</strong>
-                {submitResponse?.orderNumber ? (
-                  <> (order <strong>{submitResponse.orderNumber}</strong>)</>
-                ) : null}{' '}
-                so you can email it to the customer.
-              </p>
-              {paymentLinkError && (
-                <p className="mt-2 text-red-800" role="alert">{paymentLinkError}</p>
-              )}
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handleCreatePaymentLink}
-                  disabled={creatingPaymentLink}
-                  className="inline-flex items-center justify-center rounded-md bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
-                >
-                  {creatingPaymentLink ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating link…
-                    </>
-                  ) : (
-                    'Yes, create payment link'
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowPaymentLinkPrompt(false)}
-                  disabled={creatingPaymentLink}
-                  className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-                >
-                  No thanks
-                </button>
-              </div>
-            </div>
-          )}
-
-          {submitResponse?.paymentLink?.url && (
-            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
-              <h4 className="text-sm font-semibold text-indigo-900">Payment link for customer</h4>
-              <p className="mt-1 text-sm text-indigo-800">
-                Email this link to the customer manually, or copy it into your own message. The link stays
-                active until you deactivate it in Stripe.
-              </p>
-              {(submitResponse.paymentLink.orderNumber || submitResponse.paymentLink.totalAmount != null) && (
-                <p className="mt-2 text-sm text-indigo-900">
-                  {submitResponse.paymentLink.orderNumber && (
-                    <span className="mr-4">Order: <strong>{submitResponse.paymentLink.orderNumber}</strong></span>
-                  )}
-                  {submitResponse.paymentLink.totalAmount != null && (
-                    <span>Total: <strong>{formatDollarAmount(submitResponse.paymentLink.totalAmount)}</strong></span>
-                  )}
-                </p>
-              )}
-              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-                <a
-                  href={buildPaymentEmailMailto({
-                    customerEmail: submitResponse.paymentLink.customerEmail || email,
-                    customerName,
-                    orderNumber: submitResponse.paymentLink.orderNumber || submitResponse.orderNumber,
-                    totalAmount: submitResponse.paymentLink.totalAmount,
-                    paymentUrl: submitResponse.paymentLink.url
-                  })}
-                  className="inline-flex items-center justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-                >
-                  <Mail className="mr-2 h-4 w-4" />
-                  Email to customer
-                </a>
-                <a
-                  href={submitResponse.paymentLink.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Preview payment page
-                </a>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(submitResponse.paymentLink.url)
-                      setPaymentLinkCopied(true)
-                      setTimeout(() => setPaymentLinkCopied(false), 2000)
-                    } catch {
-                      setPaymentLinkCopied(false)
-                    }
-                  }}
-                  className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100"
-                >
-                  <Copy className="mr-2 h-4 w-4" />
-                  {paymentLinkCopied ? 'Copied!' : 'Copy link'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleCreatePaymentLink({ regenerate: true })}
-                  disabled={creatingPaymentLink}
-                  className="inline-flex items-center justify-center rounded-md border border-indigo-300 bg-white px-4 py-2 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
-                >
-                  {creatingPaymentLink ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Regenerating…
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4" />
-                      Regenerate link
-                    </>
-                  )}
-                </button>
-              </div>
-              <p className="mt-3 break-all text-xs text-indigo-700">{submitResponse.paymentLink.url}</p>
-            </div>
-          )}
-
-          {paymentLinkError && !showPaymentLinkPrompt && !submitResponse?.paymentLink?.url && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert">
-              <p className="font-medium">Payment link not created</p>
-              <p className="mt-1">{paymentLinkError}</p>
-            </div>
-          )}
-
-          {submitResponse && (
-            <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-              <h4 className="text-sm font-semibold text-emerald-100">API response</h4>
-              <pre className="mt-2 overflow-auto text-xs text-emerald-100 font-mono max-h-64">
-                {JSON.stringify(submitResponse.data, null, 2)}
-              </pre>
             </div>
           )}
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CreditCard, Copy, ExternalLink, Loader2, Mail, RefreshCw } from 'lucide-react'
-import { apiFetch } from '../utils/api'
+import { CreditCard, Copy, ExternalLink, Loader2, Mail, RefreshCw, Ban } from 'lucide-react'
+import { apiFetch, parseApiJsonResponse } from '../utils/api'
 import { formatDollarAmount } from '../utils/formatCurrency'
 import {
   buildManualOrderPaymentContext,
@@ -41,9 +41,11 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
   const [stripeConfigured, setStripeConfigured] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
+  const [isVoiding, setIsVoiding] = useState(false)
   const [error, setError] = useState(null)
   const [copied, setCopied] = useState(false)
   const [regenerateSuccess, setRegenerateSuccess] = useState(false)
+  const [voidSuccess, setVoidSuccess] = useState(false)
   const lookupRequestIdRef = useRef(0)
 
   const manualOrder = isManualOrder(order, orderDetails)
@@ -88,6 +90,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
       setStripeConfigured(data.configured !== false)
       setPaymentLink(data.paymentLink?.url ? data.paymentLink : null)
       setRegenerateSuccess(false)
+      setVoidSuccess(false)
     } catch (e) {
       if (requestId !== lookupRequestIdRef.current) return
       if (e.name === 'AbortError') {
@@ -185,9 +188,48 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
     }
   }
 
+  const handleVoidInvoice = async () => {
+    if (!orderNumber) return
+    if (
+      !window.confirm(
+        'Void this Stripe invoice? The customer will no longer be able to pay using the current link. You can create a new invoice afterward if needed.'
+      )
+    ) {
+      return
+    }
+
+    setIsVoiding(true)
+    setError(null)
+    try {
+      const response = await apiFetch('/api/manual-order/payment-link/void', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderNumber })
+      })
+      const data = await parseApiJsonResponse(response)
+      if (!response.ok || !data.success) {
+        setError(
+          response.status === 409
+            ? data.error || 'This invoice has already been paid and cannot be voided.'
+            : data.error || data.message || 'Failed to void invoice'
+        )
+        return
+      }
+      setPaymentLink(null)
+      setRegenerateSuccess(false)
+      setVoidSuccess(true)
+      window.setTimeout(() => setVoidSuccess(false), 10000)
+    } catch (e) {
+      setError(e.message || 'Network error')
+    } finally {
+      setIsVoiding(false)
+    }
+  }
+
   if (!manualOrder) return null
 
-  const regenerateDisabled = isCreating || isLoading || !canManagePaymentLink
+  const regenerateDisabled = isCreating || isVoiding || isLoading || !canManagePaymentLink
+  const voidDisabled = isCreating || isVoiding || isLoading
   const detailsStillLoading = !orderDetails
 
   return (
@@ -218,6 +260,30 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <Loader2 className="h-4 w-4 animate-spin" />
             Checking for an existing invoice…
+          </div>
+        </div>
+      ) : voidSuccess ? (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-4 text-sm text-green-900">
+          <p className="font-semibold">Invoice voided</p>
+          <p className="mt-1 text-green-800">
+            The Stripe invoice for order <strong>{orderNumber}</strong> has been voided. Create a new invoice below if needed.
+          </p>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => handleCreatePaymentLink()}
+              disabled={isCreating || !canManagePaymentLink}
+              className="inline-flex items-center rounded-md bg-bevvi-800 px-4 py-2 text-sm font-medium text-white hover:bg-bevvi-900 disabled:opacity-60"
+            >
+              {isCreating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                'Create new invoice'
+              )}
+            </button>
           </div>
         </div>
       ) : paymentLink?.url ? (
@@ -334,10 +400,28 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
               disabled={regenerateDisabled}
               isWorking={isCreating}
             />
+            <button
+              type="button"
+              onClick={handleVoidInvoice}
+              disabled={voidDisabled}
+              className="inline-flex items-center rounded-md border border-red-300 bg-white px-3 py-2 text-sm font-medium text-red-800 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isVoiding ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Voiding…
+                </>
+              ) : (
+                <>
+                  <Ban className="mr-2 h-4 w-4" />
+                  Void invoice
+                </>
+              )}
+            </button>
           </div>
           {!regenerateSuccess ? (
             <p className="mt-2 text-xs text-indigo-700">
-              Need updated line items or totals? Regenerate to void this invoice and create a fresh one.
+              Need updated line items or totals? Regenerate to void this invoice and create a fresh one. To cancel without replacing, use Void invoice.
             </p>
           ) : null}
           <p className="mt-3 break-all text-xs text-indigo-700">{paymentLink.url}</p>

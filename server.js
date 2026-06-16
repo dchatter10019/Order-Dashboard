@@ -213,6 +213,10 @@ if (process.env.OPENAI_API_KEY) {
 // Slack notifications state (in-memory)
 const slackNotificationState = new Map()
 
+// New order notifications — track seen order keys so we only alert once per order
+const knownOrderIds = new Set()
+let ordersNotificationBaselineSeeded = false
+
 function getSlackNotificationState(orderId) {
   if (!slackNotificationState.has(orderId)) {
     slackNotificationState.set(orderId, {
@@ -1056,6 +1060,17 @@ async function refreshOrdersForAlerts(orders, dateRange = null) {
     timestamp: new Date(),
     dateRange: range
   }
+
+  const newOrders = detectNewOrders(list)
+  if (newOrders.length > 0) {
+    notifyClientsOfNewOrders(newOrders)
+    try {
+      await evaluateSlackNewOrderNotifications(newOrders)
+    } catch (err) {
+      console.error('Slack new order notification failed:', err.message)
+    }
+  }
+
   try {
     await evaluateSlackNotifications(list)
   } catch (err) {
@@ -2918,6 +2933,88 @@ function notifyClientsOfRefresh(ordersCount, refreshTime) {
   console.log(`📡 Notified ${connectedClients.length} connected clients about data refresh`)
 }
 
+function getOrderNotificationKey(order) {
+  const key = order?.ordernum || order?.id
+  return key ? String(key) : null
+}
+
+function serializeOrderForNotification(order) {
+  return {
+    id: order.id,
+    ordernum: order.ordernum,
+    customerName: order.customerName || 'Unknown customer',
+    establishment: order.establishment || '',
+    status: order.status || 'Unknown',
+    total: parseFloat(order.total) || 0,
+    orderDate: order.orderDate || order.orderDateTime || null
+  }
+}
+
+function detectNewOrders(orders) {
+  const list = Array.isArray(orders) ? orders : []
+  const newOrders = []
+  const currentKeys = new Set()
+
+  for (const order of list) {
+    const key = getOrderNotificationKey(order)
+    if (!key) continue
+    currentKeys.add(key)
+    if (ordersNotificationBaselineSeeded && !knownOrderIds.has(key)) {
+      newOrders.push(serializeOrderForNotification(order))
+    }
+  }
+
+  for (const key of currentKeys) {
+    knownOrderIds.add(key)
+  }
+
+  if (!ordersNotificationBaselineSeeded) {
+    ordersNotificationBaselineSeeded = true
+    console.log(`🔔 Order notification baseline seeded with ${currentKeys.size} order(s)`)
+  }
+
+  return newOrders
+}
+
+async function evaluateSlackNewOrderNotifications(newOrders) {
+  if (!SLACK_WEBHOOK_URL || !Array.isArray(newOrders) || newOrders.length === 0) {
+    return
+  }
+
+  for (const order of newOrders) {
+    const message = [
+      '🆕 New order received',
+      `Order: ${order.ordernum || order.id}`,
+      `Customer: ${order.customerName}`,
+      order.establishment ? `Retailer: ${order.establishment}` : null,
+      `Status: ${order.status}`,
+      `Total: $${order.total.toFixed(2)}`
+    ].filter(Boolean).join('\n')
+    await sendSlackMessage(message)
+  }
+}
+
+function notifyClientsOfNewOrders(newOrders) {
+  if (!Array.isArray(newOrders) || newOrders.length === 0) {
+    return
+  }
+
+  const payload = JSON.stringify({
+    type: 'new_orders',
+    orders: newOrders,
+    count: newOrders.length,
+    timestamp: new Date().toISOString()
+  })
+
+  connectedClients.forEach((client) => {
+    if (client.res && !client.res.destroyed) {
+      client.res.write(`data: ${payload}\n\n`)
+    }
+  })
+
+  console.log(`🔔 Notified ${connectedClients.length} client(s) about ${newOrders.length} new order(s)`)
+}
+
 // Function to add a new client connection
 function addClient(client) {
   connectedClients.push(client)
@@ -3017,6 +3114,7 @@ function searchProducts(searchTerm) {
   // Deduplicate by UPC
   const seen = new Set()
   const deduped = scored.filter(({ product }) => {
+    if (!isValidCatalogProductSize(product)) return false
     const upc = product.upc
     if (!upc || seen.has(upc)) return false
     seen.add(upc)
@@ -3029,6 +3127,28 @@ function searchProducts(searchTerm) {
 
 function normalizeSizeToken(str) {
   return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+const VALID_CATALOG_SIZE_UNITS = /^(ml|l|oz|cl|g|lb|pk|pack|lt|liter|litre)$/i
+
+function isValidCatalogProductSize(product) {
+  const units = String(product?.units || '').trim()
+  if (!VALID_CATALOG_SIZE_UNITS.test(units)) return false
+  const sizeNum = parseFloat(product?.size)
+  return !Number.isNaN(sizeNum) && sizeNum > 0
+}
+
+function formatCatalogProductSizeLabel(product) {
+  if (!isValidCatalogProductSize(product)) {
+    return parseSizeFromCombinedName(product?.name || '') || ''
+  }
+  return `${product.size} ${product.units || ''}`.trim()
+}
+
+function isValidManualOrderSizeInput(sizeInput) {
+  const normalized = normalizeSizeToken(sizeInput)
+  if (!normalized) return false
+  return /^\d+(?:\.\d+)?\s*(?:ml|l|oz|cl|g|lb|pk|pack|lt|liter|litre)$/.test(normalized)
 }
 
 function stripSizeSuffixFromName(name) {
@@ -3111,7 +3231,7 @@ function scoreProductMatch(product, nameInput, sizeInput) {
 
 function buildManualOrderProductName(product) {
   const name = (product.name || '').trim()
-  const sizeLabel = `${product.size || ''} ${product.units || ''}`.trim()
+  const sizeLabel = formatCatalogProductSizeLabel(product)
   if (!sizeLabel) return name
   if (name.toLowerCase().includes(sizeLabel.toLowerCase())) return name
   return `${name} - ${sizeLabel}`
@@ -3128,15 +3248,22 @@ function findProductInCache(productName, sizeInput) {
 
   if (!nameInput) return null
 
+  const requiresSizeMatch = isValidManualOrderSizeInput(sizeInputValue)
+
   const scored = productsCache
-    .map(product => ({ product, score: scoreProductMatch(product, nameInput, sizeInputValue) }))
-    .filter(entry => entry.score >= 70)
+    .filter((product) => isValidCatalogProductSize(product))
+    .map((product) => ({ product, score: scoreProductMatch(product, nameInput, sizeInputValue) }))
+    .filter((entry) => {
+      if (entry.score < 70) return false
+      if (requiresSizeMatch) return sizeTokensMatch(entry.product, sizeInputValue)
+      return true
+    })
     .sort((a, b) => b.score - a.score)
 
   if (scored.length === 0) return null
 
   const topScore = scored[0].score
-  const topMatches = scored.filter(entry => entry.score >= topScore - 5)
+  const topMatches = scored.filter((entry) => entry.score >= topScore - 5)
   return topMatches[0].product
 }
 
@@ -3455,16 +3582,95 @@ function parseMoneyValue(value) {
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-function getTaxableAmountForStripe(totalAmount, salesTax) {
-  const total = parseFloat(totalAmount)
-  const tax = parseMoneyValue(salesTax)
-  if (Number.isNaN(total)) return null
-  if (tax > 0) return Math.max(0, total - tax)
-  return total
-}
-
 function sumManualOrderLineItems(lines) {
   return (lines || []).reduce((sum, line) => sum + line.unitAmount * line.quantity, 0)
+}
+
+function computeManualOrderProductSubtotal(matchedProducts = []) {
+  return matchedProducts.reduce((sum, product) => {
+    const qty = parseInt(product.quantity, 10) || 1
+    const price = parseMoneyValue(product.price)
+    return sum + price * qty
+  }, 0)
+}
+
+function resolveManualOrderEmbeddedTax(input = {}) {
+  return parseMoneyValue(
+    input.orderTax ?? input.originalSalesTax ?? input.taxes ?? input.salesTax
+  )
+}
+
+function resolveManualOrderPaymentFees(input = {}) {
+  const matchedProducts = input.matchedProducts || []
+  const productSubtotal = computeManualOrderProductSubtotal(matchedProducts)
+  const shipping = parseMoneyValue(input.shipping)
+  const service = parseMoneyValue(input.service)
+  const serviceChargeTax = parseMoneyValue(input.serviceChargeTax)
+  const networkServiceCharge = parseMoneyValue(input.networkServiceCharge)
+  const giftNoteCharge = parseMoneyValue(input.giftNoteCharge || input.engraving)
+  const tip = parseMoneyValue(input.tip)
+  const discount = parseMoneyValue(input.discount)
+  const orderTotal = parseMoneyValue(input.totalAmount)
+  const orderTax = resolveManualOrderEmbeddedTax(input)
+  const salesTax = parseMoneyValue(input.salesTax)
+
+  let delivery = parseMoneyValue(input.delivery)
+  if (delivery <= 0) {
+    const accountedWithoutDelivery =
+      productSubtotal +
+      shipping +
+      service +
+      serviceChargeTax +
+      networkServiceCharge +
+      giftNoteCharge +
+      tip -
+      discount
+
+    if (orderTotal > 0) {
+      const preTaxFromOrder = orderTax > 0 ? Math.max(0, orderTotal - orderTax) : orderTotal
+      const remainder = Math.round((preTaxFromOrder - accountedWithoutDelivery) * 100) / 100
+      if (remainder > 0.02) {
+        delivery = remainder
+      }
+    }
+  }
+
+  const preTaxTotal =
+    productSubtotal +
+    delivery +
+    shipping +
+    service +
+    serviceChargeTax +
+    networkServiceCharge +
+    giftNoteCharge +
+    tip -
+    discount
+
+  return {
+    matchedProducts,
+    productSubtotal,
+    delivery,
+    shipping,
+    service,
+    serviceChargeTax,
+    networkServiceCharge,
+    giftNoteCharge,
+    tip,
+    discount,
+    preTaxTotal,
+    salesTax,
+    orderTax,
+    orderTotal
+  }
+}
+
+function normalizeManualOrderPaymentInput(input = {}) {
+  const fees = resolveManualOrderPaymentFees(input)
+
+  return {
+    ...input,
+    ...fees
+  }
 }
 
 const STRIPE_TAX_CODES = {
@@ -3668,17 +3874,31 @@ function reconcileManualOrderLineItems(lines, discount, expectedPayable) {
     return { lines: [...lines], discount: normalizedDiscount + diff }
   }
 
-  return {
-    lines: [
-      ...lines,
-      {
+  const gap = Math.round(Math.abs(diff) * 100) / 100
+  const hasDeliveryOrShipping = lines.some(
+    (line) => line.feeType === 'delivery' || line.feeType === 'shipping'
+  )
+
+  const gapLine = hasDeliveryOrShipping
+    ? {
         type: 'fee',
+        feeType: 'service',
         name: 'Order adjustment',
-        unitAmount: Math.abs(diff),
+        unitAmount: gap,
         quantity: 1,
-        taxCode: STRIPE_TAX_CODES.GENERAL_TANGIBLE
+        taxCode: STRIPE_TAX_CODES.GENERAL_SERVICE
       }
-    ],
+    : {
+        type: 'fee',
+        feeType: 'delivery',
+        name: 'Delivery Fee',
+        unitAmount: gap,
+        quantity: 1,
+        taxCode: STRIPE_TAX_CODES.SHIPPING
+      }
+
+  return {
+    lines: [...lines, gapLine],
     discount: normalizedDiscount
   }
 }
@@ -3944,9 +4164,13 @@ async function archiveManualOrderStripeInvoice(invoiceId) {
   const invoice = await stripe.invoices.retrieve(invoiceId)
 
   if (invoice.status === 'paid') {
-    const error = new Error('Cannot regenerate: the previous invoice has already been paid.')
+    const error = new Error('This invoice has already been paid and cannot be voided.')
     error.code = 'INVOICE_ALREADY_PAID'
     throw error
+  }
+
+  if (invoice.status === 'void') {
+    return 'already_voided'
   }
 
   if (invoice.status === 'draft') {
@@ -3960,6 +4184,50 @@ async function archiveManualOrderStripeInvoice(invoiceId) {
   }
 
   return 'skipped'
+}
+
+async function voidManualOrderStripePayment(orderNumber) {
+  if (!stripe) {
+    return { skipped: true, reason: 'Stripe is not configured on the server' }
+  }
+
+  const normalizedOrderNumber = String(orderNumber || '').trim()
+  if (!normalizedOrderNumber) {
+    const error = new Error('orderNumber is required')
+    error.code = 'ORDER_NUMBER_REQUIRED'
+    throw error
+  }
+
+  const store = await readManualOrderPaymentLinks()
+  const existingRecord = store[normalizedOrderNumber] || null
+  const archiveActions = await archiveManualOrderStripePaymentResources(
+    existingRecord,
+    normalizedOrderNumber
+  )
+
+  if (archiveActions.length === 0) {
+    const invoices = await findStripeInvoicesForOrder(normalizedOrderNumber)
+    const voidable = invoices.filter((invoice) => ['draft', 'open'].includes(invoice.status))
+    if (voidable.length === 0) {
+      return {
+        orderNumber: normalizedOrderNumber,
+        voided: false,
+        message: 'No open Stripe invoice found for this order.',
+        archiveActions: []
+      }
+    }
+  }
+
+  await clearManualOrderPaymentLink(normalizedOrderNumber)
+
+  const invoiceAction = archiveActions.find((action) => action.type === 'invoice')
+  return {
+    orderNumber: normalizedOrderNumber,
+    voided: true,
+    invoiceId: invoiceAction?.id || existingRecord?.invoiceId || null,
+    result: invoiceAction?.result || 'voided',
+    archiveActions
+  }
 }
 
 async function archiveManualOrderStripePaymentResources(existingRecord, orderNumber) {
@@ -4072,32 +4340,35 @@ async function getManualOrderPaymentLink(orderNumber) {
   return enrichPaymentLinkWithInvoiceTax(paymentLink)
 }
 
-async function createStripePaymentLinkForManualOrder({
-  orderNumber,
-  email,
-  customerName,
-  storeName,
-  totalAmount,
-  matchedProducts,
-  streetAddress,
-  city,
-  state,
-  zip,
-  salesTax,
-  delivery = 0,
-  shipping = 0,
-  service = 0,
-  serviceChargeTax = 0,
-  networkServiceCharge = 0,
-  giftNoteCharge = 0,
-  engraving = 0,
-  tip = 0,
-  discount = 0,
-  country = 'US'
-}) {
+async function createStripePaymentLinkForManualOrder(input) {
   if (!stripe) {
     return { skipped: true, reason: 'Stripe is not configured on the server' }
   }
+
+  const {
+    orderNumber,
+    email,
+    customerName,
+    storeName,
+    totalAmount,
+    matchedProducts,
+    streetAddress,
+    city,
+    state,
+    zip,
+    salesTax,
+    delivery,
+    shipping,
+    service,
+    serviceChargeTax,
+    networkServiceCharge,
+    giftNoteCharge,
+    tip,
+    discount,
+    country,
+    preTaxTotal,
+    orderTotal
+  } = normalizeManualOrderPaymentInput(input)
 
   const shippingAddress = buildStripeShippingAddress({
     streetAddress,
@@ -4108,8 +4379,10 @@ async function createStripePaymentLinkForManualOrder({
   })
   const useAutomaticTax = Boolean(shippingAddress)
   const expectedPayable = useAutomaticTax
-    ? getTaxableAmountForStripe(totalAmount, salesTax)
-    : parseFloat(totalAmount)
+    ? preTaxTotal
+    : orderTotal > 0
+      ? orderTotal
+      : preTaxTotal + parseMoneyValue(salesTax)
 
   const productSummary = (matchedProducts || [])
     .map((p) => `${p.quantity}x ${p.name}`)
@@ -4140,7 +4413,6 @@ async function createStripePaymentLinkForManualOrder({
       serviceChargeTax,
       networkServiceCharge,
       giftNoteCharge,
-      engraving,
       tip,
       salesTax,
       useAutomaticTax
@@ -4214,7 +4486,7 @@ async function createStripePaymentLinkForManualOrder({
       paymentType: 'invoice',
       livemode: invoice.livemode,
       stripeDashboardUrl: buildStripeDashboardUrl('invoice', invoice.id, invoice.livemode),
-      totalAmount: parseFloat(totalAmount),
+      totalAmount: orderTotal || parseFloat(totalAmount),
       taxableAmount: payableBeforeTax,
       lineItemCount: lines.length,
       automaticTax: true,
@@ -4251,7 +4523,7 @@ async function createStripePaymentLinkForManualOrder({
     paymentType: 'payment_link',
     livemode: paymentLink.livemode,
     stripeDashboardUrl: buildStripeDashboardUrl('payment_link', paymentLink.id, paymentLink.livemode),
-    totalAmount: parseFloat(totalAmount),
+    totalAmount: orderTotal || parseFloat(totalAmount),
     taxableAmount: payableBeforeTax,
     lineItemCount: lines.length,
     automaticTax: false,
@@ -4652,7 +4924,14 @@ app.post('/api/manual-order', async (req, res) => {
 
       const matched = findProductInCache(name, size || effectiveSize)
       if (!matched) {
-        productErrors.push({ index: i, name, size, message: 'Product not found in master list (name + size)' })
+        productErrors.push({
+          index: i,
+          name,
+          size: size || effectiveSize,
+          message: size || effectiveSize
+            ? 'Product not found in master list — pick a suggestion that includes bottle size (e.g. 750 ML)'
+            : 'Product not found — include size in your search (e.g. "Perrier Jouet Grand Brut 750 ML")'
+        })
         continue
       }
 
@@ -4728,11 +5007,16 @@ app.post('/api/manual-order', async (req, res) => {
     })
   } catch (error) {
     console.error('Error submitting manual order:', error.message)
+    const bevviError = error.response?.data?.error
+    const bevviMessage =
+      (typeof bevviError === 'object' && bevviError?.message) ||
+      error.response?.data?.message ||
+      error.message
     const status = error.response?.status || 500
     res.status(status).json({
       success: false,
       error: 'Failed to submit manual order',
-      message: error.response?.data?.message || error.message,
+      message: bevviMessage,
       details: error.response?.data || null
     })
   }
@@ -4842,6 +5126,9 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       state,
       zip,
       salesTax,
+      orderTax,
+      originalSalesTax,
+      taxes,
       delivery,
       shipping,
       service,
@@ -4909,6 +5196,9 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       state: String(state || '').trim(),
       zip: String(zip || '').trim(),
       salesTax,
+      orderTax,
+      originalSalesTax,
+      taxes,
       delivery,
       shipping,
       service,
@@ -4943,6 +5233,71 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
     })
   }
 })
+
+async function handleVoidManualOrderPaymentLinkRequest(req, res) {
+  try {
+    const orderNumber = String(req.query.orderNumber || req.body?.orderNumber || '').trim()
+    if (!orderNumber) {
+      return res.status(400).json({
+        success: false,
+        error: 'orderNumber is required to void an invoice'
+      })
+    }
+
+    if (!stripe) {
+      return res.status(503).json({
+        success: false,
+        error: 'Stripe is not configured on the server'
+      })
+    }
+
+    const result = await voidManualOrderStripePayment(orderNumber)
+
+    if (result.skipped) {
+      return res.status(503).json({
+        success: false,
+        error: result.reason
+      })
+    }
+
+    if (!result.voided) {
+      return res.status(404).json({
+        success: false,
+        error: result.message || 'No open Stripe invoice found for this order.'
+      })
+    }
+
+    console.log('🚫 Voided Stripe invoice:', {
+      orderNumber: result.orderNumber,
+      invoiceId: result.invoiceId,
+      result: result.result
+    })
+
+    res.json({
+      success: true,
+      orderNumber: result.orderNumber,
+      invoiceId: result.invoiceId,
+      result: result.result,
+      archiveActions: result.archiveActions
+    })
+  } catch (error) {
+    console.error('❌ Stripe invoice void error:', error.message)
+    if (error.code === 'INVOICE_ALREADY_PAID') {
+      return res.status(409).json({
+        success: false,
+        error: error.message
+      })
+    }
+    res.status(500).json({
+      success: false,
+      error: 'Failed to void Stripe invoice',
+      message: error.message
+    })
+  }
+}
+
+app.post('/api/manual-order/payment-link/void', handleVoidManualOrderPaymentLinkRequest)
+app.delete('/api/manual-order/payment-link', handleVoidManualOrderPaymentLinkRequest)
 
 // Add product via UPC enrichment + external API
 app.post('/api/products/add-from-upc', async (req, res) => {
@@ -5141,6 +5496,7 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
       data?.recipientorders?.[0]?.isManualOrder
 
     if (isManualOrder && stripe) {
+      data.originalSalesTax = data.taxes
       const stripeTaxAmount = await getStripeInvoiceTaxForOrder(orderNumber)
       if (stripeTaxAmount != null) {
         data.taxes = stripeTaxAmount
@@ -6259,6 +6615,8 @@ app.listen(PORT, async () => {
   console.log(`   POST /api/manual-order/parse-receipt - Scan receipt image/PDF into order fields`)
   console.log(`   GET  /api/manual-order/payment-link?orderNumber= - Look up Stripe payment link for manual order`)
   console.log(`   POST /api/manual-order/payment-link - Create Stripe payment link for manual order`)
+  console.log(`   POST /api/manual-order/payment-link/void - Void Stripe invoice for manual order`)
+  console.log(`   DELETE /api/manual-order/payment-link?orderNumber= - Void Stripe invoice for manual order`)
   console.log(`   GET  /api/address/autocomplete?input= - Google address suggestions`)
   console.log(`   GET  /api/address/details?placeId= - Resolve Google place to street/city/state/zip`)
   console.log(`🛵 GoPuff order checker:`)

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown, AlertTriangle, Search, X } from 'lucide-react'
+import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown, AlertTriangle, Search, X, Bell, BellOff } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
@@ -8,6 +8,7 @@ import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
 import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
 import { useOrdersFooter } from '../context/OrdersFooterContext'
+import { useOrderNotifications } from '../context/OrderNotificationsContext'
 import {
   filterOrdersByCalendarRange,
   getDeliveryYmdForDashboard,
@@ -79,6 +80,7 @@ const getOrderDateRangeError = (dateRange) => {
 
 const Dashboard = ({ onSwitchToAI }) => {
   const { setOrdersStatus } = useOrdersFooter()
+  const { enabled: orderNotificationsEnabled, toggleEnabled: toggleOrderNotifications } = useOrderNotifications()
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -1036,7 +1038,28 @@ const Dashboard = ({ onSwitchToAI }) => {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Auto-Refresh Control */}
-        <div className="mb-4 sm:mb-6 flex justify-end">
+        <div className="mb-4 sm:mb-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={toggleOrderNotifications}
+            className={`flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition-colors text-xs sm:text-sm ${
+              orderNotificationsEnabled
+                ? 'bg-bevvi-800 text-white hover:bg-bevvi-900'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+            aria-pressed={orderNotificationsEnabled}
+            title={orderNotificationsEnabled ? 'New order alerts on' : 'New order alerts off'}
+          >
+            {orderNotificationsEnabled ? (
+              <Bell className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+            ) : (
+              <BellOff className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-2" />
+            )}
+            <span className="hidden sm:inline">
+              {orderNotificationsEnabled ? 'Order Alerts ON' : 'Order Alerts OFF'}
+            </span>
+            <span className="sm:hidden">{orderNotificationsEnabled ? 'Alerts' : 'Muted'}</span>
+          </button>
           <button
             onClick={toggleAutoRefresh}
             className={`flex items-center px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg transition-colors text-xs sm:text-sm ${
