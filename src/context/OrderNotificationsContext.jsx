@@ -15,9 +15,6 @@ import {
 
 const OrderNotificationsContext = createContext(null)
 
-const MAX_TOASTS = 5
-const TOAST_DURATION_MS = 8000
-
 export function OrderNotificationsProvider({ children, isAuthenticated }) {
   const [enabled, setEnabled] = useState(isOrderNotificationsEnabled)
   const [toasts, setToasts] = useState([])
@@ -31,6 +28,10 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
 
   const dismissToast = useCallback((toastId) => {
     setToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }, [])
+
+  const dismissAllToasts = useCallback(() => {
+    setToasts([])
   }, [])
 
   const notifyNewOrders = useCallback((orders) => {
@@ -68,16 +69,9 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
         order,
         createdAt
       }))
-      return [...next, ...current].slice(0, MAX_TOASTS)
+      return [...next, ...current]
     })
-
-    freshOrders.forEach((order, index) => {
-      const toastId = `${order.ordernum || order.id}-${createdAt}-${index}`
-      window.setTimeout(() => {
-        dismissToast(toastId)
-      }, TOAST_DURATION_MS)
-    })
-  }, [enabled, dismissToast])
+  }, [enabled])
 
   const requestBrowserPermission = useCallback(async () => {
     const result = await requestBrowserNotificationPermission()
@@ -187,6 +181,7 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
       showBrowserPrompt,
       toggleEnabled,
       dismissToast,
+      dismissAllToasts,
       notifyNewOrders,
       requestBrowserPermission,
       dismissBrowserPrompt
@@ -198,6 +193,7 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
       showBrowserPrompt,
       toggleEnabled,
       dismissToast,
+      dismissAllToasts,
       notifyNewOrders,
       requestBrowserPermission,
       dismissBrowserPrompt

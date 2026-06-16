@@ -173,41 +173,116 @@
 }
 
 @layer components {
-  .order-notification-toasts {
-    @apply fixed right-3 left-3 sm:left-auto sm:right-4 z-[60] flex flex-col gap-2 pointer-events-none;
+  .order-notification-panel {
+    @apply fixed z-[60] flex flex-col overflow-hidden rounded-2xl border border-bevvi-200 bg-white shadow-bevvi pointer-events-auto;
+    right: 0.75rem;
+    left: 0.75rem;
     bottom: calc(var(--bevvi-footer-height) + 0.75rem);
-    max-width: 24rem;
+    max-height: min(70vh, 32rem);
   }
 
   @media (min-width: 640px) {
-    .order-notification-toasts {
-      margin-left: auto;
+    .order-notification-panel {
+      @apply left-auto;
+      width: min(100%, 22rem);
+      right: 1rem;
+      top: 5.5rem;
+      bottom: auto;
     }
   }
 
-  .order-notification-toast {
-    @apply pointer-events-auto rounded-xl border border-bevvi-200 bg-white p-3 shadow-bevvi-sm;
-    animation: order-notification-enter 0.25s ease-out;
+  .order-notification-panel-header {
+    @apply flex items-start justify-between gap-3 border-b border-bevvi-100 bg-bevvi-50/80 px-4 py-3;
   }
 
-  .order-notification-toast-icon {
-    @apply mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-bevvi-100 text-bevvi-800;
+  .order-notification-panel-icon {
+    @apply flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-bevvi-100 text-bevvi-800;
   }
 
-  .order-notification-toast-title {
+  .order-notification-panel-title {
     @apply text-sm font-semibold text-bevvi-900;
   }
 
-  .order-notification-toast-body {
-    @apply mt-0.5 text-xs text-bevvi-dark-600 leading-relaxed;
+  .order-notification-panel-subtitle {
+    @apply text-[11px] text-bevvi-dark-500;
   }
 
-  .order-notification-toast-action {
-    @apply mt-1 text-[11px] font-medium text-bevvi-700;
+  .order-notification-panel-count {
+    @apply ml-1 inline-flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-full bg-bevvi-800 px-2 text-xs font-semibold text-white;
   }
 
-  .order-notification-toast-dismiss {
+  .order-notification-panel-dismiss-all {
+    @apply shrink-0 rounded-lg border border-bevvi-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-bevvi-dark-700 transition-colors hover:bg-bevvi-100;
+  }
+
+  .order-notification-panel-list {
+    @apply flex flex-col gap-2 overflow-y-auto p-3;
+    max-height: min(calc(70vh - 4.5rem), 26rem);
+  }
+
+  .order-notification-card {
+    @apply rounded-xl border border-bevvi-100 bg-white p-3 shadow-sm;
+    animation: order-notification-enter 0.25s ease-out;
+  }
+
+  .order-notification-card-top {
+    @apply flex items-start gap-2;
+  }
+
+  .order-notification-card-order {
+    @apply truncate text-sm font-semibold text-bevvi-900;
+  }
+
+  .order-notification-card-time {
+    @apply mt-0.5 text-[11px] text-bevvi-dark-500;
+  }
+
+  .order-notification-status {
+    @apply shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide;
+  }
+
+  .order-notification-status-pending {
+    @apply bg-amber-100 text-amber-900;
+  }
+
+  .order-notification-status-accepted {
+    @apply bg-sky-100 text-sky-900;
+  }
+
+  .order-notification-status-delivered {
+    @apply bg-green-100 text-green-900;
+  }
+
+  .order-notification-status-cancelled {
+    @apply bg-red-100 text-red-900;
+  }
+
+  .order-notification-status-default {
+    @apply bg-bevvi-100 text-bevvi-800;
+  }
+
+  .order-notification-card-dismiss {
     @apply shrink-0 rounded-md p-1 text-bevvi-dark-400 transition-colors hover:bg-bevvi-50 hover:text-bevvi-800;
+  }
+
+  .order-notification-card-details {
+    @apply mt-2 space-y-1;
+  }
+
+  .order-notification-card-row {
+    @apply flex items-center gap-2 text-xs text-bevvi-dark-700;
+  }
+
+  .order-notification-card-footer {
+    @apply mt-3 flex items-center justify-between gap-3 border-t border-bevvi-50 pt-3;
+  }
+
+  .order-notification-card-total {
+    @apply text-sm font-semibold tabular-nums text-bevvi-900;
+  }
+
+  .order-notification-card-view {
+    @apply inline-flex items-center gap-1.5 rounded-lg bg-bevvi-800 px-2.5 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-bevvi-900;
   }
 
   @keyframes order-notification-enter {

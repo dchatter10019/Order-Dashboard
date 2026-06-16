@@ -64,6 +64,35 @@ export function formatOrderNotificationBody(order) {
   return parts.join(' · ')
 }
 
+export function formatOrderNotificationTime(orderDate) {
+  if (!orderDate) return ''
+  const date = new Date(orderDate)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
+export function getOrderNotificationStatusClass(status) {
+  const normalized = String(status || '').toLowerCase()
+  if (normalized.includes('pending') || normalized.includes('new')) {
+    return 'order-notification-status-pending'
+  }
+  if (normalized.includes('accept')) {
+    return 'order-notification-status-accepted'
+  }
+  if (normalized.includes('deliver') || normalized.includes('complete')) {
+    return 'order-notification-status-delivered'
+  }
+  if (normalized.includes('cancel') || normalized.includes('reject')) {
+    return 'order-notification-status-cancelled'
+  }
+  return 'order-notification-status-default'
+}
+
 export async function requestBrowserNotificationPermission() {
   if (typeof Notification === 'undefined') {
     return 'unsupported'
