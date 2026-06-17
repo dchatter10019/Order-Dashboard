@@ -216,6 +216,24 @@ const slackNotificationState = new Map()
 // New order notifications — track seen order keys so we only alert once per order
 const knownOrderIds = new Set()
 let ordersNotificationBaselineSeeded = false
+let ordersNotificationContextKey = null
+
+function getOrdersNotificationContextKey(dateRange) {
+  if (!dateRange?.startDate || !dateRange?.endDate) return null
+  const timeZone = dateRange.timeZone || 'UTC'
+  return `${dateRange.startDate}|${dateRange.endDate}|${timeZone}`
+}
+
+function seedOrderNotificationBaseline(orders) {
+  const list = Array.isArray(orders) ? orders : []
+  knownOrderIds.clear()
+  for (const order of list) {
+    const key = getOrderNotificationKey(order)
+    if (key) knownOrderIds.add(key)
+  }
+  ordersNotificationBaselineSeeded = true
+  console.log(`🔔 Order notification baseline seeded with ${knownOrderIds.size} order(s)`)
+}
 
 function getSlackNotificationState(orderId) {
   if (!slackNotificationState.has(orderId)) {
@@ -1061,14 +1079,16 @@ async function refreshOrdersForAlerts(orders, dateRange = null) {
     dateRange: range
   }
 
-  const newOrders = detectNewOrders(list)
+  const contextKey = getOrdersNotificationContextKey(range)
+  const contextChanged = Boolean(contextKey && contextKey !== ordersNotificationContextKey)
+  if (contextChanged) {
+    ordersNotificationContextKey = contextKey
+    console.log(`🔔 Order notification context changed — reseeding baseline (${contextKey})`)
+  }
+
+  const newOrders = detectNewOrders(list, { reseed: contextChanged })
   if (newOrders.length > 0) {
     notifyClientsOfNewOrders(newOrders)
-    try {
-      await evaluateSlackNewOrderNotifications(newOrders)
-    } catch (err) {
-      console.error('Slack new order notification failed:', err.message)
-    }
   }
 
   try {
@@ -2950,7 +2970,12 @@ function serializeOrderForNotification(order) {
   }
 }
 
-function detectNewOrders(orders) {
+function detectNewOrders(orders, { reseed = false } = {}) {
+  if (reseed) {
+    seedOrderNotificationBaseline(orders)
+    return []
+  }
+
   const list = Array.isArray(orders) ? orders : []
   const newOrders = []
   const currentKeys = new Set()
@@ -2969,29 +2994,11 @@ function detectNewOrders(orders) {
   }
 
   if (!ordersNotificationBaselineSeeded) {
-    ordersNotificationBaselineSeeded = true
-    console.log(`🔔 Order notification baseline seeded with ${currentKeys.size} order(s)`)
+    seedOrderNotificationBaseline(orders)
+    return []
   }
 
   return newOrders
-}
-
-async function evaluateSlackNewOrderNotifications(newOrders) {
-  if (!SLACK_WEBHOOK_URL || !Array.isArray(newOrders) || newOrders.length === 0) {
-    return
-  }
-
-  for (const order of newOrders) {
-    const message = [
-      '🆕 New order received',
-      `Order: ${order.ordernum || order.id}`,
-      `Customer: ${order.customerName}`,
-      order.establishment ? `Retailer: ${order.establishment}` : null,
-      `Status: ${order.status}`,
-      `Total: $${order.total.toFixed(2)}`
-    ].filter(Boolean).join('\n')
-    await sendSlackMessage(message)
-  }
 }
 
 function notifyClientsOfNewOrders(newOrders) {
