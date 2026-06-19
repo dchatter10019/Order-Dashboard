@@ -266,9 +266,18 @@ const Dashboard = ({ onSwitchToAI }) => {
     return () => window.clearTimeout(timeoutId)
   }, [searchTerm, orders])
 
-  const ordersDateRangeTotal = useMemo(
-    () => ordersInDateRange.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0),
+  const ordersForFooterTotal = useMemo(
+    () =>
+      ordersInDateRange.filter(
+        (order) =>
+          !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      ),
     [ordersInDateRange]
+  )
+
+  const ordersDateRangeTotal = useMemo(
+    () => ordersForFooterTotal.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0),
+    [ordersForFooterTotal]
   )
 
   useEffect(() => {
@@ -277,7 +286,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       isLoading,
       lastRefreshTime,
       nextRefreshTime,
-      orderCount: ordersInDateRange.length,
+      orderCount: ordersForFooterTotal.length,
       orderTotal: ordersDateRangeTotal
     })
     return () => setOrdersStatus(null)
@@ -286,7 +295,7 @@ const Dashboard = ({ onSwitchToAI }) => {
     isLoading,
     lastRefreshTime,
     nextRefreshTime,
-    ordersInDateRange.length,
+    ordersForFooterTotal.length,
     ordersDateRangeTotal,
     setOrdersStatus
   ])
