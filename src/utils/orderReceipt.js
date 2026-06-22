@@ -42,10 +42,11 @@ function formatPlacedAt(dateTime) {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
-function pickExternalOrderNumber(order, orderDetails) {
+function pickExternalOrderNumber(order, orderDetails, recipient) {
   const candidates = [
     orderDetails?.externalOrderNumber,
     orderDetails?.origOrderNumber,
+    recipient?.externalOrderNumber,
     order?.externalOrderNumber,
     order?.origOrderNumber
   ]
@@ -239,7 +240,7 @@ export function buildOrderReceiptModel(order, orderDetails) {
     orderDate: formatOrderDateLong(orderDateTime, order.orderDate),
     placedAt: formatPlacedAt(orderDateTime),
     serviceType: shipping > 0 ? 'shipping' : 'delivery',
-    externalOrderNumber: pickExternalOrderNumber(order, orderDetails),
+    externalOrderNumber: pickExternalOrderNumber(order, orderDetails, recipient),
     reference: pickReference(order, orderDetails),
     products: products.map((p) => {
       const sizeLabel = productSizeOnly(p)

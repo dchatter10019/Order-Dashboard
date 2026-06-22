@@ -1443,6 +1443,7 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
       promoDiscAmt: 0,
       serviceChargeTax: 0,
       stripePaymentId: '',
+      externalOrderNumber: '',
       // State fields
       shippingState: '',
       billingState: '',
@@ -1743,6 +1744,9 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
           break
         case 'stripepaymentid':
           order.stripePaymentId = value || ''
+          break
+        case 'externalordernumber':
+          order.externalOrderNumber = value || ''
           break
         case 'deliverydatetime':
           // Use actual delivery date/time from API if available
@@ -5502,6 +5506,17 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
     console.log('📊 Order details response data:', response.data)
 
     const data = response.data
+    const recipient = Array.isArray(data?.recipientorders) ? data.recipientorders[0] : null
+    const externalOrderNumber = String(
+      data?.externalOrderNumber || data?.origOrderNumber || recipient?.externalOrderNumber || ''
+    ).trim()
+    if (externalOrderNumber) {
+      data.externalOrderNumber = externalOrderNumber
+      if (!String(data.origOrderNumber || '').trim()) {
+        data.origOrderNumber = externalOrderNumber
+      }
+    }
+
     const isManualOrder =
       /^BEV-MAN-/i.test(String(orderNumber)) ||
       data?.isManualOrder ||
