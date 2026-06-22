@@ -675,6 +675,7 @@ function normalizeManualOrderReceiptParse(raw) {
     state: String(raw.state || '').trim().toUpperCase().slice(0, 2) || null,
     zip: String(raw.zip || '').trim().replace(/[^\d-]/g, '').slice(0, 10) || null,
     orderDate: normalizeReceiptDate(raw.orderDate),
+    externalOrderNumber: String(raw.externalOrderNumber || raw.poNumber || raw.po || '').trim() || null,
     products,
     delivery: normalizeReceiptMoneyValue(raw.delivery),
     discount: normalizeReceiptMoneyValue(raw.discount),
@@ -729,6 +730,7 @@ Products are typically wine, beer, or spirits with sizes like 750 ML, 1 L, 1.75 
 Return numeric money amounts without currency symbols. Use null for missing optional fields.
 Dates must be YYYY-MM-DD when possible.
 US state as 2-letter code. Zip as 5 or 9 digits.
+Capture purchase order numbers, invoice numbers, or customer reference numbers in externalOrderNumber when present.
 
 Return ONLY valid JSON with this shape:
 {
@@ -741,6 +743,7 @@ Return ONLY valid JSON with this shape:
   "state": null,
   "zip": null,
   "orderDate": null,
+  "externalOrderNumber": null,
   "products": [{ "name": "", "size": "", "quantity": 1, "price": null }],
   "delivery": null,
   "discount": null,
@@ -4887,6 +4890,7 @@ app.post('/api/manual-order', async (req, res) => {
       state,
       zip,
       orderDate,
+      externalOrderNumber,
       delivery = 0,
       discount = 0,
       engraving = 0,
@@ -4977,6 +4981,7 @@ app.post('/api/manual-order', async (req, res) => {
       firstName,
       lastName,
       orderDate: formatManualOrderDate(orderDate),
+      externalOrderNumber: String(externalOrderNumber || '').trim(),
       products: JSON.stringify(matchedProducts),
       salesTax: formatManualOrderMoney(salesTax),
       service: formatManualOrderMoney(service),

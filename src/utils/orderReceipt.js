@@ -42,13 +42,25 @@ function formatPlacedAt(dateTime) {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
+function pickExternalOrderNumber(order, orderDetails) {
+  const candidates = [
+    orderDetails?.externalOrderNumber,
+    orderDetails?.origOrderNumber,
+    order?.externalOrderNumber,
+    order?.origOrderNumber
+  ]
+  for (const candidate of candidates) {
+    if (candidate != null && String(candidate).trim()) return String(candidate).trim()
+  }
+  return null
+}
+
 function pickReference(order, orderDetails) {
   const candidates = [
     orderDetails?.referenceNumber,
     orderDetails?.referenceNum,
     orderDetails?.clientReference,
     orderDetails?.clientOrderNum,
-    orderDetails?.externalOrderId,
     orderDetails?.bevviReference,
     orderDetails?.stripePaymentId,
     order?.reference,
@@ -227,6 +239,7 @@ export function buildOrderReceiptModel(order, orderDetails) {
     orderDate: formatOrderDateLong(orderDateTime, order.orderDate),
     placedAt: formatPlacedAt(orderDateTime),
     serviceType: shipping > 0 ? 'shipping' : 'delivery',
+    externalOrderNumber: pickExternalOrderNumber(order, orderDetails),
     reference: pickReference(order, orderDetails),
     products: products.map((p) => {
       const sizeLabel = productSizeOnly(p)

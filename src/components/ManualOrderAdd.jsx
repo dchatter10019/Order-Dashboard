@@ -823,6 +823,7 @@ const ManualOrderAdd = () => {
   const [state, setState] = useState('')
   const [zip, setZip] = useState('')
   const [orderDate, setOrderDate] = useState(todayInputValue())
+  const [externalOrderNumber, setExternalOrderNumber] = useState('')
   const [delivery, setDelivery] = useState('0')
   const [discount, setDiscount] = useState('0')
   const [engraving, setEngraving] = useState('0')
@@ -865,6 +866,7 @@ const ManualOrderAdd = () => {
     setState('')
     setZip('')
     setOrderDate(todayInputValue())
+    setExternalOrderNumber('')
     setDelivery('0')
     setDiscount('0')
     setEngraving('0')
@@ -912,6 +914,7 @@ const ManualOrderAdd = () => {
     if (parsed.customerName) setCustomerName(parsed.customerName)
     if (parsed.email) setEmail(parsed.email)
     if (parsed.orderDate) setOrderDate(parsed.orderDate)
+    if (parsed.externalOrderNumber) setExternalOrderNumber(parsed.externalOrderNumber)
 
     const applyMoney = (value, setter) => {
       const formatted = formatReceiptMoney(value)
@@ -1242,6 +1245,7 @@ const ManualOrderAdd = () => {
     state: addressOverride?.state ?? state,
     zip: addressOverride?.zip ?? zip,
     orderDate,
+    externalOrderNumber,
     delivery,
     discount,
     engraving,
@@ -1800,6 +1804,20 @@ const ManualOrderAdd = () => {
                   onChange={(e) => setOrderDate(e.target.value)}
                   className={inputClass}
                   required
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="externalOrderNumber" className={labelClass}>
+                  External order / PO number
+                </label>
+                <input
+                  id="externalOrderNumber"
+                  type="text"
+                  value={externalOrderNumber}
+                  onChange={(e) => setExternalOrderNumber(e.target.value)}
+                  placeholder="Customer PO or reference number"
+                  className={inputClass}
+                  autoComplete="off"
                 />
               </div>
               {[
