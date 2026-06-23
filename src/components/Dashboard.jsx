@@ -277,7 +277,7 @@ const Dashboard = ({ onSwitchToAI }) => {
     () =>
       ordersInDateRange.filter(
         (order) =>
-          !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+          !['cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       ),
     [ordersInDateRange]
   )
