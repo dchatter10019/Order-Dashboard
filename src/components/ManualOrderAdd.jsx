@@ -492,6 +492,85 @@ function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, 
 
 const getStoreName = (store) => store.name || store.Name || store.storeName || ''
 
+function RetailerStripeAccountDisplay({ storeName }) {
+  const [info, setInfo] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    const name = String(storeName || '').trim()
+    if (!name) {
+      setInfo(null)
+      setLoading(false)
+      return undefined
+    }
+
+    let cancelled = false
+    setLoading(true)
+    apiFetch(`/api/manual-order/retailer-stripe-account?storeName=${encodeURIComponent(name)}`)
+      .then((response) => parseApiJsonResponse(response))
+      .then((data) => {
+        if (!cancelled) setInfo(data)
+      })
+      .catch(() => {
+        if (!cancelled) setInfo({ settlementType: 'error' })
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [storeName])
+
+  if (!storeName) return null
+
+  if (loading) {
+    return (
+      <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        Looking up Stripe account…
+      </p>
+    )
+  }
+
+  if (!info || info.settlementType === 'error') {
+    return (
+      <p className="mt-2 text-xs text-red-700" role="alert">
+        Could not load Stripe account for this retailer.
+      </p>
+    )
+  }
+
+  if (info.settlementType === 'bevvi_platform') {
+    return (
+      <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+        <span className="font-medium">Stripe account:</span>{' '}
+        Bevvi platform — full payment stays on Bevvi (not Connect)
+      </div>
+    )
+  }
+
+  if (info.settlementType === 'connected_account' && info.stripeAccountId) {
+    return (
+      <div className="mt-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
+        <span className="font-medium">Stripe account:</span>{' '}
+        <code className="font-mono">{info.stripeAccountId}</code>
+        {info.businessName ? (
+          <span className="text-green-800"> ({info.businessName})</span>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+      <span className="font-medium">Stripe account:</span> Not configured for this retailer.
+      Payment links will fail until a Connect account is mapped.
+    </div>
+  )
+}
+
 function RetailerCombobox({ stores, loading, value, onChange, onReload, inputClass, labelClass }) {
   const [query, setQuery] = useState(value || '')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -1745,15 +1824,18 @@ const ManualOrderAdd = () => {
           <section className="space-y-4">
             <h3 className="text-base font-semibold text-gray-900">Retailer</h3>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <RetailerCombobox
-                stores={stores}
-                loading={loadingStores}
-                value={storeName}
-                onChange={setStoreName}
-                onReload={loadStores}
-                inputClass={inputClass}
-                labelClass={labelClass}
-              />
+              <div>
+                <RetailerCombobox
+                  stores={stores}
+                  loading={loadingStores}
+                  value={storeName}
+                  onChange={setStoreName}
+                  onReload={loadStores}
+                  inputClass={inputClass}
+                  labelClass={labelClass}
+                />
+                <RetailerStripeAccountDisplay storeName={storeName} />
+              </div>
               <div>
                 <label htmlFor="companyName" className={labelClass}>Company name</label>
                 <input
