@@ -835,7 +835,7 @@ const ManualOrderAdd = () => {
   const [service, setService] = useState('0')
   const [serviceChargeTax, setServiceChargeTax] = useState('0')
   const [shipping, setShipping] = useState('0')
-  const [tip, setTip] = useState('0')
+  const [tipPercent, setTipPercent] = useState('0')
   const [loadingStores, setLoadingStores] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [validationResults, setValidationResults] = useState(null)
@@ -878,7 +878,7 @@ const ManualOrderAdd = () => {
     setService('0')
     setServiceChargeTax('0')
     setShipping('0')
-    setTip('0')
+    setTipPercent('0')
     setValidationResults(null)
     setMessage(null)
     setSubmitResponse(null)
@@ -928,7 +928,6 @@ const ManualOrderAdd = () => {
     applyMoney(parsed.service, setService)
     applyMoney(parsed.serviceChargeTax, setServiceChargeTax)
     applyMoney(parsed.shipping, setShipping)
-    applyMoney(parsed.tip, setTip)
 
     if (Array.isArray(parsed.products) && parsed.products.length > 0) {
       setLineItems(
@@ -940,6 +939,22 @@ const ManualOrderAdd = () => {
           price: product.price != null ? String(product.price) : ''
         }))
       )
+
+      if (parsed.tip != null) {
+        const tipDollars = parseFloat(parsed.tip) || 0
+        const productSubtotal = parsed.products.reduce(
+          (sum, product) => sum + (parseFloat(product.price) || 0) * (parseInt(product.quantity, 10) || 1),
+          0
+        )
+        if (productSubtotal > 0 && tipDollars > 0) {
+          const percent = Math.round((tipDollars / productSubtotal) * 10000) / 100
+          setTipPercent(percent === 0 ? '0' : String(percent))
+        } else {
+          setTipPercent('0')
+        }
+      }
+    } else if (parsed.tip != null && (parseFloat(parsed.tip) || 0) <= 0) {
+      setTipPercent('0')
     }
 
     if (parsed.streetAddress || parsed.city || parsed.state || parsed.zip) {
@@ -1010,6 +1025,14 @@ const ManualOrderAdd = () => {
   const subTotal = useMemo(() => {
     return lineSubtotals.reduce((sum, line) => sum + line.total, 0)
   }, [lineSubtotals])
+
+  const tipAmount = useMemo(() => {
+    const percent = parseFloat(tipPercent) || 0
+    if (percent <= 0 || subTotal <= 0) return 0
+    return Math.round(subTotal * percent / 100 * 100) / 100
+  }, [tipPercent, subTotal])
+
+  const tip = useMemo(() => (tipAmount === 0 ? '0' : tipAmount.toFixed(2)), [tipAmount])
 
   useEffect(() => {
     const charge = Math.round(subTotal * 0.1 * 100) / 100
@@ -1793,8 +1816,8 @@ const ManualOrderAdd = () => {
           </section>
 
           <section className="space-y-4">
-            <h3 className="text-base font-semibold text-gray-900">Order details &amp; fees</h3>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <h3 className="text-base font-semibold text-gray-900">Order details</h3>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="orderDate" className={labelClass}>Order date</label>
                 <input
@@ -1806,7 +1829,7 @@ const ManualOrderAdd = () => {
                   required
                 />
               </div>
-              <div className="sm:col-span-2">
+              <div>
                 <label htmlFor="externalOrderNumber" className={labelClass}>
                   External order / PO number
                 </label>
@@ -1820,14 +1843,19 @@ const ManualOrderAdd = () => {
                   autoComplete="off"
                 />
               </div>
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="text-base font-semibold text-gray-900">Fees</h3>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {[
-                ['delivery', delivery, setDelivery, 'Delivery'],
                 ['discount', discount, setDiscount, 'Discount'],
                 ['engraving', engraving, setEngraving, 'Engraving'],
                 ['service', service, setService, 'Service (10% of subtotal)'],
                 ['serviceChargeTax', serviceChargeTax, setServiceChargeTax, 'Service charge tax'],
-                ['shipping', shipping, setShipping, 'Shipping'],
-                ['tip', tip, setTip, 'Tip']
+                ['delivery', delivery, setDelivery, 'Delivery'],
+                ['shipping', shipping, setShipping, 'Shipping']
               ].map(([id, value, setter, label]) => (
                 <div key={id}>
                   <label htmlFor={id} className={labelClass}>
@@ -1844,6 +1872,28 @@ const ManualOrderAdd = () => {
                   />
                 </div>
               ))}
+              <div>
+                <label htmlFor="tipPercent" className={labelClass}>
+                  Tip (% of product cost)
+                </label>
+                <input
+                  id="tipPercent"
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  value={tipPercent}
+                  onChange={(e) => setTipPercent(e.target.value)}
+                  className={inputClass}
+                />
+                {tipAmount > 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {formatDollarAmount(tipAmount)} added to total
+                    {subTotal > 0 && (
+                      <span> ({tipPercent}% of {formatDollarAmount(subTotal)} in products)</span>
+                    )}
+                  </p>
+                )}
+              </div>
               <div>
                 <label htmlFor="salesTax" className={labelClass}>
                   Sales tax
@@ -1881,9 +1931,17 @@ const ManualOrderAdd = () => {
                 )}
               </div>
             </div>
-            <p className="text-sm text-gray-600">
-              Estimated total: <strong>{formatDollarAmount(estimatedTotal)}</strong>
-            </p>
+            <div className="space-y-1 text-sm text-gray-600">
+              {tipAmount > 0 && (
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+                  <span>Tip ({tipPercent}% of product cost)</span>
+                  <span className="tabular-nums font-medium text-gray-900">{formatDollarAmount(tipAmount)}</span>
+                </div>
+              )}
+              <p>
+                Estimated total: <strong>{formatDollarAmount(estimatedTotal)}</strong>
+              </p>
+            </div>
           </section>
 
           {message && (

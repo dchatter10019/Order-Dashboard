@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown, AlertTriangle, Search, X, Bell, BellOff } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
@@ -29,6 +29,13 @@ const defaultOrdersDateRange = () => {
     startDate: today,
     endDate: today
   }
+}
+
+const msUntilNextLocalMidnight = () => {
+  const now = new Date()
+  const nextMidnight = new Date(now)
+  nextMidnight.setHours(24, 0, 0, 0)
+  return Math.max(nextMidnight.getTime() - now.getTime(), 1000)
 }
 
 const looksLikeOrderNumber = (value) => /^BEV-/i.test(String(value || '').trim())
@@ -830,6 +837,36 @@ const Dashboard = ({ onSwitchToAI }) => {
 
 
   const getOrderKey = useCallback((order) => order.ordernum || order.id, [])
+  const lastKnownCalendarDayRef = useRef(formatLocalDateInput(new Date()))
+
+  // At midnight (or when the tab wakes on a new day), reset to today's orders.
+  useEffect(() => {
+    const resetToTodayIfNewDay = () => {
+      const today = formatLocalDateInput(new Date())
+      if (lastKnownCalendarDayRef.current === today) return
+      lastKnownCalendarDayRef.current = today
+      const todayRange = { startDate: today, endDate: today }
+      console.log(`📅 Calendar day changed — resetting to today: ${today}`)
+      setDateRange(todayRange)
+    }
+
+    const intervalId = window.setInterval(resetToTodayIfNewDay, 60_000)
+    let midnightTimeoutId = window.setTimeout(function scheduleMidnightReset() {
+      resetToTodayIfNewDay()
+      midnightTimeoutId = window.setTimeout(scheduleMidnightReset, msUntilNextLocalMidnight())
+    }, msUntilNextLocalMidnight())
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') resetToTodayIfNewDay()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.clearTimeout(midnightTimeoutId)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
   const openOrderDetailsPage = (order) => {
     const orderKey = getOrderKey(order)

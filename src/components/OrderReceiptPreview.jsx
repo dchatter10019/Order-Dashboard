@@ -132,10 +132,6 @@ function ReceiptDocument({ receipt, addressLines }) {
             <div className="order-receipt-meta-label">SERVICE</div>
             <div className="order-receipt-meta-value">{receipt.serviceType}</div>
           </div>
-          <div>
-            <div className="order-receipt-meta-label">REFERENCE</div>
-            <div className="order-receipt-meta-value">{receipt.reference}</div>
-          </div>
           {receipt.externalOrderNumber && (
             <div>
               <div className="order-receipt-meta-label">EXTERNAL ORDER / PO</div>

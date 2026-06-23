@@ -56,23 +56,6 @@ function pickExternalOrderNumber(order, orderDetails, recipient) {
   return null
 }
 
-function pickReference(order, orderDetails) {
-  const candidates = [
-    orderDetails?.referenceNumber,
-    orderDetails?.referenceNum,
-    orderDetails?.clientReference,
-    orderDetails?.clientOrderNum,
-    orderDetails?.bevviReference,
-    orderDetails?.stripePaymentId,
-    order?.reference,
-    order?.stripePaymentId
-  ]
-  for (const candidate of candidates) {
-    if (candidate != null && String(candidate).trim()) return String(candidate).trim()
-  }
-  return '—'
-}
-
 function pickEmail(recipient, orderDetails) {
   return recipient?.email || orderDetails?.email || orderDetails?.corpEmail || ''
 }
@@ -241,7 +224,6 @@ export function buildOrderReceiptModel(order, orderDetails) {
     placedAt: formatPlacedAt(orderDateTime),
     serviceType: shipping > 0 ? 'shipping' : 'delivery',
     externalOrderNumber: pickExternalOrderNumber(order, orderDetails, recipient),
-    reference: pickReference(order, orderDetails),
     products: products.map((p) => {
       const sizeLabel = productSizeOnly(p)
       const qty = num(p.quantity) || 1
