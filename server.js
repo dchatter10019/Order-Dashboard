@@ -3682,6 +3682,51 @@ function extractStripeTaxCalculationDollars(calculation) {
   return 0
 }
 
+function splitManualOrderTaxFromStripeCalculation(calculation, taxableLineMeta = []) {
+  let salesTaxCents = 0
+  let serviceChargeTaxCents = 0
+
+  const stripeLines = calculation?.line_items?.data || []
+  for (let i = 0; i < stripeLines.length; i++) {
+    const taxCents = Number(stripeLines[i]?.amount_tax) || 0
+    const feeType = taxableLineMeta[i]?.feeType
+    if (feeType === 'service') {
+      serviceChargeTaxCents += taxCents
+    } else {
+      salesTaxCents += taxCents
+    }
+  }
+
+  const shippingTaxCents = Number(calculation?.shipping_cost?.amount_tax) || 0
+  salesTaxCents += shippingTaxCents
+
+  if (salesTaxCents > 0 || serviceChargeTaxCents > 0) {
+    return {
+      salesTax: Math.round(salesTaxCents) / 100,
+      serviceChargeTax: Math.round(serviceChargeTaxCents) / 100
+    }
+  }
+
+  return null
+}
+
+async function fetchStripeTaxCalculationForLines(lines, shippingAddress) {
+  if (!lines.length) {
+    return { tax: 0, calculationId: null }
+  }
+
+  const { request } = buildStripeTaxCalculationRequest(lines, shippingAddress)
+  if (request.line_items.length === 0 && !request.shipping_cost) {
+    return { tax: 0, calculationId: null }
+  }
+
+  const calculation = await stripe.tax.calculations.create(request)
+  return {
+    tax: extractStripeTaxCalculationDollars(calculation) ?? 0,
+    calculationId: calculation.id
+  }
+}
+
 async function calculateManualOrderStripeTax({
   matchedProducts = [],
   streetAddress,
@@ -3692,7 +3737,6 @@ async function calculateManualOrderStripeTax({
   delivery = 0,
   shipping = 0,
   service = 0,
-  serviceChargeTax = 0,
   engraving = 0,
   tip = 0
 }) {
@@ -3716,7 +3760,7 @@ async function calculateManualOrderStripeTax({
     delivery,
     shipping,
     service,
-    serviceChargeTax,
+    serviceChargeTax: 0,
     engraving,
     tip,
     salesTax: 0,
@@ -3724,21 +3768,49 @@ async function calculateManualOrderStripeTax({
   })
 
   if (lines.length === 0) {
-    return { success: true, salesTax: 0, taxableSubtotal: 0 }
+    return { success: true, salesTax: 0, serviceChargeTax: 0, taxableSubtotal: 0 }
   }
 
-  const taxRequest = buildStripeTaxCalculationRequest(lines, shippingAddress)
-  if (taxRequest.line_items.length === 0 && !taxRequest.shipping_cost) {
-    return { success: true, salesTax: 0, taxableSubtotal: 0 }
-  }
+  const serviceAmount = parseMoneyValue(service)
+  const retailLines = buildManualOrderStripeLineItems({
+    matchedProducts,
+    delivery,
+    shipping,
+    service: 0,
+    serviceChargeTax: 0,
+    engraving,
+    tip,
+    salesTax: 0,
+    useAutomaticTax: true
+  })
+  const serviceLines =
+    serviceAmount > 0
+      ? buildManualOrderStripeLineItems({
+          matchedProducts: [],
+          delivery: 0,
+          shipping: 0,
+          service: serviceAmount,
+          serviceChargeTax: 0,
+          engraving: 0,
+          tip: 0,
+          salesTax: 0,
+          useAutomaticTax: true
+        })
+      : []
 
-  const calculation = await stripe.tax.calculations.create(taxRequest)
+  const [retailTaxResult, serviceTaxResult] = await Promise.all([
+    fetchStripeTaxCalculationForLines(retailLines, shippingAddress),
+    serviceLines.length > 0
+      ? fetchStripeTaxCalculationForLines(serviceLines, shippingAddress)
+      : Promise.resolve({ tax: 0, calculationId: null })
+  ])
 
   return {
     success: true,
-    salesTax: extractStripeTaxCalculationDollars(calculation) ?? 0,
+    salesTax: retailTaxResult.tax,
+    serviceChargeTax: serviceTaxResult.tax,
     taxableSubtotal: sumManualOrderLineItems(lines),
-    calculationId: calculation.id
+    calculationId: retailTaxResult.calculationId
   }
 }
 
@@ -4030,6 +4102,8 @@ function resolveStripeTaxCodeForFeeType(feeType) {
     case 'serviceChargeTax':
       return STRIPE_TAX_CODES.NON_TAXABLE
     case 'service':
+      // Bevvi platform service charge is taxed at the standard rate, not as a generic service.
+      return STRIPE_TAX_CODES.GENERAL_TANGIBLE
     case 'networkServiceCharge':
     case 'engraving':
     case 'giftNoteCharge':
@@ -4213,9 +4287,23 @@ function partitionManualOrderLinesForAutomaticTax(lines = []) {
 
 function buildStripeTaxCalculationRequest(lines, shippingAddress) {
   const { taxableLines, shippingCents } = partitionManualOrderLinesForAutomaticTax(lines)
-  const stripeLineItems = taxableLines
-    .map((line, index) => toStripeTaxCalculationLineItem(line, index))
-    .filter((line) => line.amount > 0)
+  const taxableLineMeta = []
+  const stripeLineItems = []
+
+  for (const line of taxableLines) {
+    const amount = Math.max(0, Math.round(line.unitAmount * line.quantity * 100))
+    if (amount <= 0) continue
+    taxableLineMeta.push({
+      feeType: line.feeType || null,
+      lineType: line.type || null
+    })
+    stripeLineItems.push({
+      amount,
+      reference: `manual-line-${stripeLineItems.length}`,
+      tax_behavior: 'exclusive',
+      tax_code: line.taxCode || STRIPE_TAX_CODES.GENERAL_TANGIBLE
+    })
+  }
 
   const request = {
     currency: 'usd',
@@ -4234,7 +4322,7 @@ function buildStripeTaxCalculationRequest(lines, shippingAddress) {
     }
   }
 
-  return request
+  return { request, taxableLineMeta }
 }
 
 function buildStripeInvoiceShippingCost(shippingCents) {
@@ -5428,7 +5516,6 @@ app.post('/api/manual-order/calculate-tax', async (req, res) => {
       delivery = 0,
       shipping = 0,
       service = 0,
-      serviceChargeTax = 0,
       engraving = 0,
       tip = 0
     } = req.body || {}
@@ -5447,7 +5534,6 @@ app.post('/api/manual-order/calculate-tax', async (req, res) => {
       delivery,
       shipping,
       service,
-      serviceChargeTax,
       engraving,
       tip
     })

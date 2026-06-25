@@ -1188,7 +1188,6 @@ const ManualOrderAdd = () => {
     delivery,
     shipping,
     service,
-    serviceChargeTax,
     engraving,
     tip,
     subTotal
@@ -1201,11 +1200,24 @@ const ManualOrderAdd = () => {
     delivery,
     shipping,
     service,
-    serviceChargeTax,
     engraving,
     tip,
     subTotal
   ])
+
+  const hasTaxableProductsForCalculation = useCallback((products, total) => {
+    if (total <= 0) return false
+    return products.some((product) => {
+      const price = parseFloat(product.price)
+      const quantity = parseFloat(product.quantity) || parseInt(product.quantity, 10) || 0
+      const label = `${product.name || ''} ${product.size || ''}`.trim()
+      return label && !Number.isNaN(price) && price >= 0 && quantity > 0
+    })
+  }, [])
+
+  const taxCalculationInputRef = useRef(taxCalculationInput)
+  taxCalculationInputRef.current = taxCalculationInput
+  const taxRequestSeqRef = useRef(0)
 
   useEffect(() => {
     if (!taxCalculationInput.zip) {
@@ -1218,22 +1230,19 @@ const ManualOrderAdd = () => {
       return undefined
     }
 
-    const hasTaxableProducts = taxCalculationInput.products.some((product) => {
-      const price = parseFloat(product.price)
-      const quantity = parseInt(product.quantity, 10)
-      const label = `${product.name || ''} ${product.size || ''}`.trim()
-      return label && !Number.isNaN(price) && price >= 0 && quantity > 0
-    })
-
-    if (!hasTaxableProducts || taxCalculationInput.subTotal <= 0) {
-      setSalesTax('0')
-      setSalesTaxFromStripe(false)
-      setSalesTaxError(null)
-      return undefined
-    }
-
     let cancelled = false
     const timeoutId = window.setTimeout(async () => {
+      const input = taxCalculationInputRef.current
+      const products = input.products
+      const canCalculateTax = hasTaxableProductsForCalculation(products, input.subTotal)
+
+      if (!canCalculateTax) {
+        return
+      }
+
+      const requestSeq = taxRequestSeqRef.current + 1
+      taxRequestSeqRef.current = requestSeq
+
       setSalesTaxLoading(true)
       setSalesTaxError(null)
       try {
@@ -1241,41 +1250,36 @@ const ManualOrderAdd = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            products: lineItems.map((item) => {
-              const { name, size } = resolveLineItemForApi(item)
-              return {
-                name,
-                size,
-                quantity: item.quantity,
-                price: item.price
-              }
-            }),
-            streetAddress: taxCalculationInput.streetAddress,
-            city: taxCalculationInput.city,
-            state: taxCalculationInput.state,
-            zip: taxCalculationInput.zip,
-            delivery: taxCalculationInput.delivery,
-            shipping: taxCalculationInput.shipping,
-            service: taxCalculationInput.service,
-            serviceChargeTax: taxCalculationInput.serviceChargeTax,
-            engraving: taxCalculationInput.engraving,
-            tip: taxCalculationInput.tip
+            products,
+            streetAddress: input.streetAddress,
+            city: input.city,
+            state: input.state,
+            zip: input.zip,
+            delivery: input.delivery,
+            shipping: input.shipping,
+            service: input.service,
+            engraving: input.engraving,
+            tip: input.tip
           })
         })
         const data = await parseApiJsonResponse(response)
-        if (cancelled) return
+        if (cancelled || requestSeq !== taxRequestSeqRef.current) return
         if (!response.ok || !data.success) {
           throw new Error(data.message || data.error || 'Could not calculate sales tax')
         }
         const taxAmount = data.salesTax ?? 0
+        const serviceTaxAmount = data.serviceChargeTax ?? 0
         setSalesTax(taxAmount === 0 ? '0' : taxAmount.toFixed(2))
+        setServiceChargeTax(serviceTaxAmount === 0 ? '0' : serviceTaxAmount.toFixed(2))
         setSalesTaxFromStripe(true)
       } catch (e) {
-        if (cancelled) return
+        if (cancelled || requestSeq !== taxRequestSeqRef.current) return
         setSalesTaxError(e.message || 'Could not calculate sales tax')
         setSalesTaxFromStripe(false)
       } finally {
-        if (!cancelled) setSalesTaxLoading(false)
+        if (!cancelled && requestSeq === taxRequestSeqRef.current) {
+          setSalesTaxLoading(false)
+        }
       }
     }, 450)
 
@@ -1283,7 +1287,7 @@ const ManualOrderAdd = () => {
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [taxCalculationInput, lineItems, salesTaxManualOverride])
+  }, [taxCalculationInput, salesTaxManualOverride, hasTaxableProductsForCalculation])
 
   useEffect(() => {
     setSalesTaxManualOverride(false)
@@ -1296,7 +1300,6 @@ const ManualOrderAdd = () => {
     taxCalculationInput.delivery,
     taxCalculationInput.shipping,
     taxCalculationInput.service,
-    taxCalculationInput.serviceChargeTax,
     taxCalculationInput.engraving,
     taxCalculationInput.tip,
     taxCalculationInput.subTotal
