@@ -9,14 +9,44 @@ import { TAB_COPY } from '../constants/brand'
 const emptyLineItem = () => ({ query: '', name: '', size: '', quantity: '1', price: '' })
 
 const VALID_PRODUCT_SIZE_UNITS = /^(ML|L|OZ|CL|G|LB|PK|PACK|LT|LITER|LITRE)$/i
+const PACK_SIZE_IN_NAME_PATTERN = /(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(OZ|ML|L|CL|G|LB)\b/i
+const PACK_UNITS_PATTERN = /^x(\d+(?:\.\d+)?)\s*(OZ|ML|L|CL|G|LB)\b/i
+
+function parsePackSizeFromProductName(name) {
+  const match = String(name || '').match(PACK_SIZE_IN_NAME_PATTERN)
+  if (!match) return ''
+  return `${match[1]}x${match[2]} ${match[3].toUpperCase()}`
+}
+
+function isPackStyleProduct(product) {
+  const units = String(product?.units || '').trim()
+  const sizeNum = parseFloat(product?.size)
+  if (!Number.isNaN(sizeNum) && sizeNum > 0 && PACK_UNITS_PATTERN.test(units)) {
+    return true
+  }
+  return Boolean(parsePackSizeFromProductName(productFullLabel(product)))
+}
 
 function isValidProductSize(product) {
+  if (isPackStyleProduct(product)) return true
   const units = String(product?.units || '').trim()
   const sizeNum = parseFloat(product?.size)
   return VALID_PRODUCT_SIZE_UNITS.test(units) && !Number.isNaN(sizeNum) && sizeNum > 0
 }
 
 const formatProductSize = (product) => {
+  const packFromName = parsePackSizeFromProductName(productFullLabel(product))
+  if (packFromName) return packFromName
+
+  if (isPackStyleProduct(product)) {
+    const units = String(product?.units || '').trim()
+    const sizeNum = parseFloat(product?.size)
+    const packMatch = units.match(PACK_UNITS_PATTERN)
+    if (packMatch && !Number.isNaN(sizeNum) && sizeNum > 0) {
+      return `${sizeNum}x${packMatch[1]} ${packMatch[2].toUpperCase()}`
+    }
+  }
+
   if (isValidProductSize(product)) {
     return `${product.size} ${product.units || ''}`.trim()
   }
@@ -48,6 +78,14 @@ function parseQueryToNameAndSize(query) {
     }
   }
 
+  const packMatch = trimmed.match(/^(.+?)\s+(\d+\s*x\s*\d+(?:\.\d+)?\s*(?:OZ|ML|L|CL|G|LB))\b/i)
+  if (packMatch) {
+    return {
+      name: packMatch[1].trim(),
+      size: packMatch[2].replace(/\s+/g, ' ').replace(/(\d+)\s*x\s*(\d+)/i, '$1x$2').trim()
+    }
+  }
+
   return { name: trimmed, size: '' }
 }
 
@@ -71,6 +109,7 @@ function rankProductsForQuery(products, query) {
         if (fullName.includes(token)) score += 20
         if (sizeLabel.includes(token)) score += 35
         if (/^\d+(?:\.\d+)?$/.test(token) && sizeLabel.startsWith(token)) score += 40
+        if (/^\d+x\d+$/i.test(token) && sizeLabel.replace(/\s+/g, '').includes(token.toLowerCase())) score += 50
       }
 
       const parsed = parseQueryToNameAndSize(query)

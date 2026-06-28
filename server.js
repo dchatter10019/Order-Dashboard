@@ -653,17 +653,136 @@ function formatCatalogProductSize(product) {
   return `${product.size} ${product.units || ''}`.trim()
 }
 
+function roundReceiptMoney(value) {
+  return Math.round(Number(value) * 100) / 100
+}
+
+function moneyRoughlyEqual(a, b, tolerance = 0.03) {
+  if (a == null || b == null) return false
+  return Math.abs(Number(a) - Number(b)) <= tolerance
+}
+
+function normalizeReceiptProductPricing(product) {
+  const quantity = Math.max(1, parseInt(product?.quantity, 10) || 1)
+  const explicitUnitPrice = normalizeReceiptMoneyValue(product?.unitPrice)
+  const explicitLineTotal = normalizeReceiptMoneyValue(
+    product?.lineTotal ??
+      product?.lineTotalPrice ??
+      product?.extendedPrice ??
+      product?.extPrice ??
+      product?.totalPrice ??
+      product?.amount
+  )
+  const legacyPrice = normalizeReceiptMoneyValue(product?.price)
+
+  let unitPrice = explicitUnitPrice
+  let lineTotal = explicitLineTotal
+
+  if (unitPrice == null && legacyPrice != null) {
+    if (lineTotal != null) {
+      unitPrice = legacyPrice
+    } else if (quantity > 1 && explicitUnitPrice == null && product?.lineTotal == null) {
+      // Receipt line amounts with qty > 1 are usually extended totals, not unit prices.
+      lineTotal = legacyPrice
+      unitPrice = roundReceiptMoney(legacyPrice / quantity)
+    } else {
+      unitPrice = legacyPrice
+    }
+  }
+
+  if (lineTotal != null && lineTotal > 0) {
+    const unitFromLine = roundReceiptMoney(lineTotal / quantity)
+    if (unitPrice == null) {
+      unitPrice = unitFromLine
+    } else if (quantity > 1) {
+      const lineFromUnit = roundReceiptMoney(unitPrice * quantity)
+      const priceIsLineTotal = moneyRoughlyEqual(unitPrice, lineTotal)
+      const unitPriceIsConsistent = moneyRoughlyEqual(lineFromUnit, lineTotal)
+      if (priceIsLineTotal && !unitPriceIsConsistent) {
+        unitPrice = unitFromLine
+      } else if (!unitPriceIsConsistent && unitFromLine > 0 && unitPrice > lineTotal) {
+        // unitPrice larger than the stated line total — likely swapped
+        unitPrice = unitFromLine
+      }
+    }
+  }
+
+  return {
+    ...product,
+    quantity,
+    price: unitPrice
+  }
+}
+
+function inferReceiptPricesFromSubtotal(products, productSubtotal) {
+  if (!Array.isArray(products) || products.length === 0) return products
+  const subtotal = normalizeReceiptMoneyValue(productSubtotal)
+  if (subtotal == null || subtotal <= 0) return products
+
+  const pricedProducts = products.filter((product) => product.price != null && product.price > 0)
+  if (pricedProducts.length === 0) return products
+
+  const sumAsUnitPrices = roundReceiptMoney(
+    pricedProducts.reduce((sum, product) => sum + product.price * product.quantity, 0)
+  )
+  const sumAsLineTotals = roundReceiptMoney(
+    pricedProducts.reduce((sum, product) => sum + product.price, 0)
+  )
+
+  const unitPricingMatches = moneyRoughlyEqual(sumAsUnitPrices, subtotal, 0.5)
+  const linePricingMatches = moneyRoughlyEqual(sumAsLineTotals, subtotal, 0.5)
+
+  if (linePricingMatches && !unitPricingMatches) {
+    return products.map((product) => {
+      if (product.price == null || product.quantity <= 1) return product
+      return {
+        ...product,
+        price: roundReceiptMoney(product.price / product.quantity)
+      }
+    })
+  }
+
+  return products
+}
+
 function normalizeManualOrderReceiptParse(raw) {
   if (!raw || typeof raw !== 'object') return null
 
-  const products = (Array.isArray(raw.products) ? raw.products : [])
-    .map((product) => ({
-      name: String(product?.name || '').trim(),
-      size: String(product?.size || '').trim(),
-      quantity: Math.max(1, parseInt(product?.quantity, 10) || 1),
-      price: normalizeReceiptMoneyValue(product?.price)
-    }))
+  const productSubtotal = normalizeReceiptMoneyValue(
+    raw.productSubtotal ?? raw.productsSubtotal ?? raw.merchandiseSubtotal ?? raw.subtotal
+  )
+
+  let products = (Array.isArray(raw.products) ? raw.products : [])
+    .map((product) =>
+      normalizeReceiptProductPricing({
+        name: String(product?.name || '').trim(),
+        size: String(product?.size || '').trim(),
+        quantity: product?.quantity,
+        unitPrice: product?.unitPrice,
+        price: product?.price,
+        lineTotal:
+          product?.lineTotal ??
+          product?.lineTotalPrice ??
+          product?.extendedPrice ??
+          product?.extPrice ??
+          product?.totalPrice ??
+          product?.amount
+      })
+    )
     .filter((product) => product.name)
+
+  products = inferReceiptPricesFromSubtotal(products, productSubtotal)
+
+  let confidenceNotes = String(raw.confidenceNotes || '').trim() || null
+  if (productSubtotal != null) {
+    const correctedSum = roundReceiptMoney(
+      products.reduce((sum, product) => sum + (product.price || 0) * product.quantity, 0)
+    )
+    if (moneyRoughlyEqual(correctedSum, productSubtotal, 0.5)) {
+      const note = 'Unit prices normalized from receipt line totals using the merchandise subtotal.'
+      confidenceNotes = confidenceNotes ? `${confidenceNotes} ${note}` : note
+    }
+  }
 
   return {
     storeName: String(raw.storeName || '').trim() || null,
@@ -676,6 +795,7 @@ function normalizeManualOrderReceiptParse(raw) {
     zip: String(raw.zip || '').trim().replace(/[^\d-]/g, '').slice(0, 10) || null,
     orderDate: normalizeReceiptDate(raw.orderDate),
     externalOrderNumber: String(raw.externalOrderNumber || raw.poNumber || raw.po || '').trim() || null,
+    productSubtotal,
     products,
     delivery: normalizeReceiptMoneyValue(raw.delivery),
     discount: normalizeReceiptMoneyValue(raw.discount),
@@ -685,7 +805,7 @@ function normalizeManualOrderReceiptParse(raw) {
     serviceChargeTax: normalizeReceiptMoneyValue(raw.serviceChargeTax),
     shipping: normalizeReceiptMoneyValue(raw.shipping),
     tip: normalizeReceiptMoneyValue(raw.tip),
-    confidenceNotes: String(raw.confidenceNotes || '').trim() || null
+    confidenceNotes
   }
 }
 
@@ -732,6 +852,13 @@ Dates must be YYYY-MM-DD when possible.
 US state as 2-letter code. Zip as 5 or 9 digits.
 Capture purchase order numbers, invoice numbers, or customer reference numbers in externalOrderNumber when present.
 
+IMPORTANT pricing rules:
+- Each product must include quantity, unitPrice (price for ONE item), and lineTotal (extended amount = unitPrice x quantity).
+- If the receipt shows only one dollar amount for a line, put the per-item amount in unitPrice when qty is 1.
+- If qty > 1 and the receipt shows an extended/line total, put that amount in lineTotal and compute unitPrice = lineTotal / quantity.
+- Never put a line total into unitPrice when quantity is greater than 1.
+- Also extract productSubtotal when visible (merchandise/product total before tax, delivery, service, and tip).
+
 Return ONLY valid JSON with this shape:
 {
   "storeName": null,
@@ -744,7 +871,8 @@ Return ONLY valid JSON with this shape:
   "zip": null,
   "orderDate": null,
   "externalOrderNumber": null,
-  "products": [{ "name": "", "size": "", "quantity": 1, "price": null }],
+  "productSubtotal": null,
+  "products": [{ "name": "", "size": "", "quantity": 1, "unitPrice": null, "lineTotal": null, "price": null }],
   "delivery": null,
   "discount": null,
   "engraving": null,
@@ -3072,9 +3200,11 @@ async function loadAllProducts() {
 
 // Function to search cached products
 function productSearchHaystack(product) {
-  const sizePart = product.size == null || product.size === ''
-    ? String(product.units || '')
-    : `${product.size} ${product.units || ''}`.trim()
+  const sizePart = formatCatalogProductSizeLabel(product) || (
+    product.size == null || product.size === ''
+      ? String(product.units || '')
+      : `${product.size} ${product.units || ''}`.trim()
+  )
   return [
     product.name,
     product.upc,
@@ -3085,6 +3215,7 @@ function productSearchHaystack(product) {
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
+    .replace(/(\d+)\s*x\s*(\d+)/g, '$1x$2')
 }
 
 function searchProducts(searchTerm) {
@@ -3092,7 +3223,7 @@ function searchProducts(searchTerm) {
     return []
   }
 
-  const searchLower = searchTerm.toLowerCase().trim()
+  const searchLower = searchTerm.toLowerCase().trim().replace(/(\d+)\s*x\s*(\d+)/g, '$1x$2')
   const tokens = searchLower.split(/\s+/).filter(Boolean)
 
   const results = productsCache.filter(product => {
@@ -3119,6 +3250,7 @@ function searchProducts(searchTerm) {
       const sizeLabel = productSizeLabel(product)
       if (sizeLabel.includes(token)) score += 25
       if (/^\d+(?:\.\d+)?$/.test(token) && String(product.size ?? '') === token) score += 30
+      if (/^\d+x\d+$/i.test(token) && sizeLabel.replace(/\s+/g, '').includes(token.toLowerCase())) score += 40
     }
     return { product, score }
   })
@@ -3144,8 +3276,26 @@ function normalizeSizeToken(str) {
 }
 
 const VALID_CATALOG_SIZE_UNITS = /^(ml|l|oz|cl|g|lb|pk|pack|lt|liter|litre)$/i
+const PACK_SIZE_IN_NAME_PATTERN = /(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(oz|ml|l|cl|g|lb)\b/i
+const PACK_UNITS_PATTERN = /^x(\d+(?:\.\d+)?)\s*(oz|ml|l|cl|g|lb)\b/i
+
+function parsePackSizeFromProductName(name) {
+  const match = String(name || '').match(PACK_SIZE_IN_NAME_PATTERN)
+  if (!match) return null
+  return `${match[1]}x${match[2]} ${match[3].toUpperCase()}`
+}
+
+function isPackStyleCatalogProduct(product) {
+  const units = String(product?.units || '').trim()
+  const sizeNum = parseFloat(product?.size)
+  if (!Number.isNaN(sizeNum) && sizeNum > 0 && PACK_UNITS_PATTERN.test(units)) {
+    return true
+  }
+  return Boolean(parsePackSizeFromProductName(product?.name))
+}
 
 function isValidCatalogProductSize(product) {
+  if (isPackStyleCatalogProduct(product)) return true
   const units = String(product?.units || '').trim()
   if (!VALID_CATALOG_SIZE_UNITS.test(units)) return false
   const sizeNum = parseFloat(product?.size)
@@ -3153,6 +3303,18 @@ function isValidCatalogProductSize(product) {
 }
 
 function formatCatalogProductSizeLabel(product) {
+  const packFromName = parsePackSizeFromProductName(product?.name)
+  if (packFromName) return packFromName
+
+  if (isPackStyleCatalogProduct(product)) {
+    const units = String(product?.units || '').trim()
+    const sizeNum = parseFloat(product?.size)
+    const packMatch = units.match(PACK_UNITS_PATTERN)
+    if (packMatch && !Number.isNaN(sizeNum) && sizeNum > 0) {
+      return `${sizeNum}x${packMatch[1]} ${packMatch[2].toUpperCase()}`
+    }
+  }
+
   if (!isValidCatalogProductSize(product)) {
     return parseSizeFromCombinedName(product?.name || '') || ''
   }
