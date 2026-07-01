@@ -17,12 +17,13 @@ const ProductManagement = () => {
       return []
     }
   })
-  // Set companies list with airculinaire, sendoso, OnGoody, and gourmetinflight
+  // Set companies list for Add Product client selection
   const [companies] = useState([
     { name: 'airculinaire' },
     { name: 'sendoso' },
-    { name: 'OnGoody' },
-    { name: 'gourmetinflight' }
+    { name: 'ongoody' },
+    { name: 'gourmetinflight' },
+    { name: 'nuveen' }
   ])
   const [selectedProduct, setSelectedProduct] = useState(null) // Store full product object instead of just name
   const [selectedStore, setSelectedStore] = useState('')
