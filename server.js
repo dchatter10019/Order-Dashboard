@@ -3525,8 +3525,13 @@ async function saveManualOrderPaymentLinks(store) {
 async function saveManualOrderPaymentLink(orderNumber, paymentLink) {
   if (!orderNumber || !paymentLink?.url) return
   const store = await readManualOrderPaymentLinks()
+  const stripeAccountId = resolveManualOrderStripeAccountId({
+    stripeAccountId: paymentLink.stripeAccountId,
+    url: paymentLink.url
+  })
   store[orderNumber] = {
     ...paymentLink,
+    stripeAccountId,
     orderNumber,
     savedAt: new Date().toISOString()
   }
@@ -3777,6 +3782,59 @@ function buildStripeConnectRequestOptions(stripeAccountId) {
   return { stripeAccount: stripeAccountId }
 }
 
+function extractStripeAccountIdFromInvoiceUrl(url) {
+  const match = String(url || '').match(/\/i\/(acct_[^/]+)\//)
+  return match ? match[1] : null
+}
+
+function resolveManualOrderStripeAccountId({ stripeAccountId, url, invoice } = {}) {
+  const fromRecord = String(stripeAccountId || '').trim()
+  if (fromRecord && fromRecord !== 'platform') return fromRecord
+
+  const fromUrl = extractStripeAccountIdFromInvoiceUrl(url)
+  if (fromUrl) return fromUrl
+
+  const fromMetadata = String(invoice?.metadata?.stripeAccountId || '').trim()
+  if (fromMetadata && fromMetadata !== 'platform') return fromMetadata
+
+  return null
+}
+
+function isStripeMissingInvoiceError(error) {
+  return (
+    error?.code === 'resource_missing' ||
+    /No such invoice/i.test(String(error?.message || ''))
+  )
+}
+
+async function retrieveManualOrderStripeInvoice(invoiceId, stripeAccountId = null) {
+  const preferredAccountId = resolveManualOrderStripeAccountId({ stripeAccountId })
+  const accountAttempts = []
+  if (preferredAccountId) accountAttempts.push(preferredAccountId)
+  accountAttempts.push(null)
+
+  for (const account of stripeConnectedAccountsCache.accounts || []) {
+    const accountId = String(account?.id || '').trim()
+    if (accountId && !accountAttempts.includes(accountId)) {
+      accountAttempts.push(accountId)
+    }
+  }
+
+  let lastError = null
+  for (const accountId of accountAttempts) {
+    try {
+      const connectOpts = buildStripeConnectRequestOptions(accountId)
+      const invoice = await stripe.invoices.retrieve(invoiceId, {}, connectOpts)
+      return { invoice, stripeAccountId: accountId }
+    } catch (error) {
+      lastError = error
+      if (!isStripeMissingInvoiceError(error)) throw error
+    }
+  }
+
+  throw lastError || new Error(`No such invoice: '${invoiceId}'`)
+}
+
 function filterRetailInvoiceLines(lines = []) {
   return lines.filter(
     (line) => line.feeType !== 'service' && line.feeType !== 'serviceChargeTax'
@@ -3991,7 +4049,11 @@ async function getStripeInvoiceRecordForOrder(orderNumber, stripeAccountId = nul
     return preferred
   }
 
-  return stripe.invoices.retrieve(preferred.id, buildStripeConnectRequestOptions(stripeAccountId))
+  return stripe.invoices.retrieve(
+    preferred.id,
+    {},
+    buildStripeConnectRequestOptions(stripeAccountId)
+  )
 }
 
 async function getStripeInvoiceTaxForOrder(orderNumber) {
@@ -4019,6 +4081,7 @@ async function enrichPaymentLinkWithInvoiceTax(paymentLink) {
     const stripeAccountId = paymentLink.stripeAccountId || null
     const invoice = await stripe.invoices.retrieve(
       invoiceId,
+      {},
       buildStripeConnectRequestOptions(stripeAccountId)
     )
     const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
@@ -4062,7 +4125,7 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
     if (String(storedId).startsWith('in_')) {
       const stripeAccountId = cached.stripeAccountId || null
       const connectOpts = buildStripeConnectRequestOptions(stripeAccountId)
-      const invoice = await stripe.invoices.retrieve(storedId, connectOpts)
+      const invoice = await stripe.invoices.retrieve(storedId, {}, connectOpts)
       if (invoice.status === 'open' && invoice.hosted_invoice_url) {
         return {
           ...cached,
@@ -4707,8 +4770,11 @@ async function findStripeInvoiceForOrder(orderNumber) {
 }
 
 async function archiveManualOrderStripeInvoice(invoiceId, stripeAccountId = null) {
-  const connectOpts = buildStripeConnectRequestOptions(stripeAccountId)
-  const invoice = await stripe.invoices.retrieve(invoiceId, connectOpts)
+  const { invoice, stripeAccountId: resolvedAccountId } = await retrieveManualOrderStripeInvoice(
+    invoiceId,
+    stripeAccountId
+  )
+  const connectOpts = buildStripeConnectRequestOptions(resolvedAccountId)
 
   if (invoice.status === 'paid') {
     const error = new Error('This invoice has already been paid and cannot be voided.')
@@ -4721,12 +4787,12 @@ async function archiveManualOrderStripeInvoice(invoiceId, stripeAccountId = null
   }
 
   if (invoice.status === 'draft') {
-    await stripe.invoices.del(invoiceId, connectOpts)
+    await stripe.invoices.del(invoiceId, {}, connectOpts)
     return 'deleted'
   }
 
   if (invoice.status === 'open') {
-    await stripe.invoices.voidInvoice(invoiceId, connectOpts)
+    await stripe.invoices.voidInvoice(invoiceId, {}, connectOpts)
     return 'voided'
   }
 
@@ -4736,6 +4802,10 @@ async function archiveManualOrderStripeInvoice(invoiceId, stripeAccountId = null
 async function voidManualOrderStripePayment(orderNumber) {
   if (!stripe) {
     return { skipped: true, reason: 'Stripe is not configured on the server' }
+  }
+
+  if (!stripeConnectedAccountsCache.loadedAt) {
+    await refreshStripeConnectedAccountsCache()
   }
 
   const normalizedOrderNumber = String(orderNumber || '').trim()
@@ -4754,7 +4824,11 @@ async function voidManualOrderStripePayment(orderNumber) {
 
   if (archiveActions.length === 0) {
     const store = await readManualOrderPaymentLinks()
-    const storedAccountId = store[normalizedOrderNumber]?.stripeAccountId || null
+    const storedRecord = store[normalizedOrderNumber] || null
+    const storedAccountId = resolveManualOrderStripeAccountId({
+      stripeAccountId: storedRecord?.stripeAccountId,
+      url: storedRecord?.url
+    })
     const invoices = await findStripeInvoicesForOrder(normalizedOrderNumber, storedAccountId)
     const voidable = invoices.filter((invoice) => ['draft', 'open'].includes(invoice.status))
     if (voidable.length === 0) {
@@ -4784,12 +4858,31 @@ async function archiveManualOrderStripePaymentResources(existingRecord, orderNum
 
   const actions = []
   const handledInvoiceIds = new Set()
+  const resolvedAccountId = resolveManualOrderStripeAccountId({
+    stripeAccountId: existingRecord?.stripeAccountId,
+    url: existingRecord?.url
+  })
 
   const archiveInvoice = async (invoiceId, source, stripeAccountId = null) => {
     if (!invoiceId || handledInvoiceIds.has(invoiceId)) return
     handledInvoiceIds.add(invoiceId)
-    const result = await archiveManualOrderStripeInvoice(invoiceId, stripeAccountId)
-    actions.push({ type: 'invoice', id: invoiceId, result, source })
+    try {
+      const accountId =
+        resolveManualOrderStripeAccountId({
+          stripeAccountId: stripeAccountId || resolvedAccountId,
+          url: existingRecord?.url
+        }) || null
+      const result = await archiveManualOrderStripeInvoice(invoiceId, accountId)
+      actions.push({ type: 'invoice', id: invoiceId, result, source })
+    } catch (error) {
+      if (error.code === 'INVOICE_ALREADY_PAID') throw error
+      if (isStripeMissingInvoiceError(error)) {
+        console.warn(`Stripe invoice not found during archive (${source}):`, invoiceId, error.message)
+        actions.push({ type: 'invoice', id: invoiceId, result: 'not_found', source })
+        return
+      }
+      throw error
+    }
   }
 
   const sessionId =
@@ -4800,7 +4893,7 @@ async function archiveManualOrderStripePaymentResources(existingRecord, orderNum
     try {
       const session = await stripe.checkout.sessions.retrieve(sessionId)
       if (session.invoice) {
-        await archiveInvoice(session.invoice, 'checkout_session')
+        await archiveInvoice(session.invoice, 'checkout_session', resolvedAccountId)
       }
       if (session.status === 'open') {
         await stripe.checkout.sessions.expire(sessionId)
@@ -4825,16 +4918,23 @@ async function archiveManualOrderStripePaymentResources(existingRecord, orderNum
   }
 
   if (existingRecord?.invoiceId) {
-    await archiveInvoice(existingRecord.invoiceId, 'stored_record', existingRecord.stripeAccountId || null)
+    await archiveInvoice(existingRecord.invoiceId, 'stored_record', resolvedAccountId)
   }
 
   const invoices = await findStripeInvoicesForOrder(
     orderNumber,
-    existingRecord?.stripeAccountId || null
+    resolvedAccountId
   )
   for (const invoice of invoices) {
     if (['draft', 'open'].includes(invoice.status)) {
-      await archiveInvoice(invoice.id, 'order_lookup')
+      await archiveInvoice(
+        invoice.id,
+        'order_lookup',
+        resolveManualOrderStripeAccountId({
+          stripeAccountId: resolvedAccountId,
+          invoice
+        })
+      )
     }
   }
 
@@ -5079,7 +5179,7 @@ async function createStripePaymentLinkForManualOrder(input) {
       },
       connectOpts
     )
-    const invoice = await stripe.invoices.finalizeInvoice(draftInvoice.id, connectOpts)
+    const invoice = await stripe.invoices.finalizeInvoice(draftInvoice.id, {}, connectOpts)
     const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
     const platformFeeCents = Number(invoice.application_fee_amount) || 0
 
