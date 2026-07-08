@@ -7,7 +7,6 @@ import { TAB_COPY } from '../constants/brand'
 const STEP = {
   INPUT: 'input',
   VALIDATED: 'validated',
-  PREVIEW: 'preview',
   SUBMIT_SUCCESS: 'submit_success'
 }
 
@@ -42,11 +41,23 @@ async function parseErrorFromResponse(response) {
   return { message, details, status: response.status }
 }
 
+function parseGoPuffApiResult(data) {
+  if (data == null || typeof data !== 'object') {
+    return { ok: true }
+  }
+  if (data.status === false || data.success === false) {
+    return {
+      ok: false,
+      message: data.message || data.error || 'GoPuff request failed'
+    }
+  }
+  return { ok: true }
+}
+
 const GoPuffOrderChecker = () => {
   const [orderNumber, setOrderNumber] = useState('')
   const [step, setStep] = useState(STEP.INPUT)
   const [validationJson, setValidationJson] = useState(null)
-  const [previewJson, setPreviewJson] = useState(null)
   const [submitJson, setSubmitJson] = useState(null)
   const [resendJson, setResendJson] = useState(null)
   const [loading, setLoading] = useState(null)
@@ -57,9 +68,7 @@ const GoPuffOrderChecker = () => {
   const startOver = useCallback(() => {
     setStep(STEP.INPUT)
     setValidationJson(null)
-    setPreviewJson(null)
     setSubmitJson(null)
-    setResendJson(null)
     setResendJson(null)
     setError(null)
     setLoading(null)
@@ -70,49 +79,41 @@ const GoPuffOrderChecker = () => {
   const handleValidate = async () => {
     setError(null)
     setValidationJson(null)
-    setPreviewJson(null)
     setSubmitJson(null)
     setResendJson(null)
+    setShowSubmitConfirm(false)
+
     const trimmed = orderNumber.trim()
     if (!trimmed) {
       setError({ message: 'Enter an order number to validate.' })
       return
     }
+
     setLoading('validate')
     try {
       const q = new URLSearchParams({ orderNumber: trimmed })
       const res = await apiFetch(`/api/validate-order?${q}`)
+      const data = await res.json().catch(() => null)
+
       if (!res.ok) {
-        setError(await parseErrorFromResponse(res))
+        setError({
+          message: data?.message || data?.error || `Request failed (${res.status})`,
+          details: data
+        })
         return
       }
-      const data = await res.json()
+
+      const result = parseGoPuffApiResult(data)
+      if (!result.ok) {
+        setValidationJson(data)
+        setError({ message: result.message, details: data })
+        return
+      }
+
       setValidationJson(data)
-      setPreviewJson(null)
       setSubmitJson(null)
       setStep(STEP.VALIDATED)
-    } catch (e) {
-      setError({ message: e.message || 'Network error' })
-    } finally {
-      setLoading(null)
-    }
-  }
-
-  const handlePreview = async () => {
-    setError(null)
-    const trimmed = orderNumber.trim()
-    setLoading('preview')
-    try {
-      const q = new URLSearchParams({ orderNumber: trimmed })
-      const res = await apiFetch(`/api/preview-order?${q}`)
-      if (!res.ok) {
-        setError(await parseErrorFromResponse(res))
-        return
-      }
-      const data = await res.json()
-      setPreviewJson(data)
-      setSubmitJson(null)
-      setStep(STEP.PREVIEW)
+      setShowSubmitConfirm(true)
     } catch (e) {
       setError({ message: e.message || 'Network error' })
     } finally {
@@ -149,11 +150,22 @@ const GoPuffOrderChecker = () => {
     try {
       const q = new URLSearchParams({ orderNumber: trimmed })
       const res = await apiFetch(`/api/submit-order?${q}`)
+      const data = await res.json().catch(() => null)
+
       if (!res.ok) {
-        setError(await parseErrorFromResponse(res))
+        setError({
+          message: data?.message || data?.error || `Request failed (${res.status})`,
+          details: data
+        })
         return
       }
-      const data = await res.json()
+
+      const result = parseGoPuffApiResult(data)
+      if (!result.ok) {
+        setError({ message: result.message, details: data })
+        return
+      }
+
       setSubmitJson(data)
       setStep(STEP.SUBMIT_SUCCESS)
     } catch (e) {
@@ -171,7 +183,7 @@ const GoPuffOrderChecker = () => {
         <PageHeader
           icon={ClipboardCheck}
           title={TAB_COPY['gopuff-checker'].title}
-          description="Enter an order number, validate, preview, then submit or resend to GoPuff — three steps, done."
+          description="Enter an order number, validate it, then confirm to submit to GoPuff."
         />
 
         <div className="space-y-4">
@@ -208,7 +220,7 @@ const GoPuffOrderChecker = () => {
                       Validating…
                     </>
                   ) : (
-                    'Validate'
+                    'Validate order'
                   )}
                 </button>
                 {!showResendConfirm ? (
@@ -264,34 +276,6 @@ const GoPuffOrderChecker = () => {
 
             {step === STEP.VALIDATED && (
               <>
-                <button
-                  type="button"
-                  onClick={handlePreview}
-                  disabled={busy}
-                  className="inline-flex items-center justify-center rounded-md bg-bevvi-primary-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-bevvi-primary-700 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:opacity-50"
-                >
-                  {loading === 'preview' ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading preview…
-                    </>
-                  ) : (
-                    'Load order details'
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={startOver}
-                  disabled={busy}
-                  className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 focus:ring-offset-2 disabled:opacity-50"
-                >
-                  Start over
-                </button>
-              </>
-            )}
-
-            {step === STEP.PREVIEW && (
-              <>
                 {!showSubmitConfirm ? (
                   <button
                     type="button"
@@ -302,15 +286,17 @@ const GoPuffOrderChecker = () => {
                     Submit to GoPuff
                   </button>
                 ) : (
-                  <div className="w-full rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
-                    <p className="font-medium">Send this order to GoPuff?</p>
-                    <p className="mt-1 text-amber-800">This uses the same order number you validated and previewed.</p>
+                  <div className="w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-900">
+                    <p className="font-medium">Order validated successfully.</p>
+                    <p className="mt-1 text-emerald-800">
+                      Submit order <strong>{orderNumber.trim()}</strong> to GoPuff?
+                    </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={handleSubmit}
                         disabled={busy}
-                        className="inline-flex items-center justify-center rounded-md bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50"
+                        className="inline-flex items-center justify-center rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
                       >
                         {loading === 'submit' ? (
                           <>
@@ -318,16 +304,16 @@ const GoPuffOrderChecker = () => {
                             Submitting…
                           </>
                         ) : (
-                          'Yes, send to GoPuff'
+                          'Yes, submit order'
                         )}
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowSubmitConfirm(false)}
                         disabled={busy}
-                        className="inline-flex items-center justify-center rounded-md border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                        className="inline-flex items-center justify-center rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
                       >
-                        Cancel
+                        Not now
                       </button>
                     </div>
                   </div>
@@ -367,19 +353,11 @@ const GoPuffOrderChecker = () => {
             </div>
           )}
 
-          {step === STEP.VALIDATED && <JsonPanel title="Validation response" data={validationJson} />}
-          {step === STEP.PREVIEW && (
-            <>
-              <JsonPanel title="Validation response" data={validationJson} />
-              <JsonPanel title="Preview response" data={previewJson} />
-            </>
+          {(step === STEP.VALIDATED || step === STEP.SUBMIT_SUCCESS) && (
+            <JsonPanel title="Validation response" data={validationJson} />
           )}
           {step === STEP.SUBMIT_SUCCESS && (
-            <>
-              <JsonPanel title="Validation response" data={validationJson} />
-              <JsonPanel title="Preview response" data={previewJson} />
-              <JsonPanel title="Submit response" data={submitJson} />
-            </>
+            <JsonPanel title="Submit response" data={submitJson} />
           )}
           {resendJson != null && <JsonPanel title="Resend response" data={resendJson} />}
         </div>

@@ -21,7 +21,7 @@ export const TAB_COPY = {
   },
   'gopuff-checker': {
     title: 'GoPuff Checker',
-    description: 'Validate, preview, and submit corporate orders to GoPuff in three steps.'
+    description: 'Validate a corporate order, then confirm to submit it to GoPuff.'
   },
   'manual-order': {
     title: 'Manual Order',
