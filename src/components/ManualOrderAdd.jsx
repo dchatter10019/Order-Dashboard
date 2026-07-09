@@ -953,6 +953,7 @@ const ManualOrderAdd = () => {
   const [service, setService] = useState('0')
   const [serviceChargeTax, setServiceChargeTax] = useState('0')
   const [shipping, setShipping] = useState('0')
+  const [additionalFees, setAdditionalFees] = useState('0')
   const [tipPercent, setTipPercent] = useState('0')
   const [loadingStores, setLoadingStores] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -996,6 +997,7 @@ const ManualOrderAdd = () => {
     setService('0')
     setServiceChargeTax('0')
     setShipping('0')
+    setAdditionalFees('0')
     setTipPercent('0')
     setValidationResults(null)
     setMessage(null)
@@ -1046,6 +1048,7 @@ const ManualOrderAdd = () => {
     applyMoney(parsed.service, setService)
     applyMoney(parsed.serviceChargeTax, setServiceChargeTax)
     applyMoney(parsed.shipping, setShipping)
+    applyMoney(parsed.additionalFees ?? parsed.networkServiceCharge, setAdditionalFees)
 
     if (Array.isArray(parsed.products) && parsed.products.length > 0) {
       setLineItems(
@@ -1166,11 +1169,12 @@ const ManualOrderAdd = () => {
       add(service) +
       add(serviceChargeTax) +
       add(shipping) +
+      add(additionalFees) +
       add(tip) +
       add(engraving) -
       add(discount)
     )
-  }, [subTotal, delivery, discount, engraving, salesTax, service, serviceChargeTax, shipping, tip])
+  }, [subTotal, delivery, discount, engraving, salesTax, service, serviceChargeTax, shipping, additionalFees, tip])
 
   const updateLineItem = (index, field, value) => {
     setLineItems(prev => prev.map((item, i) => (i === index ? { ...item, [field]: value } : item)))
@@ -1228,6 +1232,7 @@ const ManualOrderAdd = () => {
     shipping,
     service,
     engraving,
+    additionalFees,
     tip,
     subTotal
   }), [
@@ -1240,6 +1245,7 @@ const ManualOrderAdd = () => {
     shipping,
     service,
     engraving,
+    additionalFees,
     tip,
     subTotal
   ])
@@ -1297,6 +1303,7 @@ const ManualOrderAdd = () => {
             delivery: input.delivery,
             shipping: input.shipping,
             service: input.service,
+            additionalFees: input.additionalFees,
             engraving: input.engraving,
             tip: input.tip
           })
@@ -1339,6 +1346,7 @@ const ManualOrderAdd = () => {
     taxCalculationInput.delivery,
     taxCalculationInput.shipping,
     taxCalculationInput.service,
+    taxCalculationInput.additionalFees,
     taxCalculationInput.engraving,
     taxCalculationInput.tip,
     taxCalculationInput.subTotal
@@ -1397,6 +1405,7 @@ const ManualOrderAdd = () => {
     service,
     serviceChargeTax,
     shipping,
+    additionalFees,
     tip
   })
 
@@ -1463,6 +1472,7 @@ const ManualOrderAdd = () => {
           service,
           serviceChargeTax,
           engraving,
+          additionalFees,
           tip,
           discount
         }
@@ -1502,6 +1512,8 @@ const ManualOrderAdd = () => {
       giftNoteCharge: submitResponse.payload?.engraving ?? snapshot.engraving ?? engraving,
       engraving: submitResponse.payload?.engraving ?? snapshot.engraving ?? engraving,
       tip: submitResponse.payload?.tip ?? snapshot.tip ?? tip,
+      additionalFees: submitResponse.payload?.networkServiceCharge ?? snapshot.additionalFees ?? additionalFees,
+      networkServiceCharge: submitResponse.payload?.networkServiceCharge ?? snapshot.additionalFees ?? additionalFees,
       discount: submitResponse.payload?.discount ?? snapshot.discount ?? discount,
       country: 'US',
       regenerate
@@ -1979,7 +1991,8 @@ const ManualOrderAdd = () => {
                 ['service', service, setService, 'Service (10% of subtotal)'],
                 ['serviceChargeTax', serviceChargeTax, setServiceChargeTax, 'Service charge tax'],
                 ['delivery', delivery, setDelivery, 'Delivery'],
-                ['shipping', shipping, setShipping, 'Shipping']
+                ['shipping', shipping, setShipping, 'Shipping'],
+                ['additionalFees', additionalFees, setAdditionalFees, 'Additional Fees']
               ].map(([id, value, setter, label]) => (
                 <div key={id}>
                   <label htmlFor={id} className={labelClass}>
@@ -2056,6 +2069,12 @@ const ManualOrderAdd = () => {
               </div>
             </div>
             <div className="space-y-1 text-sm text-gray-600">
+              {(parseFloat(additionalFees) || 0) > 0 && (
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4">
+                  <span>Additional fees</span>
+                  <span className="tabular-nums font-medium text-gray-900">{formatDollarAmount(additionalFees)}</span>
+                </div>
+              )}
               {tipAmount > 0 && (
                 <div className="flex flex-wrap items-baseline justify-between gap-x-4">
                   <span>Tip ({tipPercent}% of product cost)</span>

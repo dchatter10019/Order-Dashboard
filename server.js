@@ -3957,12 +3957,16 @@ async function calculateManualOrderStripeTax({
   delivery = 0,
   shipping = 0,
   service = 0,
+  additionalFees = 0,
+  networkServiceCharge = 0,
   engraving = 0,
   tip = 0
 }) {
   if (!stripe) {
     return { skipped: true, reason: 'Stripe is not configured on the server' }
   }
+
+  const additionalFeesAmount = resolveManualOrderAdditionalFees({ additionalFees, networkServiceCharge })
 
   const shippingAddress = buildStripeShippingAddress({
     streetAddress,
@@ -3981,6 +3985,7 @@ async function calculateManualOrderStripeTax({
     shipping,
     service,
     serviceChargeTax: 0,
+    additionalFees: additionalFeesAmount,
     engraving,
     tip,
     salesTax: 0,
@@ -3998,6 +4003,7 @@ async function calculateManualOrderStripeTax({
     shipping,
     service: 0,
     serviceChargeTax: 0,
+    additionalFees: additionalFeesAmount,
     engraving,
     tip,
     salesTax: 0,
@@ -4181,13 +4187,20 @@ function resolveManualOrderEmbeddedTax(input = {}) {
   )
 }
 
+function resolveManualOrderAdditionalFees(input = {}) {
+  if (input == null || typeof input !== 'object') {
+    return parseMoneyValue(input)
+  }
+  return parseMoneyValue(input.additionalFees ?? input.networkServiceCharge)
+}
+
 function resolveManualOrderPaymentFees(input = {}) {
   const matchedProducts = input.matchedProducts || []
   const productSubtotal = computeManualOrderProductSubtotal(matchedProducts)
   const shipping = parseMoneyValue(input.shipping)
   const service = parseMoneyValue(input.service)
   const serviceChargeTax = parseMoneyValue(input.serviceChargeTax)
-  const networkServiceCharge = parseMoneyValue(input.networkServiceCharge)
+  const networkServiceCharge = resolveManualOrderAdditionalFees(input)
   const giftNoteCharge = parseMoneyValue(input.giftNoteCharge || input.engraving)
   const tip = parseMoneyValue(input.tip)
   const discount = parseMoneyValue(input.discount)
@@ -4330,6 +4343,7 @@ function resolveStripeTaxCodeForFeeType(feeType) {
       // Bevvi platform service charge is taxed at the standard rate, not as a generic service.
       return STRIPE_TAX_CODES.GENERAL_TANGIBLE
     case 'networkServiceCharge':
+    case 'additionalFees':
     case 'engraving':
     case 'giftNoteCharge':
       return STRIPE_TAX_CODES.GENERAL_SERVICE
@@ -4385,6 +4399,7 @@ function buildManualOrderStripeLineItems({
   service = 0,
   serviceChargeTax = 0,
   networkServiceCharge = 0,
+  additionalFees = 0,
   giftNoteCharge = 0,
   engraving = 0,
   tip = 0,
@@ -4392,6 +4407,7 @@ function buildManualOrderStripeLineItems({
   useAutomaticTax = false
 }) {
   const lines = []
+  const additionalFeesAmount = resolveManualOrderAdditionalFees({ additionalFees, networkServiceCharge })
 
   for (const product of matchedProducts) {
     const quantity = parseInt(product.quantity, 10) || 1
@@ -4411,7 +4427,7 @@ function buildManualOrderStripeLineItems({
     ['shipping', 'Shipping Fee', shipping],
     ['service', 'Service Charge', service],
     ['serviceChargeTax', 'Service Charge Tax', serviceChargeTax],
-    ['networkServiceCharge', 'Network Service Charge', networkServiceCharge],
+    ['additionalFees', 'Additional Fees', additionalFeesAmount],
     ['engraving', 'Gift Note / Engraving', giftNoteCharge || engraving],
     ['tip', 'Tip', tip]
   ]
@@ -5600,6 +5616,8 @@ app.post('/api/manual-order', async (req, res) => {
       service = 0,
       serviceChargeTax = 0,
       shipping = 0,
+      additionalFees = 0,
+      networkServiceCharge = 0,
       tip = 0
     } = req.body || {}
 
@@ -5663,6 +5681,7 @@ app.post('/api/manual-order', async (req, res) => {
     }
 
     const subTotal = matchedProducts.reduce((sum, p) => sum + p.price * p.quantity, 0)
+    const additionalFeesAmount = resolveManualOrderAdditionalFees({ additionalFees, networkServiceCharge })
     const total =
       subTotal +
       parseFloat(delivery || 0) +
@@ -5671,7 +5690,8 @@ app.post('/api/manual-order', async (req, res) => {
       parseFloat(serviceChargeTax || 0) +
       parseFloat(shipping || 0) +
       parseFloat(tip || 0) +
-      parseFloat(engraving || 0) -
+      parseFloat(engraving || 0) +
+      additionalFeesAmount -
       parseFloat(discount || 0)
 
     const payload = {
@@ -5689,6 +5709,7 @@ app.post('/api/manual-order', async (req, res) => {
       service: formatManualOrderMoney(service),
       serviceChargeTax: formatManualOrderMoney(serviceChargeTax),
       shipping: formatManualOrderMoney(shipping),
+      networkServiceCharge: formatManualOrderMoney(additionalFeesAmount),
       state: String(state).trim(),
       storeName: String(storeName).trim(),
       streetAddress: String(streetAddress).trim(),
@@ -5778,6 +5799,8 @@ app.post('/api/manual-order/calculate-tax', async (req, res) => {
       delivery = 0,
       shipping = 0,
       service = 0,
+      additionalFees = 0,
+      networkServiceCharge = 0,
       engraving = 0,
       tip = 0
     } = req.body || {}
@@ -5796,6 +5819,8 @@ app.post('/api/manual-order/calculate-tax', async (req, res) => {
       delivery,
       shipping,
       service,
+      additionalFees,
+      networkServiceCharge,
       engraving,
       tip
     })
@@ -5874,6 +5899,7 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       service,
       serviceChargeTax,
       networkServiceCharge,
+      additionalFees,
       giftNoteCharge,
       engraving,
       tip,
@@ -5944,6 +5970,7 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       service,
       serviceChargeTax,
       networkServiceCharge,
+      additionalFees,
       giftNoteCharge,
       engraving,
       tip,
