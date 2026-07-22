@@ -7,6 +7,7 @@ import AIAssistant from './AIAssistant'
 import GoPuffOrderChecker from './GoPuffOrderChecker'
 import ManualOrderAdd from './ManualOrderAdd'
 import Logo from './Logo'
+import { InvoicingRulesProvider } from '../context/InvoicingRulesContext'
 import { BRAND, TAB_COPY } from '../constants/brand'
 
 const MainDashboard = ({ onLogout }) => {
@@ -53,6 +54,7 @@ const MainDashboard = ({ onLogout }) => {
   const activeCopy = TAB_COPY[activeTab]
 
   return (
+    <InvoicingRulesProvider>
     <div className="bevvi-shell">
       <header className="bevvi-shell-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -220,6 +222,7 @@ const MainDashboard = ({ onLogout }) => {
         </div>
       </main>
     </div>
+    </InvoicingRulesProvider>
   )
 }
 

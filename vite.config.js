@@ -1,5 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 
 const apiProxy = {
   '/api': {
@@ -12,6 +16,11 @@ const apiProxy = {
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      '@lib/invoicing-rules': path.resolve(projectRoot, 'lib/invoicingRulesEngine.cjs')
+    }
+  },
   server: {
     port: 3000,
     proxy: { ...apiProxy }

@@ -6,6 +6,40 @@ const path = require('path')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 
+const {
+  parseInvoicingRulesMarkdown,
+  createInvoicingRulesEngine
+} = require('./lib/invoicingRulesEngine.cjs')
+
+const INVOICING_RULES_PATH =
+  process.env.INVOICING_RULES_PATH || path.join(__dirname, 'docs/Bevvi-Invoicing-Rules.md')
+
+let invoicingRulesCache = {
+  mtimeMs: 0,
+  config: null,
+  loadedAt: null,
+  sourcePath: INVOICING_RULES_PATH
+}
+
+async function loadInvoicingRulesFromFile(force = false) {
+  const stat = await fs.stat(INVOICING_RULES_PATH)
+  if (!force && invoicingRulesCache.config && stat.mtimeMs === invoicingRulesCache.mtimeMs) {
+    return invoicingRulesCache
+  }
+
+  const markdown = await fs.readFile(INVOICING_RULES_PATH, 'utf8')
+  const config = parseInvoicingRulesMarkdown(markdown)
+  invoicingRulesCache = {
+    mtimeMs: stat.mtimeMs,
+    config,
+    loadedAt: new Date().toISOString(),
+    sourcePath: INVOICING_RULES_PATH
+  }
+
+  console.log(`📋 Invoicing rules loaded from ${INVOICING_RULES_PATH}`)
+  return invoicingRulesCache
+}
+
 /** Calendar YYYY-MM-DD in a specific IANA zone (not server local / not raw UTC date). */
 const DEFAULT_ORDER_TIMEZONE = process.env.BEVVI_ORDER_TIMEZONE || 'America/New_York'
 const MAX_ORDER_DATE_RANGE_DAYS = 31
@@ -7381,6 +7415,26 @@ app.use((error, req, res, next) => {
   })
 })
 
+app.get('/api/invoicing-rules', async (req, res) => {
+  try {
+    const cache = await loadInvoicingRulesFromFile()
+    res.json({
+      success: true,
+      rules: cache.config,
+      loadedAt: cache.loadedAt,
+      sourcePath: cache.sourcePath
+    })
+  } catch (error) {
+    console.error('❌ Failed to load invoicing rules:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoicing rules',
+      message: error.message,
+      sourcePath: INVOICING_RULES_PATH
+    })
+  }
+})
+
 app.listen(PORT, async () => {
   console.log(`🚀 Bevvi Order Tracking System server running on port ${PORT}`)
   console.log(`📊 API available at http://localhost:${PORT}/api`)
@@ -7417,6 +7471,12 @@ app.listen(PORT, async () => {
   
   console.log(`📦 Loading all Bevvi products on startup...`)
   await loadAllProducts()
+  try {
+    await loadInvoicingRulesFromFile(true)
+    console.log(`📋 Invoicing rules API: GET /api/invoicing-rules (${INVOICING_RULES_PATH})`)
+  } catch (error) {
+    console.warn(`⚠️ Could not load invoicing rules on startup: ${error.message}`)
+  }
   console.log(`✅ Server ready with products cache loaded`)
 
   if (stripe) {

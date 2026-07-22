@@ -6,7 +6,7 @@ import StatusFilter from './StatusFilter'
 import DeliveryFilter from './DeliveryFilter'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch, getApiUrl } from '../utils/api'
-import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
+import { isIncludedOrderStatus, useInvoicingRules } from '../utils/invoicingRules'
 import { useOrdersFooter } from '../context/OrdersFooterContext'
 import { useOrderNotifications } from '../context/OrderNotificationsContext'
 import {
@@ -88,6 +88,7 @@ const getOrderDateRangeError = (dateRange) => {
 const Dashboard = ({ onSwitchToAI }) => {
   const { setOrdersStatus } = useOrdersFooter()
   const { enabled: orderNotificationsEnabled, toggleEnabled: toggleOrderNotifications } = useOrderNotifications()
+  const { engine: invoicingEngine } = useInvoicingRules()
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -538,8 +539,10 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   // Calculate filtered summary statistics
   const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
-  const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter(order => 
-    !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+  const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter((order) =>
+    invoicingEngine
+      ? invoicingEngine.isIncludedOrderStatus(order.status)
+      : isIncludedOrderStatus(order.status)
   )
   const filteredTotalRevenue = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
@@ -573,135 +576,35 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
   
   const filteredAverageOrderValue = filteredAcceptedOrders.length > 0 ? filteredTotalRevenue / filteredAcceptedOrders.length : 0
-  
-  // Fee calculation function based on Bevvi transaction fee rules
-  const calculateFeeRate = (retailer, customer) => {
-    // Normalize inputs for comparison (trim and lowercase for case-insensitive matching)
-    const normalizedCustomer = (customer || '').trim().toLowerCase()
-    const normalizedRetailer = (retailer || '').trim().toLowerCase()
-    
-    // Priority 1: VistaJet Customer Rule (8%)
-    if (normalizedCustomer === 'vistajet') {
-      return 0.08
-    }
-    
-    // Priority 2: Total Wine Manual (0%)
-    if (normalizedRetailer === 'total wine manual') {
-      return 0
-    }
-    
-    // Priority 3: 10% Retailer List Rule
-    const tenPercentRetailers = [
-      'wine & spirits market',
-      'freshco',
-      'national liquor and package',
-      'mavy clippership wine & spirits',
-      'liquor master',
-      "sam's liquor & market",
-      'dallas fine wine',
-      'super duper liquor',
-      'fountain liquor & spirits',
-      'aficionados',
-      'wine & spirits discount warehouse',
-      'youbooze',
-      'garfields beverage',
-      'royal wines & spirits'
-    ]
-    if (tenPercentRetailers.includes(normalizedRetailer)) {
-      return 0.10
-    }
 
-    // Priority 3b: All stores starting with GoPuff (15%)
-    if (normalizedRetailer.startsWith('gopuff')) {
-      return 0.15
-    }
-    
-    // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
-    const fifteenPercentRetailers = [
-      'ashburn wine shop',
-      'rezerve wine & spirits',
-      'san_point-loma_446',
-      'sea_southcenter_596',
-      'pit_pittsburgh_294',
-      'mia_miami_183'
-    ]
-    if (fifteenPercentRetailers.includes(normalizedRetailer)) {
-      return 0.15
-    }
-    
-    // Priority 5: Sendoso Customer Rule (12%)
-    if (normalizedCustomer === 'sendoso') {
-      return 0.12
-    }
-    
-    // Priority 6: In Good Taste Wines Rule (25%)
-    if (normalizedRetailer === 'in good taste wines') {
-      return 0.25
-    }
-    
-    // Priority 7: Default Rule (20%)
-    return 0.20
-  }
-
-  // Calculate fees for an order
-  const calculateOrderFees = (order) => {
-    const retailer = (order.establishment || '').trim()
-    const customer = (order.customerName || '').trim()
-    const revenue = parseFloat(order.revenue) || 0
-    
-    if (revenue === 0) {
-      return { serviceFee: 0, retailerFee: 0 }
-    }
-
-    const normalizedCustomer = customer.toLowerCase()
-    const establishmentKey = normalizeEstablishmentForFees(retailer)
-    // VistaJet (8%) still uses percentage; flat per-order fees for named retailers otherwise
-    if (normalizedCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
-      return { serviceFee: 0, retailerFee: FLAT_RETAILER_FEES_USD[establishmentKey] }
-    }
-    
-    // Determine fee rate based on retailer and customer rules
-    const feeRate = calculateFeeRate(retailer, customer)
-    
-    // Debug logging for Sendoso orders
-    if (customer === 'Sendoso' || customer.toLowerCase().includes('sendoso')) {
-      console.log(`🔍 Sendoso order detected:`, {
-        orderId: order.id,
-        customer: customer,
-        retailer: retailer,
-        revenue: revenue,
-        feeRate: feeRate,
-        calculatedRetailerFee: Math.round(revenue * feeRate * 100) / 100
-      })
-    }
-    
-    // Retailer fee = revenue × fee_rate
-    const retailerFee = Math.round(revenue * feeRate * 100) / 100
-    
-    return { serviceFee: 0, retailerFee }
-  }
-
-  // Calculate total service fee and retailer fee from API data and fee rules
+  // Calculate total service fee and retailer fee from API data and invoicing rules
   const totalFees = useMemo(() => {
     const fees = filteredAcceptedOrders.reduce((acc, order) => {
-      // Get service fee from API
       const apiServiceFee = parseFloat(order.serviceCharge) || 0
-      
-      // Calculate retailer fee based on fee rules
-      const { retailerFee } = calculateOrderFees(order)
-      
+      const { retailerFee } = invoicingEngine
+        ? invoicingEngine.calculateOrderFees(order)
+        : { retailerFee: 0 }
+
       return {
         serviceFee: acc.serviceFee + apiServiceFee,
         retailerFee: acc.retailerFee + retailerFee
       }
     }, { serviceFee: 0, retailerFee: 0 })
-    
+
     return {
       serviceFee: Math.round(fees.serviceFee * 100) / 100,
       retailerFee: Math.round(fees.retailerFee * 100) / 100,
       total: Math.round((fees.serviceFee + fees.retailerFee) * 100) / 100
     }
-  }, [filteredAcceptedOrders])
+  }, [filteredAcceptedOrders, invoicingEngine])
+
+  const orderRetailerFee = useCallback(
+    (order) =>
+      invoicingEngine
+        ? invoicingEngine.calculateOrderFees(order).retailerFee
+        : 0,
+    [invoicingEngine]
+  )
 
   // Fetch orders function (wrapped in useCallback to avoid dependency issues)
   const fetchOrders = useCallback(async () => {
@@ -1905,8 +1808,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={formatDollarAmount(calculateOrderFees(order).retailerFee)}>
-                              {formatDollarAmount(calculateOrderFees(order).retailerFee)}
+                            <div className="truncate" title={formatDollarAmount(orderRetailerFee(order))}>
+                              {formatDollarAmount(orderRetailerFee(order))}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
@@ -2014,7 +1917,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Retailer Fee</p>
-                              <p className="text-sm font-medium text-gray-900">{formatDollarAmount(calculateOrderFees(order).retailerFee)}</p>
+                              <p className="text-sm font-medium text-gray-900">{formatDollarAmount(orderRetailerFee(order))}</p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Total</p>

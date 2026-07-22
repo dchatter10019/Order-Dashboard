@@ -9,8 +9,5 @@ export function normalizeEstablishmentForFees(establishment) {
     .replace(/\s+/g, ' ')
 }
 
-/** Per-order flat retailer fees (non–VistaJet). Keys must use normalizeEstablishmentForFees output. */
-export const FLAT_RETAILER_FEES_USD = {
-  'sundance liquor and gifts': 40,
-  'heritage wine and liquor': 13
-}
+/** Per-order flat retailer fees — see invoicingRules.js (rules live in docs/Bevvi-Invoicing-Rules.md). */
+export const FLAT_RETAILER_FEES_USD = {}

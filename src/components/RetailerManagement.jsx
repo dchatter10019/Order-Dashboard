@@ -4,7 +4,7 @@ import DateRangePicker from './DateRangePicker'
 import PageHeader from './ui/PageHeader'
 import { TAB_COPY } from '../constants/brand'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
-import { normalizeEstablishmentForFees, FLAT_RETAILER_FEES_USD } from '../utils/feeMatching'
+import { isIncludedOrderStatus, useInvoicingRules } from '../utils/invoicingRules'
 import * as XLSX from 'xlsx-js-style'
 
 // xlsx community build drops fills; xlsx-js-style preserves them for .xlsx export
@@ -46,6 +46,7 @@ function mergeCellStyle(sheet, ref, patch) {
 }
 
 const RetailerManagement = () => {
+  const { engine: invoicingEngine } = useInvoicingRules()
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [apiError, setApiError] = useState(null)
@@ -67,112 +68,7 @@ const RetailerManagement = () => {
     dateRange: false
   })
 
-  // Fee calculation function based on Bevvi transaction fee rules (same as Dashboard)
-  const calculateFeeRate = (retailer, customer) => {
-    const normalizedCustomer = (customer || '').trim().toLowerCase()
-    const normalizedRetailer = (retailer || '').trim().toLowerCase()
-    
-    // Priority 1: VistaJet Customer Rule (8%)
-    if (normalizedCustomer === 'vistajet') {
-      return 0.08
-    }
-    
-    // Priority 2: Total Wine Manual (0%)
-    if (normalizedRetailer === 'total wine manual') {
-      return 0
-    }
-    
-    // Priority 3: 10% Retailer List Rule
-    const tenPercentRetailers = [
-      'wine & spirits market',
-      'freshco',
-      'national liquor and package',
-      'mavy clippership wine & spirits',
-      'liquor master',
-      "sam's liquor & market",
-      'dallas fine wine',
-      'super duper liquor',
-      'fountain liquor & spirits',
-      'aficionados',
-      'wine & spirits discount warehouse',
-      'youbooze',
-      'garfields beverage',
-      'royal wines & spirits'
-    ]
-    if (tenPercentRetailers.includes(normalizedRetailer)) {
-      return 0.10
-    }
-
-    // Priority 3b: All stores starting with GoPuff (15%)
-    if (normalizedRetailer.startsWith('gopuff')) {
-      return 0.15
-    }
-    
-    // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
-    const fifteenPercentRetailers = [
-      'ashburn wine shop',
-      'rezerve wine & spirits',
-      'san_point-loma_446',
-      'sea_southcenter_596',
-      'pit_pittsburgh_294',
-      'mia_miami_183'
-    ]
-    if (fifteenPercentRetailers.includes(normalizedRetailer)) {
-      return 0.15
-    }
-    
-    // Priority 5: Sendoso Customer Rule (12%)
-    if (normalizedCustomer === 'sendoso') {
-      return 0.12
-    }
-    
-    // Priority 6: In Good Taste Wines Rule (25%)
-    if (normalizedRetailer === 'in good taste wines') {
-      return 0.25
-    }
-    
-    // Priority 7: Default Rule (20%)
-    return 0.20
-  }
-
-  // Calculate fees for an order
-  const calculateOrderFees = (order) => {
-    const retailer = (order.establishment || '').trim()
-    const customer = (order.customerName || '').trim()
-    const revenue = parseFloat(order.revenue) || 0
-    
-    if (revenue === 0) {
-      return { serviceFee: 0, retailerFee: 0 }
-    }
-
-    const normalizedCustomer = customer.toLowerCase()
-    const establishmentKey = normalizeEstablishmentForFees(retailer)
-    const serviceFee = parseFloat(order.serviceCharge) || 0
-    if (normalizedCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
-      return { serviceFee, retailerFee: FLAT_RETAILER_FEES_USD[establishmentKey] }
-    }
-    
-    const feeRate = calculateFeeRate(retailer, customer)
-    const retailerFee = Math.round(revenue * feeRate * 100) / 100
-    
-    return { serviceFee, retailerFee }
-  }
-
-  /** Human-readable retailer-fee rule per order (must stay aligned with calculateOrderFees). */
-  const getOrderRetailerFeeLabel = (order) => {
-    const retailer = (order.establishment || '').trim()
-    const customer = (order.customerName || '').trim()
-    const normC = customer.toLowerCase()
-    const estKey = normalizeEstablishmentForFees(retailer)
-    if (normC === 'vistajet') return '8%'
-    if (normC !== 'vistajet' && FLAT_RETAILER_FEES_USD[estKey] != null) {
-      return `$${FLAT_RETAILER_FEES_USD[estKey]} / order`
-    }
-    const rate = calculateFeeRate(retailer, customer)
-    return `${Math.round(rate * 100)}%`
-  }
-
-  // Filter orders by date range and exclude pending/cancelled/rejected
+  // Filter orders by date range and billable statuses (see docs/Bevvi-Invoicing-Rules.md)
   const filteredOrders = useMemo(() => {
     return orders.filter(order => {
       // Filter by date range
@@ -186,10 +82,11 @@ const RetailerManagement = () => {
         }
       }
       
-      // Exclude pending, cancelled, rejected orders
-      return !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+      return invoicingEngine
+        ? invoicingEngine.isIncludedOrderStatus(order.status)
+        : isIncludedOrderStatus(order.status)
     })
-  }, [orders, dateRange])
+  }, [orders, dateRange, invoicingEngine])
 
   // Group orders by retailer and calculate metrics
   const retailerData = useMemo(() => {
@@ -214,7 +111,9 @@ const RetailerManagement = () => {
       retailer.orders.push(order)
       
       const revenue = parseFloat(order.revenue) || 0
-      const { serviceFee, retailerFee } = calculateOrderFees(order)
+      const { serviceFee, retailerFee } = invoicingEngine
+        ? invoicingEngine.calculateOrderFees(order)
+        : { serviceFee: parseFloat(order.serviceCharge) || 0, retailerFee: 0 }
       
       retailer.gmv += revenue
       retailer.serviceFee += serviceFee
@@ -226,7 +125,13 @@ const RetailerManagement = () => {
     // Convert map to array and round values
     return Array.from(retailerMap.values()).map(retailer => {
       const labelSet = new Set()
-      retailer.orders.forEach(order => labelSet.add(getOrderRetailerFeeLabel(order)))
+      retailer.orders.forEach((order) =>
+        labelSet.add(
+          invoicingEngine
+            ? invoicingEngine.getOrderRetailerFeeLabel(order)
+            : '—'
+        )
+      )
       const feeRuleSummary = [...labelSet].sort().join(', ') || '—'
       return {
         ...retailer,
@@ -237,7 +142,7 @@ const RetailerManagement = () => {
         totalCharges: Math.round(retailer.totalCharges * 100) / 100
       }
     })
-  }, [filteredOrders])
+  }, [filteredOrders, invoicingEngine])
 
   // Sort retailer data
   const sortedRetailerData = useMemo(() => {
@@ -391,75 +296,6 @@ const RetailerManagement = () => {
     return sanitized || 'Sheet1'
   }
 
-  // Determine fee rate based on retailer and customer
-  const determineFeeRate = (retailer, customer) => {
-    const normalizedCustomer = (customer || '').trim().toLowerCase()
-    const retailerTrim = (retailer || '').trim()
-    const retailerLower = retailerTrim.toLowerCase()
-    
-    // Priority 1: VistaJet Customer Rule (8%)
-    if (normalizedCustomer === 'vistajet') {
-      return 0.08
-    }
-    
-    // Priority 2: Total Wine Manual (0%)
-    if (retailerLower === 'total wine manual') {
-      return 0
-    }
-    
-    // Priority 3: 10% Retailer List Rule
-    const tenPercentRetailers = [
-      'Wine & Spirits Market',
-      'Freshco',
-      'National Liquor and Package',
-      'Mavy Clippership Wine & Spirits',
-      'LIQUOR MASTER',
-      "Sam's Liquor & Market",
-      'Dallas Fine Wine',
-      'Super Duper Liquor',
-      'Fountain Liquor & Spirits',
-      'Aficionados',
-      'Wine & Spirits Discount Warehouse',
-      'Youbooze',
-      'Garfields Beverage',
-      'ROYAL WINES & SPIRITS'
-    ]
-    if (tenPercentRetailers.includes(retailerTrim)) {
-      return 0.10
-    }
-
-    // Priority 3b: All stores starting with GoPuff (15%)
-    if (retailerLower.startsWith('gopuff')) {
-      return 0.15
-    }
-    
-    // Priority 4: 15% retailer list (Ashburn Wine Shop + GoPuff-style locations)
-    const fifteenPercentRetailers = [
-      'ashburn wine shop',
-      'rezerve wine & spirits',
-      'san_point-loma_446',
-      'sea_southcenter_596',
-      'pit_pittsburgh_294',
-      'mia_miami_183'
-    ]
-    if (fifteenPercentRetailers.includes(retailerLower)) {
-      return 0.15
-    }
-    
-    // Priority 5: Sendoso Customer Rule (12%)
-    if (normalizedCustomer === 'sendoso') {
-      return 0.12
-    }
-    
-    // Priority 6: In Good Taste Wines Rule (25%)
-    if (retailerTrim === 'In Good Taste Wines') {
-      return 0.25
-    }
-    
-    // Priority 7: Default Rule (20%)
-    return 0.20
-  }
-
   // Generate Excel report for a specific retailer
   const handleGenerateReport = (retailerName) => {
     try {
@@ -491,17 +327,9 @@ const RetailerManagement = () => {
       // Prepare transaction data for this retailer only
       const transactions = retailerOrders.map(order => {
         const subtotal = parseFloat(order.revenue) || 0
-        const normCustomer = (order.customerName || '').trim().toLowerCase()
-        const establishmentKey = normalizeEstablishmentForFees(order.establishment)
-        const feeRate = determineFeeRate(order.establishment, order.customerName)
-        let bevviFees = 0
-        if (subtotal > 0) {
-          if (normCustomer !== 'vistajet' && FLAT_RETAILER_FEES_USD[establishmentKey] != null) {
-            bevviFees = FLAT_RETAILER_FEES_USD[establishmentKey]
-          } else {
-            bevviFees = Math.round(subtotal * feeRate * 100) / 100
-          }
-        }
+        const { bevviFee, feeRateLabel, feeRate } = invoicingEngine
+          ? invoicingEngine.calculateBevviFee(order)
+          : { bevviFee: 0, feeRateLabel: '—', feeRate: null }
         const tax = parseFloat(order.tax) || 0
         const tip = parseFloat(order.tip) || 0
         const shippingFee = parseFloat(order.shippingFee) || 0
@@ -512,7 +340,12 @@ const RetailerManagement = () => {
         if (!totalAmount && subtotal > 0) {
           totalAmount = Math.round((subtotal + tax + tip + shippingFee + deliveryFee + platformServiceFee + serviceChargeTax) * 100) / 100
         }
-        const feeRatePct = subtotal > 0 ? Math.round((bevviFees / subtotal) * 1000) / 10 : 0
+        const feeRatePct =
+          feeRate != null
+            ? Math.round(feeRate * 1000) / 10
+            : subtotal > 0
+              ? Math.round((bevviFee / subtotal) * 1000) / 10
+              : 0
 
         return {
           id: order.id || order.ordernum || `ORD-${Date.now()}`,
@@ -521,8 +354,9 @@ const RetailerManagement = () => {
           customer: order.customerName || 'Unknown Customer',
           order_number: order.ordernum || order.id || 'N/A',
           subtotal,
-          bevviFees,
+          bevviFees: bevviFee,
           feeRatePct,
+          feeRateLabel,
           tax,
           tip,
           shippingFee,
@@ -710,8 +544,7 @@ const RetailerManagement = () => {
 
       sortedTransactions.forEach(txn => {
         const formattedDate = formatReportDate(txn.date)
-        const feePctStr =
-          txn.subtotal > 0 ? `${txn.feeRatePct}%` : '0%'
+        const feePctStr = txn.feeRateLabel || (txn.subtotal > 0 ? `${txn.feeRatePct}%` : '0%')
         retailerSheetData.push([
           txn.order_number,
           formattedDate,
