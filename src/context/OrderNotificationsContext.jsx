@@ -1,16 +1,24 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { getApiUrl } from '../utils/api'
 import {
+  addNotifiedOrderKeys,
   clearBrowserNotificationPromptDismissed,
   dismissBrowserNotificationPrompt,
+  fetchNotifiedOrderKeysFromServer,
   formatOrderNotificationBody,
   formatOrderNotificationTitle,
   getBrowserNotificationPermission,
+  getNotifiedOrderKeysForDate,
+  getOrderNotificationKey,
+  getTodayYmd,
   isBrowserNotificationPromptDismissed,
+  isOrderFromToday,
   isOrderNotificationsEnabled,
+  mergeNotifiedOrderKeys,
   requestBrowserNotificationPermission,
   setOrderNotificationsEnabled,
-  showBrowserOrderNotification
+  showBrowserOrderNotification,
+  syncNotifiedOrderKeysToServer
 } from '../utils/orderNotifications'
 
 const OrderNotificationsContext = createContext(null)
@@ -20,27 +28,43 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
   const [toasts, setToasts] = useState([])
   const [browserPermission, setBrowserPermission] = useState(getBrowserNotificationPermission)
   const [promptDismissed, setPromptDismissed] = useState(isBrowserNotificationPromptDismissed)
-  const recentOrderKeysRef = useRef(new Set())
+  const clientTimeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    []
+  )
+  const recentOrderKeysRef = useRef(getNotifiedOrderKeysForDate(getTodayYmd(clientTimeZone)))
 
-  const refreshBrowserPermission = useCallback(() => {
-    setBrowserPermission(getBrowserNotificationPermission())
-  }, [])
+  const markOrdersSeen = useCallback((orders) => {
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return
+    }
 
-  const dismissToast = useCallback((toastId) => {
-    setToasts((current) => current.filter((toast) => toast.id !== toastId))
-  }, [])
+    const todayYmd = getTodayYmd(clientTimeZone)
+    const todayOrders = orders.filter((order) => isOrderFromToday(order, clientTimeZone))
+    if (todayOrders.length === 0) {
+      return
+    }
 
-  const dismissAllToasts = useCallback(() => {
-    setToasts([])
-  }, [])
+    for (const order of todayOrders) {
+      const key = getOrderNotificationKey(order)
+      if (key) recentOrderKeysRef.current.add(key)
+    }
+
+    addNotifiedOrderKeys(todayOrders, todayYmd)
+    void syncNotifiedOrderKeysToServer(todayOrders, todayYmd)
+  }, [clientTimeZone])
 
   const notifyNewOrders = useCallback((orders) => {
     if (!enabled || !Array.isArray(orders) || orders.length === 0) {
       return
     }
 
+    const todayYmd = getTodayYmd(clientTimeZone)
     const freshOrders = orders.filter((order) => {
-      const key = String(order.ordernum || order.id || '')
+      if (!isOrderFromToday(order, clientTimeZone)) {
+        return false
+      }
+      const key = getOrderNotificationKey(order)
       if (!key || recentOrderKeysRef.current.has(key)) {
         return false
       }
@@ -51,6 +75,9 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
     if (freshOrders.length === 0) {
       return
     }
+
+    addNotifiedOrderKeys(freshOrders, todayYmd)
+    void syncNotifiedOrderKeysToServer(freshOrders, todayYmd)
 
     if (recentOrderKeysRef.current.size > 500) {
       recentOrderKeysRef.current = new Set(
@@ -71,7 +98,50 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
       }))
       return [...next, ...current]
     })
-  }, [enabled])
+  }, [enabled, clientTimeZone])
+
+  const refreshBrowserPermission = useCallback(() => {
+    setBrowserPermission(getBrowserNotificationPermission())
+  }, [])
+
+  const dismissToast = useCallback((toastId) => {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }, [])
+
+  const dismissAllToasts = useCallback(() => {
+    setToasts([])
+  }, [])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return undefined
+    }
+
+    let cancelled = false
+
+    const syncNotifiedKeys = async () => {
+      const todayYmd = getTodayYmd(clientTimeZone)
+      const localKeys = getNotifiedOrderKeysForDate(todayYmd)
+      const serverKeys = await fetchNotifiedOrderKeysFromServer(todayYmd)
+      if (cancelled) return
+
+      const merged = mergeNotifiedOrderKeys(localKeys, serverKeys)
+      recentOrderKeysRef.current = merged
+
+      if (serverKeys.size > 0) {
+        addNotifiedOrderKeys(
+          Array.from(serverKeys).map((key) => ({ ordernum: key })),
+          todayYmd
+        )
+      }
+    }
+
+    void syncNotifiedKeys()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, clientTimeZone])
 
   const requestBrowserPermission = useCallback(async () => {
     const result = await requestBrowserNotificationPermission()
@@ -183,6 +253,7 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
       dismissToast,
       dismissAllToasts,
       notifyNewOrders,
+      markOrdersSeen,
       requestBrowserPermission,
       dismissBrowserPrompt
     }),
@@ -195,6 +266,7 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
       dismissToast,
       dismissAllToasts,
       notifyNewOrders,
+      markOrdersSeen,
       requestBrowserPermission,
       dismissBrowserPrompt
     ]

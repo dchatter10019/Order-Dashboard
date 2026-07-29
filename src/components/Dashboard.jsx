@@ -87,10 +87,12 @@ const getOrderDateRangeError = (dateRange) => {
 
 const Dashboard = ({ onSwitchToAI }) => {
   const { setOrdersStatus } = useOrdersFooter()
-  const { enabled: orderNotificationsEnabled, toggleEnabled: toggleOrderNotifications } = useOrderNotifications()
+  const { enabled: orderNotificationsEnabled, toggleEnabled: toggleOrderNotifications, markOrdersSeen } = useOrderNotifications()
   const { engine: invoicingEngine } = useInvoicingRules()
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const fetchSeqRef = useRef(0)
   const [apiError, setApiError] = useState(null)
   const [dateRange, setDateRange] = useState(defaultOrdersDateRange)
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected'])
@@ -607,27 +609,35 @@ const Dashboard = ({ onSwitchToAI }) => {
   )
 
   // Fetch orders function (wrapped in useCallback to avoid dependency issues)
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async ({ background = false } = {}) => {
+    const seq = ++fetchSeqRef.current
+
     try {
       // Validate date range before making API call
       const dateRangeError = getOrderDateRangeError(dateRange)
       if (dateRangeError) {
         setApiError(dateRangeError)
-        setIsLoading(false)
+        if (!background) {
+          setIsLoading(false)
+        }
         return
       }
-      
-      setIsLoading(true)
-      setApiError(null)
-      // Clear old orders to prevent showing stale data while loading
-      setOrders([])
-      
+
+      if (background) {
+        setIsRefreshing(true)
+      } else {
+        setIsLoading(true)
+        setApiError(null)
+        // Only clear orders for explicit date-range loads, not background auto-refresh.
+        setOrders([])
+      }
+
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
       const clientTz = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)
       const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&timeZone=${clientTz}&t=${timestamp}&r=${randomId}`
-      console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}`)
-      
+      console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}${background ? ' (background)' : ''}`)
+
       const response = await apiFetch(apiUrl, {
         cache: 'no-store',
         headers: {
@@ -636,11 +646,15 @@ const Dashboard = ({ onSwitchToAI }) => {
           'Expires': '0'
         }
       })
-      
+
+      if (seq !== fetchSeqRef.current) {
+        return
+      }
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-      
+
       // Check if response is JSON before parsing
       const contentType = response.headers.get('content-type')
       if (!contentType || !contentType.includes('application/json')) {
@@ -648,37 +662,53 @@ const Dashboard = ({ onSwitchToAI }) => {
         console.error('❌ Expected JSON but got:', text.substring(0, 200))
         throw new Error(`Server returned non-JSON response (status ${response.status}). Check if API endpoint exists.`)
       }
-      
+
       const data = await response.json()
       console.log(`✅ Received ${data.data?.length || 0} orders ${data.cached ? '(cached)' : ''}${data.chunked ? ` (${data.chunks} chunks)` : ''}`)
-      
+
+      if (seq !== fetchSeqRef.current) {
+        return
+      }
+
       // Only update orders after ALL data is retrieved (not during chunking)
       if (data.data && Array.isArray(data.data)) {
         setOrders(data.data)
-      } else {
+        markOrdersSeen(data.data)
+      } else if (!background) {
         setOrders([])
       }
-      
+
       // Clear loading state AFTER orders are set to prevent number jumping
-      setIsLoading(false)
-      
+      if (!background) {
+        setIsLoading(false)
+      }
+
       // Update last refresh time
       const now = new Date()
       setLastRefreshTime(now)
-      
+
       // Calculate next refresh time (2 minutes from now)
       const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
       setNextRefreshTime(nextRefresh)
     } catch (error) {
+      if (seq !== fetchSeqRef.current) {
+        return
+      }
       console.error('❌ Error fetching orders:', error)
-      setApiError({
-        message: 'Network or system error',
-        status: 'Network Error',
-        details: error.message
-      })
-      setIsLoading(false)
+      if (!background) {
+        setApiError({
+          message: 'Network or system error',
+          status: 'Network Error',
+          details: error.message
+        })
+        setIsLoading(false)
+      }
+    } finally {
+      if (seq === fetchSeqRef.current && background) {
+        setIsRefreshing(false)
+      }
     }
-  }, [dateRange])
+  }, [dateRange, markOrdersSeen])
 
   // Auto-refresh functionality
   const toggleAutoRefresh = async () => {
@@ -839,8 +869,8 @@ const Dashboard = ({ onSwitchToAI }) => {
               // Update the last refresh time
               setLastRefreshTime(new Date(data.refreshTime))
               
-              // Automatically fetch fresh data
-              fetchOrders()
+              // Refresh in background so the order table stays visible.
+              fetchOrders({ background: true })
               
               // Show notification to user
               if (data.ordersCount > 0) {
@@ -883,7 +913,7 @@ const Dashboard = ({ onSwitchToAI }) => {
         eventSource.close()
       }
     }
-  }, []) // Only run once on mount
+  }, [fetchOrders])
 
   // Auto-start auto-refresh when component mounts
   useEffect(() => {
@@ -1961,12 +1991,12 @@ const Dashboard = ({ onSwitchToAI }) => {
             <button
               onClick={() => {
                 console.log('🔄 Manual refresh triggered')
-                fetchOrders()
+                fetchOrders({ background: true })
               }}
-              disabled={isLoading}
+              disabled={isLoading || isRefreshing}
               className="w-full sm:w-auto px-4 py-2 text-sm bg-bevvi-primary-600 text-white rounded-lg hover:bg-bevvi-primary-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
-              {isLoading ? (
+              {isLoading || isRefreshing ? (
                 <>
                   <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                   Refreshing...

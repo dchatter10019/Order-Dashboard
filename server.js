@@ -11,6 +11,12 @@ const {
   createInvoicingRulesEngine
 } = require('./lib/invoicingRulesEngine.cjs')
 
+const {
+  getNotifiedKeysForDate,
+  isOrderNotified,
+  addNotifiedKeysForDate
+} = require('./lib/orderNotificationStore.cjs')
+
 const INVOICING_RULES_PATH =
   process.env.INVOICING_RULES_PATH || path.join(__dirname, 'docs/Bevvi-Invoicing-Rules.md')
 
@@ -260,6 +266,14 @@ function getOrdersNotificationContextKey(dateRange) {
 
 function seedOrderNotificationBaseline(orders) {
   const list = Array.isArray(orders) ? orders : []
+  if (list.length === 0) {
+    // Keep existing baseline when a fetch returns no orders (avoid treating all orders as new later).
+    if (!ordersNotificationBaselineSeeded) {
+      ordersNotificationBaselineSeeded = true
+      console.log('🔔 Order notification baseline seeded with 0 order(s) (empty fetch)')
+    }
+    return
+  }
   knownOrderIds.clear()
   for (const order of list) {
     const key = getOrderNotificationKey(order)
@@ -267,6 +281,20 @@ function seedOrderNotificationBaseline(orders) {
   }
   ordersNotificationBaselineSeeded = true
   console.log(`🔔 Order notification baseline seeded with ${knownOrderIds.size} order(s)`)
+}
+
+function isOrderFromToday(order, timeZone = DEFAULT_ORDER_TIMEZONE) {
+  const today = getYyyyMmDdInTimeZone(new Date(), timeZone)
+  if (!today) return false
+  const orderLocalDate = getOrderLocalDate(order, timeZone)
+  return Boolean(orderLocalDate && orderLocalDate === today)
+}
+
+function isDateRangeTodayOnly(dateRange, timeZone = DEFAULT_ORDER_TIMEZONE) {
+  if (!dateRange?.startDate || !dateRange?.endDate) return false
+  if (dateRange.startDate !== dateRange.endDate) return false
+  const today = getYyyyMmDdInTimeZone(new Date(), timeZone)
+  return Boolean(today && dateRange.startDate === today)
 }
 
 function getSlackNotificationState(orderId) {
@@ -1235,9 +1263,10 @@ async function evaluateSlackNotifications(orders) {
 }
 
 /** Update in-memory orders used for Slack checks and re-run time-based Slack alerts. */
-async function refreshOrdersForAlerts(orders, dateRange = null) {
+async function refreshOrdersForAlerts(orders, dateRange = null, { notifyNewOrders = false } = {}) {
   const list = Array.isArray(orders) ? orders : []
   const range = dateRange || lastAutoRefreshRange || (global.lastRefreshedOrders && global.lastRefreshedOrders.dateRange) || null
+  const timeZone = range?.timeZone || DEFAULT_ORDER_TIMEZONE
   global.lastRefreshedOrders = {
     orders: list,
     timestamp: new Date(),
@@ -1251,9 +1280,15 @@ async function refreshOrdersForAlerts(orders, dateRange = null) {
     console.log(`🔔 Order notification context changed — reseeding baseline (${contextKey})`)
   }
 
-  const newOrders = detectNewOrders(list, { reseed: contextChanged })
-  if (newOrders.length > 0) {
-    notifyClientsOfNewOrders(newOrders)
+  const newOrders = detectNewOrders(list, { reseed: contextChanged, timeZone })
+  const shouldNotify =
+    notifyNewOrders &&
+    isDateRangeTodayOnly(range, timeZone) &&
+    newOrders.length > 0
+  if (shouldNotify) {
+    notifyClientsOfNewOrders(newOrders, timeZone)
+  } else if (!notifyNewOrders && isDateRangeTodayOnly(range, timeZone) && list.length > 0) {
+    markTodaysOrdersNotifiedOnServer(list, timeZone)
   }
 
   try {
@@ -3049,7 +3084,7 @@ function startAutoRefresh() {
           console.log(`✅ Auto-refresh successful: ${orders.length} orders updated`)
           lastAutoRefreshDate = new Date()
           
-          await refreshOrdersForAlerts(orders, lastAutoRefreshRange)
+          await refreshOrdersForAlerts(orders, lastAutoRefreshRange, { notifyNewOrders: true })
           
           // Notify all connected clients about the data refresh
           notifyClientsOfRefresh(orders.length, lastAutoRefreshDate)
@@ -3139,7 +3174,7 @@ function serializeOrderForNotification(order) {
   }
 }
 
-function detectNewOrders(orders, { reseed = false } = {}) {
+function detectNewOrders(orders, { reseed = false, timeZone = DEFAULT_ORDER_TIMEZONE } = {}) {
   if (reseed) {
     seedOrderNotificationBaseline(orders)
     return []
@@ -3148,12 +3183,18 @@ function detectNewOrders(orders, { reseed = false } = {}) {
   const list = Array.isArray(orders) ? orders : []
   const newOrders = []
   const currentKeys = new Set()
+  const today = getYyyyMmDdInTimeZone(new Date(), timeZone)
 
   for (const order of list) {
     const key = getOrderNotificationKey(order)
     if (!key) continue
     currentKeys.add(key)
-    if (ordersNotificationBaselineSeeded && !knownOrderIds.has(key)) {
+    if (
+      ordersNotificationBaselineSeeded &&
+      !knownOrderIds.has(key) &&
+      isOrderFromToday(order, timeZone) &&
+      !isOrderNotified(today, key)
+    ) {
       newOrders.push(serializeOrderForNotification(order))
     }
   }
@@ -3170,9 +3211,33 @@ function detectNewOrders(orders, { reseed = false } = {}) {
   return newOrders
 }
 
-function notifyClientsOfNewOrders(newOrders) {
+function markTodaysOrdersNotifiedOnServer(orders, timeZone = DEFAULT_ORDER_TIMEZONE) {
+  const today = getYyyyMmDdInTimeZone(new Date(), timeZone)
+  if (!today) return
+
+  const keys = []
+  for (const order of orders) {
+    if (!isOrderFromToday(order, timeZone)) continue
+    const key = getOrderNotificationKey(order)
+    if (key) keys.push(key)
+  }
+
+  if (keys.length > 0) {
+    addNotifiedKeysForDate(today, keys)
+  }
+}
+
+function notifyClientsOfNewOrders(newOrders, timeZone = DEFAULT_ORDER_TIMEZONE) {
   if (!Array.isArray(newOrders) || newOrders.length === 0) {
     return
+  }
+
+  const today = getYyyyMmDdInTimeZone(new Date(), timeZone)
+  const keys = newOrders
+    .map((order) => getOrderNotificationKey(order))
+    .filter(Boolean)
+  if (today && keys.length > 0) {
+    addNotifiedKeysForDate(today, keys)
   }
 
   const payload = JSON.stringify({
@@ -7295,6 +7360,50 @@ app.get('/api/auto-refresh/status', (req, res) => {
 })
 
 // Server-Sent Events endpoint for real-time updates
+app.get('/api/order-notifications/notified', (req, res) => {
+  const dateYmd = String(req.query.date || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid date',
+      message: 'Query param "date" must be YYYY-MM-DD'
+    })
+  }
+
+  const orderKeys = Array.from(getNotifiedKeysForDate(dateYmd))
+  res.json({
+    success: true,
+    dateYmd,
+    orderKeys,
+    count: orderKeys.length
+  })
+})
+
+app.post('/api/order-notifications/mark-seen', (req, res) => {
+  const dateYmd = String(req.body?.dateYmd || '').trim()
+  const orderKeys = Array.isArray(req.body?.orderKeys) ? req.body.orderKeys : []
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateYmd)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid date',
+      message: 'Body "dateYmd" must be YYYY-MM-DD'
+    })
+  }
+
+  const normalizedKeys = orderKeys
+    .map((key) => String(key || '').trim())
+    .filter(Boolean)
+
+  const added = addNotifiedKeysForDate(dateYmd, normalizedKeys)
+  res.json({
+    success: true,
+    dateYmd,
+    added,
+    total: getNotifiedKeysForDate(dateYmd).size
+  })
+})
+
 app.get('/api/events', (req, res) => {
   // Set headers for SSE
   res.writeHead(200, {
