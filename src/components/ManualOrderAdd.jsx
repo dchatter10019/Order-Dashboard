@@ -89,6 +89,11 @@ function parseQueryToNameAndSize(query) {
   return { name: trimmed, size: '' }
 }
 
+function isPlaceholderProductUpc(upc) {
+  const digits = String(upc || '').replace(/\D/g, '')
+  return !digits || /^0+$/.test(digits)
+}
+
 function rankProductsForQuery(products, query) {
   const q = String(query || '').trim().toLowerCase()
   if (!q) return []
@@ -96,7 +101,13 @@ function rankProductsForQuery(products, query) {
   const tokens = q.split(/\s+/).filter(Boolean)
 
   return products
+    .filter((product) => !isPlaceholderProductUpc(product.upc))
     .filter((product) => isValidProductSize(product) || parseQueryToNameAndSize(productFullLabel(product)).size)
+    .filter((product) => {
+      const packInQuery = parsePackSizeFromProductName(query)
+      if (!packInQuery) return true
+      return Boolean(parsePackSizeFromProductName(productFullLabel(product)))
+    })
     .map(product => {
       const fullName = productFullLabel(product).toLowerCase()
       const sizeLabel = formatProductSize(product).toLowerCase()
@@ -1197,7 +1208,7 @@ const ManualOrderAdd = () => {
         ? {
             ...item,
             query: displayName || productFullLabel(product),
-            name: productBaseName(product),
+            name: productFullLabel(product),
             size: formatProductSize(product)
           }
         : item

@@ -3420,9 +3420,26 @@ function formatCatalogProductSizeLabel(product) {
   return `${product.size} ${product.units || ''}`.trim()
 }
 
+function parsePackSizeInput(sizeInput) {
+  const normalized = normalizeSizeToken(sizeInput).replace(/\s*x\s*/gi, 'x')
+  const match = normalized.match(/^(\d+)x(\d+(?:\.\d+)?)\s*(oz|ml|l|cl|g|lb)$/)
+  if (!match) return null
+  return `${match[1]}x${match[2]} ${match[3].toUpperCase()}`
+}
+
+function isPlaceholderProductUpc(upc) {
+  const digits = String(upc || '').replace(/\D/g, '')
+  return !digits || /^0+$/.test(digits)
+}
+
+function isIncompletePackCatalogProduct(product) {
+  return isPackStyleCatalogProduct(product) && !parsePackSizeFromProductName(product?.name)
+}
+
 function isValidManualOrderSizeInput(sizeInput) {
   const normalized = normalizeSizeToken(sizeInput)
   if (!normalized) return false
+  if (parsePackSizeInput(sizeInput)) return true
   return /^\d+(?:\.\d+)?\s*(?:ml|l|oz|cl|g|lb|pk|pack|lt|liter|litre)$/.test(normalized)
 }
 
@@ -3448,6 +3465,16 @@ function productSizeLabel(product) {
 function sizeTokensMatch(product, sizeInput) {
   const inputNorm = normalizeSizeToken(sizeInput)
   if (!inputNorm) return true
+
+  const packInput = parsePackSizeInput(sizeInput)
+  const packInName = parsePackSizeFromProductName(product?.name)
+  if (packInput && packInName) {
+    return normalizeSizeFragment(packInput) === normalizeSizeFragment(packInName)
+  }
+  if (packInput && isPackStyleCatalogProduct(product)) {
+    const label = formatCatalogProductSizeLabel(product)
+    return Boolean(label && normalizeSizeFragment(label) === normalizeSizeFragment(packInput))
+  }
 
   const productSize = productSizeLabel(product)
   if (!productSize) return false
@@ -3492,6 +3519,8 @@ function scoreProductMatch(product, nameInput, sizeInput) {
   const fullName = normalizeSizeToken(product.name)
   const productBase = stripSizeSuffixFromName(product.name)
   const inputBase = stripSizeSuffixFromName(nameInput)
+  const packInput = parsePackSizeInput(sizeInput)
+  const packInName = parsePackSizeFromProductName(product.name)
 
   if (fullName === inputNorm) score += 120
   if (productBase && inputBase && productBase === inputBase) score += 100
@@ -3500,15 +3529,42 @@ function scoreProductMatch(product, nameInput, sizeInput) {
   if (fullName.includes(inputNorm)) score += 40
   if (productBase && inputBase && productBase.includes(inputBase)) score += 30
   if (sizeTokensMatch(product, sizeInput)) score += 35
+  if (packInput && packInName && normalizeSizeFragment(packInput) === normalizeSizeFragment(packInName)) {
+    score += 100
+  }
+  if (isPlaceholderProductUpc(product.upc)) score -= 80
+  if (packInput && isIncompletePackCatalogProduct(product)) score -= 120
 
   return score
+}
+
+function normalizeSizeFragment(str) {
+  return normalizeSizeToken(str).replace(/\s*x\s*/gi, 'x').replace(/\s+/g, '')
+}
+
+function nameContainsSizeLabel(productName, sizeLabel) {
+  if (!sizeLabel) return true
+
+  const nameNorm = normalizeSizeFragment(productName)
+  const sizeNorm = normalizeSizeFragment(sizeLabel)
+  if (sizeNorm && nameNorm.includes(sizeNorm)) return true
+
+  const packFromName = parsePackSizeFromProductName(productName)
+  if (packFromName && normalizeSizeFragment(packFromName) === sizeNorm) return true
+
+  const singleFromName = parseSizeFromCombinedName(productName)
+  if (singleFromName && normalizeSizeFragment(singleFromName) === sizeNorm) return true
+
+  return false
 }
 
 function buildManualOrderProductName(product) {
   const name = (product.name || '').trim()
   const sizeLabel = formatCatalogProductSizeLabel(product)
   if (!sizeLabel) return name
-  if (name.toLowerCase().includes(sizeLabel.toLowerCase())) return name
+  if (nameContainsSizeLabel(name, sizeLabel)) return name
+  // Bevvi master list uses full catalog names for packs — never synthesize "Name - 12x12 OZ".
+  if (isPackStyleCatalogProduct(product) || parsePackSizeInput(sizeLabel)) return name
   return `${name} - ${sizeLabel}`
 }
 
@@ -3519,17 +3575,29 @@ function findProductInCache(productName, sizeInput) {
   if (!sizeInputValue) {
     const parsedSize = parseSizeFromCombinedName(nameInput)
     if (parsedSize) sizeInputValue = parsedSize
+    const parsedPack = parsePackSizeFromProductName(nameInput)
+    if (parsedPack) sizeInputValue = parsedPack
   }
 
   if (!nameInput) return null
 
+  const exactNameMatch = productsCache.find(
+    (product) =>
+      !isPlaceholderProductUpc(product.upc) &&
+      normalizeSizeToken(product.name) === normalizeSizeToken(nameInput)
+  )
+  if (exactNameMatch) return exactNameMatch
+
+  const packInput = parsePackSizeInput(sizeInputValue)
   const requiresSizeMatch = isValidManualOrderSizeInput(sizeInputValue)
 
   const scored = productsCache
     .filter((product) => isValidCatalogProductSize(product))
+    .filter((product) => !isPlaceholderProductUpc(product.upc))
     .map((product) => ({ product, score: scoreProductMatch(product, nameInput, sizeInputValue) }))
     .filter((entry) => {
       if (entry.score < 70) return false
+      if (packInput && isIncompletePackCatalogProduct(entry.product)) return false
       if (requiresSizeMatch) return sizeTokensMatch(entry.product, sizeInputValue)
       return true
     })
@@ -4556,11 +4624,12 @@ function buildManualOrderStripeLineItems({
 }
 
 function reconcileManualOrderLineItems(lines, discount, expectedPayable) {
+  const normalizedDiscount = Math.max(0, parseMoneyValue(discount))
+
   if (expectedPayable == null || Number.isNaN(expectedPayable)) {
-    return { lines: [...lines], discount }
+    return { lines: [...lines], discount: normalizedDiscount }
   }
 
-  const normalizedDiscount = Math.max(0, parseMoneyValue(discount))
   const subtotal = sumManualOrderLineItems(lines)
   const diff = Math.round((subtotal - normalizedDiscount - expectedPayable) * 100) / 100
 
@@ -4569,7 +4638,11 @@ function reconcileManualOrderLineItems(lines, discount, expectedPayable) {
   }
 
   if (diff > 0) {
-    return { lines: [...lines], discount: normalizedDiscount + diff }
+    // Do not invent invoice discounts to reconcile totals (e.g. service fees on retailer invoices).
+    console.warn(
+      `Manual order line items ($${subtotal.toFixed(2)}) exceed expected payable ($${expectedPayable.toFixed(2)}) by $${diff.toFixed(2)} — keeping explicit discount only`
+    )
+    return { lines: [...lines], discount: normalizedDiscount }
   }
 
   const gap = Math.round(Math.abs(diff) * 100) / 100
@@ -5157,11 +5230,8 @@ async function createStripePaymentLinkForManualOrder(input) {
     }
   }
 
-  const serviceAmount = parseMoneyValue(service)
-  const serviceChargeTaxAmount = parseMoneyValue(serviceChargeTax)
-  const retailerPreTaxTotal = Math.max(0, preTaxTotal - serviceAmount - serviceChargeTaxAmount)
   const expectedPayable = useAutomaticTax
-    ? (useConnectedAccount ? retailerPreTaxTotal : preTaxTotal)
+    ? preTaxTotal
     : orderTotal > 0
       ? orderTotal
       : preTaxTotal + parseMoneyValue(salesTax)
@@ -5189,40 +5259,36 @@ async function createStripePaymentLinkForManualOrder(input) {
     settleOnBevviPlatform: settleOnBevviPlatform ? 'true' : 'false'
   }
 
-  let { lines, discount: normalizedDiscount } = reconcileManualOrderLineItems(
-    buildManualOrderStripeLineItems({
-      matchedProducts,
-      delivery,
-      shipping,
-      service,
-      serviceChargeTax,
-      networkServiceCharge,
-      giftNoteCharge,
-      tip,
-      salesTax,
-      useAutomaticTax
-    }),
-    discount,
-    expectedPayable
-  )
+  const userDiscount = Math.max(0, parseMoneyValue(discount))
 
-  if (useConnectedAccount) {
-    lines = filterRetailInvoiceLines(lines)
-  }
+  let lines = buildManualOrderStripeLineItems({
+    matchedProducts,
+    delivery,
+    shipping,
+    service,
+    serviceChargeTax,
+    networkServiceCharge,
+    giftNoteCharge,
+    tip,
+    salesTax,
+    useAutomaticTax
+  })
+
+  ;({ lines } = reconcileManualOrderLineItems(lines, userDiscount, expectedPayable))
 
   if (lines.length === 0) {
     return { skipped: true, reason: 'No line items available to create a payment link' }
   }
 
-  const payableBeforeTax = Math.max(0, sumManualOrderLineItems(lines) - normalizedDiscount)
+  const payableBeforeTax = Math.max(0, sumManualOrderLineItems(lines) - userDiscount)
   if (payableBeforeTax < 0.5) {
     return { skipped: true, reason: 'Order total is below the Stripe minimum ($0.50)' }
   }
 
   const stripeLineItems = toStripeCheckoutLineItems(lines, useAutomaticTax)
   const discountCoupon =
-    normalizedDiscount > 0
-      ? await createStripeDiscountCoupon(normalizedDiscount, orderNumber, stripeAccountId)
+    userDiscount > 0
+      ? await createStripeDiscountCoupon(userDiscount, orderNumber, stripeAccountId)
       : null
   const customerEmail = String(email || '').trim()
 
@@ -5766,7 +5832,7 @@ app.post('/api/manual-order', async (req, res) => {
       }
 
       matchedProducts.push({
-        name: buildManualOrderProductName(matched),
+        name: String(matched.name || buildManualOrderProductName(matched)).trim(),
         price,
         quantity,
         category: matched.category,
