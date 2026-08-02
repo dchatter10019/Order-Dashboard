@@ -4010,17 +4010,17 @@ function filterRetailInvoiceLines(lines = []) {
 
 async function computeManualOrderPlatformFeeCents(input, { useAutomaticTax }) {
   const service = parseMoneyValue(input.service)
-  const serviceChargeTax = parseMoneyValue(input.serviceChargeTax)
+  let serviceChargeTax = parseMoneyValue(input.serviceChargeTax)
   let salesTax = 0
 
   if (useAutomaticTax) {
     const taxResult = await calculateManualOrderStripeTax({
       ...input,
-      service: 0,
       serviceChargeTax: 0
     })
     if (!taxResult.skipped) {
       salesTax = taxResult.salesTax ?? 0
+      serviceChargeTax = taxResult.serviceChargeTax ?? serviceChargeTax
     }
   } else {
     salesTax = parseMoneyValue(input.salesTax)
