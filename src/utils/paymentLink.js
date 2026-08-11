@@ -95,6 +95,20 @@ export function isManualOrder(order, orderDetails) {
   return /^BEV-MAN-/i.test(orderNumber)
 }
 
+function pickExternalOrderNumber(order, orderDetails, recipient) {
+  const candidates = [
+    orderDetails?.externalOrderNumber,
+    orderDetails?.origOrderNumber,
+    recipient?.externalOrderNumber,
+    order?.externalOrderNumber,
+    order?.origOrderNumber
+  ]
+  for (const candidate of candidates) {
+    if (candidate != null && String(candidate).trim()) return String(candidate).trim()
+  }
+  return ''
+}
+
 export function buildManualOrderPaymentContext(order, orderDetails) {
   const recipient = Array.isArray(orderDetails?.recipientorders) ? orderDetails.recipientorders[0] : null
   const orderNumber = orderDetails?.corpOrderNum || order?.ordernum || order?.id || ''
@@ -109,6 +123,7 @@ export function buildManualOrderPaymentContext(order, orderDetails) {
 
   return {
     orderNumber,
+    externalOrderNumber: pickExternalOrderNumber(order, orderDetails, recipient),
     email: recipient?.email || orderDetails?.email || '',
     customerName:
       recipient?.companyName ||

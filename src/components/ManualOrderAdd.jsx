@@ -1485,7 +1485,8 @@ const ManualOrderAdd = () => {
           engraving,
           additionalFees,
           tip,
-          discount
+          discount,
+          externalOrderNumber
         }
       })
       setShowPaymentLinkPrompt(true)
@@ -1526,6 +1527,8 @@ const ManualOrderAdd = () => {
       additionalFees: submitResponse.payload?.networkServiceCharge ?? snapshot.additionalFees ?? additionalFees,
       networkServiceCharge: submitResponse.payload?.networkServiceCharge ?? snapshot.additionalFees ?? additionalFees,
       discount: submitResponse.payload?.discount ?? snapshot.discount ?? discount,
+      externalOrderNumber:
+        submitResponse.payload?.externalOrderNumber ?? snapshot.externalOrderNumber ?? externalOrderNumber,
       country: 'US',
       regenerate
     }

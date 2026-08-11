@@ -4008,6 +4008,16 @@ function filterRetailInvoiceLines(lines = []) {
   )
 }
 
+function normalizeExternalOrderNumber(value) {
+  return String(value || '').trim().slice(0, 140)
+}
+
+function buildManualOrderStripeInvoiceCustomFields(externalOrderNumber) {
+  const poNumber = normalizeExternalOrderNumber(externalOrderNumber)
+  if (!poNumber) return null
+  return [{ name: 'External Order / PO', value: poNumber }]
+}
+
 async function computeManualOrderPlatformFeeCents(input, { useAutomaticTax }) {
   const service = parseMoneyValue(input.service)
   let serviceChargeTax = parseMoneyValue(input.serviceChargeTax)
@@ -5208,8 +5218,11 @@ async function createStripePaymentLinkForManualOrder(input) {
     discount,
     country,
     preTaxTotal,
-    orderTotal
+    orderTotal,
+    externalOrderNumber
   } = normalizeManualOrderPaymentInput(input)
+
+  const externalPoNumber = normalizeExternalOrderNumber(externalOrderNumber)
 
   const shippingAddress = buildStripeShippingAddress({
     streetAddress,
@@ -5248,6 +5261,7 @@ async function createStripePaymentLinkForManualOrder(input) {
   const sharedMetadata = {
     source: 'manual-order',
     orderNumber: orderNumber || '',
+    externalOrderNumber: externalPoNumber || '',
     storeName: storeName || '',
     customerEmail: email || '',
     customerName: customerName || '',
@@ -5332,6 +5346,11 @@ async function createStripePaymentLinkForManualOrder(input) {
       days_until_due: 30,
       metadata: sharedMetadata,
       description: productName
+    }
+
+    const invoiceCustomFields = buildManualOrderStripeInvoiceCustomFields(externalPoNumber)
+    if (invoiceCustomFields) {
+      invoiceParams.custom_fields = invoiceCustomFields
     }
 
     if (useConnectedAccount) {
@@ -6070,6 +6089,7 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       tip,
       discount,
       country,
+      externalOrderNumber,
       regenerate = false
     } = req.body || {}
 
@@ -6140,7 +6160,8 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       engraving,
       tip,
       discount,
-      country: String(country || 'US').trim() || 'US'
+      country: String(country || 'US').trim() || 'US',
+      externalOrderNumber: String(externalOrderNumber || '').trim()
     })
 
     if (paymentLink?.skipped) {
