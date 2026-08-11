@@ -34,9 +34,9 @@ const RegenerateInvoiceButton = ({ onClick, disabled, isWorking, className = '',
   </button>
 )
 
-const PAYMENT_LINK_LOOKUP_TIMEOUT_MS = 15000
+const PAYMENT_LINK_LOOKUP_TIMEOUT_MS = 30000
 
-const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxResolved }) => {
+const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDetails, detailsError, onStripeTaxResolved }) => {
   const [paymentLink, setPaymentLink] = useState(null)
   const [stripeConfigured, setStripeConfigured] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
@@ -230,7 +230,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
 
   const regenerateDisabled = isCreating || isVoiding || isLoading || !canManagePaymentLink
   const voidDisabled = isCreating || isVoiding || isLoading
-  const detailsStillLoading = !orderDetails
+  const detailsStillLoading = isLoadingDetails || (!orderDetails && !detailsError)
 
   return (
     <div className="space-y-4 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
@@ -242,7 +242,16 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
       </div>
 
       {detailsStillLoading ? (
-        <p className="text-xs text-gray-500">Loading order details for invoice line items…</p>
+        <p className="text-xs text-gray-500 flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading order details for invoice line items…
+        </p>
+      ) : null}
+
+      {detailsError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Could not load order details for invoicing. {detailsError.message || detailsError.details || 'Try refreshing the page.'}
+        </div>
       ) : null}
 
       {stripeConfigured && !isLoading && !paymentLink?.url && !detailsStillLoading ? (
@@ -430,7 +439,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, onStripeTaxR
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
           Waiting for order details before you can create a new invoice.
         </div>
-      ) : (
+      ) : detailsError ? null : (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
           <p className="font-semibold">No Stripe invoice yet</p>
           <p className="mt-1 text-amber-800">

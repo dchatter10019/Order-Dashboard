@@ -4014,8 +4014,56 @@ function normalizeExternalOrderNumber(value) {
 
 function buildManualOrderStripeInvoiceCustomFields(externalOrderNumber) {
   const poNumber = normalizeExternalOrderNumber(externalOrderNumber)
-  if (!poNumber) return null
-  return [{ name: 'External Order / PO', value: poNumber }]
+  return [{ name: 'External Order / PO', value: poNumber || '—' }]
+}
+
+/** Stripe invoice `description` — shown as Memo on the invoice PDF and hosted page. */
+function buildManualOrderStripeInvoiceMemo({ externalOrderNumber, orderNumber }) {
+  const poNumber = normalizeExternalOrderNumber(externalOrderNumber)
+  const memoLines = [`External Order / PO: ${poNumber || '—'}`]
+  if (orderNumber) {
+    memoLines.push(`Bevvi Order ${orderNumber}`)
+  }
+  return memoLines.join('\n').slice(0, 500)
+}
+
+function resolveManualOrderExpectedPayable({
+  useAutomaticTax,
+  orderTotal,
+  preTaxTotal,
+  salesTax,
+  serviceChargeTax
+}) {
+  const retailTax = parseMoneyValue(salesTax)
+  const serviceTax = parseMoneyValue(serviceChargeTax)
+  const preTax = parseMoneyValue(preTaxTotal)
+  const total = parseMoneyValue(orderTotal)
+
+  if (useAutomaticTax) {
+    if (total > 0) {
+      return Math.max(0, Math.round((total - retailTax - serviceTax) * 100) / 100)
+    }
+    return Math.max(0, Math.round((preTax - serviceTax) * 100) / 100)
+  }
+
+  if (total > 0) return total
+  return Math.round((preTax + retailTax) * 100) / 100
+}
+
+function resolveManualOrderExpectedInvoiceTotal({ orderTotal, preTaxTotal, salesTax }) {
+  const total = parseMoneyValue(orderTotal)
+  if (total > 0) return total
+  return Math.round((parseMoneyValue(preTaxTotal) + parseMoneyValue(salesTax)) * 100) / 100
+}
+
+function manualOrderInvoiceNeedsManualTaxFallback(invoice, expectedOrderTotal, expectedSalesTax) {
+  if (!invoice) return false
+  const actualTotal = invoice.total / 100
+  const stripeTax = extractStripeInvoiceTaxDollars(invoice) ?? 0
+  const retailTax = parseMoneyValue(expectedSalesTax)
+  if (retailTax <= 0) return false
+  if (stripeTax >= retailTax - 0.05) return false
+  return actualTotal < expectedOrderTotal - 0.05
 }
 
 async function computeManualOrderPlatformFeeCents(input, { useAutomaticTax }) {
@@ -4242,8 +4290,27 @@ async function getStripeInvoiceRecordForOrder(orderNumber, stripeAccountId = nul
 async function getStripeInvoiceTaxForOrder(orderNumber) {
   try {
     const store = await readManualOrderPaymentLinks()
-    const storedAccountId = store[orderNumber]?.stripeAccountId || null
-    const invoice = await getStripeInvoiceRecordForOrder(orderNumber, storedAccountId)
+    const cached = store[orderNumber]
+    if (!cached || !stripe) return null
+
+    if (cached.stripeTaxAmount != null) {
+      return cached.stripeTaxAmount
+    }
+
+    const invoiceId =
+      cached.invoiceId ||
+      (String(cached.paymentLinkId || '').startsWith('in_') ? cached.paymentLinkId : null)
+    if (!invoiceId) return null
+
+    const stripeAccountId = resolveManualOrderStripeAccountId({
+      stripeAccountId: cached.stripeAccountId,
+      url: cached.url
+    })
+    const invoice = await stripe.invoices.retrieve(
+      invoiceId,
+      {},
+      buildStripeConnectRequestOptions(stripeAccountId)
+    )
     return extractStripeInvoiceTaxDollars(invoice)
   } catch (error) {
     console.warn('Could not read Stripe invoice tax:', orderNumber, error.message)
@@ -4306,7 +4373,10 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
     }
 
     if (String(storedId).startsWith('in_')) {
-      const stripeAccountId = cached.stripeAccountId || null
+      const stripeAccountId = resolveManualOrderStripeAccountId({
+        stripeAccountId: cached.stripeAccountId,
+        url: cached.url
+      })
       const connectOpts = buildStripeConnectRequestOptions(stripeAccountId)
       const invoice = await stripe.invoices.retrieve(storedId, {}, connectOpts)
       if (invoice.status === 'open' && invoice.hosted_invoice_url) {
@@ -4317,6 +4387,7 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
           paymentLinkId: invoice.id,
           paymentType: 'invoice',
           livemode: invoice.livemode,
+          stripeAccountId: stripeAccountId || cached.stripeAccountId || null,
           stripeDashboardUrl: buildStripeConnectDashboardUrl(
             'invoice',
             invoice.id,
@@ -4335,6 +4406,15 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
     }
   } catch (error) {
     console.warn('Could not validate stored payment resource:', storedId, error.message)
+    if (cached?.url) {
+      return {
+        ...cached,
+        orderNumber,
+        stripeAccountId:
+          cached.stripeAccountId ||
+          resolveManualOrderStripeAccountId({ stripeAccountId: cached.stripeAccountId, url: cached.url })
+      }
+    }
     await clearManualOrderPaymentLink(orderNumber)
   }
 
@@ -4603,7 +4683,7 @@ function buildManualOrderStripeLineItems({
     ['delivery', 'Delivery Fee', delivery],
     ['shipping', 'Shipping Fee', shipping],
     ['service', 'Service Charge', service],
-    ['serviceChargeTax', 'Service Charge Tax', serviceChargeTax],
+    ['serviceChargeTax', 'Service Charge Tax', useAutomaticTax ? 0 : serviceChargeTax],
     ['additionalFees', 'Additional Fees', additionalFeesAmount],
     ['engraving', 'Gift Note / Engraving', giftNoteCharge || engraving],
     ['tip', 'Tip', tip]
@@ -5161,7 +5241,7 @@ async function createManualOrderStripeInvoiceItems(customerId, lines, useAutomat
   }
 }
 
-async function getManualOrderPaymentLink(orderNumber) {
+async function getManualOrderPaymentLink(orderNumber, { skipStripeScan = false } = {}) {
   let paymentLink = null
 
   const store = await readManualOrderPaymentLinks()
@@ -5171,7 +5251,7 @@ async function getManualOrderPaymentLink(orderNumber) {
     if (resolved) paymentLink = resolved
   }
 
-  if (!paymentLink) {
+  if (!paymentLink && !skipStripeScan) {
     const fromInvoice = await findStripeInvoiceForOrder(orderNumber)
     if (fromInvoice) {
       await saveManualOrderPaymentLink(orderNumber, fromInvoice)
@@ -5179,7 +5259,7 @@ async function getManualOrderPaymentLink(orderNumber) {
     }
   }
 
-  if (!paymentLink) {
+  if (!paymentLink && !skipStripeScan) {
     const fromPaymentLink = await findStripePaymentLinkForOrder(orderNumber)
     if (fromPaymentLink) {
       await saveManualOrderPaymentLink(orderNumber, fromPaymentLink)
@@ -5188,7 +5268,68 @@ async function getManualOrderPaymentLink(orderNumber) {
   }
 
   if (!paymentLink) return null
+  if (paymentLink.stripeTaxAmount != null) return paymentLink
   return enrichPaymentLinkWithInvoiceTax(paymentLink)
+}
+
+async function createAndFinalizeManualOrderStripeInvoice({
+  customerId,
+  lines,
+  useAutomaticTaxOnInvoice,
+  stripeAccountId,
+  connectOpts,
+  invoiceParamsBase,
+  userDiscount,
+  orderNumber,
+  input,
+  useConnectedAccount
+}) {
+  const { taxableLines, shippingCents } = partitionManualOrderLinesForAutomaticTax(lines)
+
+  await createManualOrderStripeInvoiceItems(
+    customerId,
+    taxableLines,
+    useAutomaticTaxOnInvoice,
+    stripeAccountId
+  )
+
+  const invoiceParams = {
+    ...invoiceParamsBase,
+    customer: customerId,
+    automatic_tax: { enabled: useAutomaticTaxOnInvoice }
+  }
+
+  if (useConnectedAccount) {
+    const platformFeeCents = await computeManualOrderPlatformFeeCents(
+      normalizeManualOrderPaymentInput(input),
+      { useAutomaticTax: useAutomaticTaxOnInvoice }
+    )
+    if (platformFeeCents > 0) {
+      invoiceParams.application_fee_amount = platformFeeCents
+    }
+  }
+
+  const shippingCost = buildStripeInvoiceShippingCost(shippingCents)
+  if (shippingCost) {
+    invoiceParams.shipping_cost = shippingCost
+  }
+
+  if (userDiscount > 0) {
+    const discountCoupon = await createStripeDiscountCoupon(userDiscount, orderNumber, stripeAccountId)
+    if (discountCoupon) {
+      invoiceParams.discounts = [{ coupon: discountCoupon.id }]
+    }
+  }
+
+  const draftInvoice = await stripe.invoices.create(
+    {
+      ...invoiceParams,
+      pending_invoice_items_behavior: 'include'
+    },
+    connectOpts
+  )
+
+  return stripe.invoices.finalizeInvoice(draftInvoice.id, {}, connectOpts)
 }
 
 async function createStripePaymentLinkForManualOrder(input) {
@@ -5243,11 +5384,18 @@ async function createStripePaymentLinkForManualOrder(input) {
     }
   }
 
-  const expectedPayable = useAutomaticTax
-    ? preTaxTotal
-    : orderTotal > 0
-      ? orderTotal
-      : preTaxTotal + parseMoneyValue(salesTax)
+  const expectedPayable = resolveManualOrderExpectedPayable({
+    useAutomaticTax,
+    orderTotal,
+    preTaxTotal,
+    salesTax,
+    serviceChargeTax
+  })
+  const expectedOrderTotal = resolveManualOrderExpectedInvoiceTotal({
+    orderTotal,
+    preTaxTotal,
+    salesTax
+  })
 
   const productSummary = (matchedProducts || [])
     .map((p) => `${p.quantity}x ${p.name}`)
@@ -5335,53 +5483,109 @@ async function createStripePaymentLinkForManualOrder(input) {
       }
     }, connectOpts)
 
-    const { taxableLines, shippingCents } = partitionManualOrderLinesForAutomaticTax(lines)
-
-    await createManualOrderStripeInvoiceItems(customer.id, taxableLines, true, stripeAccountId)
-
-    const invoiceParams = {
-      customer: customer.id,
-      automatic_tax: { enabled: true },
+    const invoiceParamsBase = {
       collection_method: 'send_invoice',
       days_until_due: 30,
       metadata: sharedMetadata,
-      description: productName
+      description: buildManualOrderStripeInvoiceMemo({
+        externalOrderNumber: externalPoNumber,
+        orderNumber
+      }),
+      custom_fields: buildManualOrderStripeInvoiceCustomFields(externalPoNumber)
     }
 
-    const invoiceCustomFields = buildManualOrderStripeInvoiceCustomFields(externalPoNumber)
-    if (invoiceCustomFields) {
-      invoiceParams.custom_fields = invoiceCustomFields
-    }
+    let invoice = await createAndFinalizeManualOrderStripeInvoice({
+      customerId: customer.id,
+      lines,
+      useAutomaticTaxOnInvoice: true,
+      stripeAccountId,
+      connectOpts,
+      invoiceParamsBase,
+      userDiscount,
+      orderNumber,
+      input,
+      useConnectedAccount
+    })
 
-    if (useConnectedAccount) {
-      const platformFeeCents = await computeManualOrderPlatformFeeCents(
-        normalizeManualOrderPaymentInput(input),
-        { useAutomaticTax: true }
+    let usedManualTaxFallback = false
+    let finalLineCount = lines.length
+
+    if (manualOrderInvoiceNeedsManualTaxFallback(invoice, expectedOrderTotal, salesTax)) {
+      console.warn(
+        `⚠️ Stripe automatic tax did not collect expected sales tax on invoice ${invoice.id} — recreating with explicit tax lines`
       )
-      if (platformFeeCents > 0) {
-        invoiceParams.application_fee_amount = platformFeeCents
+      usedManualTaxFallback = true
+      try {
+        if (invoice.status === 'open') {
+          await stripe.invoices.voidInvoice(invoice.id, {}, connectOpts)
+        }
+      } catch (voidError) {
+        console.warn('Could not void under-taxed invoice:', invoice.id, voidError.message)
       }
+
+      let manualLines = buildManualOrderStripeLineItems({
+        matchedProducts,
+        delivery,
+        shipping,
+        service,
+        serviceChargeTax,
+        networkServiceCharge,
+        giftNoteCharge,
+        tip,
+        salesTax,
+        useAutomaticTax: false
+      })
+      const manualExpectedPayable = resolveManualOrderExpectedPayable({
+        useAutomaticTax: false,
+        orderTotal,
+        preTaxTotal,
+        salesTax,
+        serviceChargeTax
+      })
+      ;({ lines: manualLines } = reconcileManualOrderLineItems(
+        manualLines,
+        userDiscount,
+        manualExpectedPayable
+      ))
+      finalLineCount = manualLines.length
+
+      const fallbackCustomer = await stripe.customers.create({
+        email: customerEmail || undefined,
+        name: customerName || undefined,
+        shipping: {
+          name: customerName || 'Customer',
+          address: shippingAddress
+        },
+        metadata: {
+          source: 'manual-order',
+          orderNumber: orderNumber || ''
+        }
+      }, connectOpts)
+
+      invoice = await createAndFinalizeManualOrderStripeInvoice({
+        customerId: fallbackCustomer.id,
+        lines: manualLines,
+        useAutomaticTaxOnInvoice: false,
+        stripeAccountId,
+        connectOpts,
+        invoiceParamsBase: {
+          ...invoiceParamsBase,
+          metadata: {
+            ...sharedMetadata,
+            automaticTax: 'false',
+            taxFallback: 'true'
+          }
+        },
+        userDiscount,
+        orderNumber,
+        input,
+        useConnectedAccount
+      })
     }
 
-    const shippingCost = buildStripeInvoiceShippingCost(shippingCents)
-    if (shippingCost) {
-      invoiceParams.shipping_cost = shippingCost
-    }
-
-    if (discountCoupon) {
-      invoiceParams.discounts = [{ coupon: discountCoupon.id }]
-    }
-
-    const draftInvoice = await stripe.invoices.create(
-      {
-        ...invoiceParams,
-        pending_invoice_items_behavior: 'include'
-      },
-      connectOpts
-    )
-    const invoice = await stripe.invoices.finalizeInvoice(draftInvoice.id, {}, connectOpts)
     const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
     const platformFeeCents = Number(invoice.application_fee_amount) || 0
+    const invoiceTotal = Math.round(invoice.total) / 100
 
     return {
       url: invoice.hosted_invoice_url,
@@ -5398,10 +5602,12 @@ async function createStripePaymentLinkForManualOrder(input) {
       stripeAccountId: stripeAccountId || null,
       settlementType: settleOnBevviPlatform ? 'bevvi_platform' : 'connected_account',
       platformFeeAmount: platformFeeCents > 0 ? platformFeeCents / 100 : null,
-      totalAmount: orderTotal || parseFloat(totalAmount),
+      totalAmount: invoiceTotal || expectedOrderTotal,
+      expectedOrderTotal,
       taxableAmount: payableBeforeTax,
-      lineItemCount: lines.length,
-      automaticTax: true,
+      lineItemCount: finalLineCount,
+      automaticTax: !usedManualTaxFallback,
+      taxFallback: usedManualTaxFallback,
       recipientZip: shippingAddress.postal_code,
       orderNumber: orderNumber || null,
       customerEmail: customerEmail || null,
@@ -6045,7 +6251,7 @@ app.get('/api/manual-order/payment-link', async (req, res) => {
       })
     }
 
-    const paymentLink = await getManualOrderPaymentLink(orderNumber)
+    const paymentLink = await getManualOrderPaymentLink(orderNumber, { skipStripeScan: true })
     res.json({
       success: true,
       configured: true,

@@ -117,6 +117,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
 
   // Auto-trigger API call when panel opens
   useEffect(() => {
+    if (!autoFetch) return
     if (isActive && order && !orderDetails && !isLoadingDetails) {
       fetch(`/api/order-details/${orderNumber}`)
         .then(response => response.json())
@@ -127,7 +128,7 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
           console.error('Error loading order details:', error)
         })
     }
-  }, [isActive, order, orderDetails, isLoadingDetails, setOrderDetails, orderNumber])
+  }, [autoFetch, isActive, order, orderDetails, isLoadingDetails, setOrderDetails, orderNumber])
 
   // Load notes from Asana when panel opens
   useEffect(() => {
@@ -657,6 +658,8 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
           order={order}
           orderDetails={orderDetails}
           isActive={isActive}
+          isLoadingDetails={isLoadingDetails}
+          detailsError={detailsError}
           onStripeTaxResolved={handleStripeTaxResolved}
         />
       ) : null}
