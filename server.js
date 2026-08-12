@@ -6,6 +6,24 @@ const path = require('path')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 
+function resolveInvoicingRulesPath() {
+  const configured = String(process.env.INVOICING_RULES_PATH || '').trim()
+  const defaultPath = path.join(__dirname, 'docs/Bevvi-Invoicing-Rules.md')
+  if (!configured) return defaultPath
+
+  let resolved = configured
+  if (resolved.startsWith('~/')) {
+    const home = process.env.HOME || process.env.USERPROFILE || ''
+    resolved = path.join(home, resolved.slice(2))
+  }
+  if (!path.isAbsolute(resolved)) {
+    resolved = path.resolve(__dirname, resolved)
+  }
+  return path.normalize(resolved)
+}
+
+const INVOICING_RULES_FROM_ENV = Boolean(String(process.env.INVOICING_RULES_PATH || '').trim())
+
 const {
   parseInvoicingRulesMarkdown,
   createInvoicingRulesEngine
@@ -17,8 +35,7 @@ const {
   addNotifiedKeysForDate
 } = require('./lib/orderNotificationStore.cjs')
 
-const INVOICING_RULES_PATH =
-  process.env.INVOICING_RULES_PATH || path.join(__dirname, 'docs/Bevvi-Invoicing-Rules.md')
+const INVOICING_RULES_PATH = resolveInvoicingRulesPath()
 
 let invoicingRulesCache = {
   mtimeMs: 0,
@@ -7741,6 +7758,28 @@ app.get('/api/events', (req, res) => {
   }, 30000) // Send heartbeat every 30 seconds
 })
 
+app.get('/api/invoicing-rules', async (req, res) => {
+  try {
+    const cache = await loadInvoicingRulesFromFile()
+    res.json({
+      success: true,
+      rules: cache.config,
+      loadedAt: cache.loadedAt,
+      sourcePath: cache.sourcePath,
+      configuredFromEnv: INVOICING_RULES_FROM_ENV
+    })
+  } catch (error) {
+    console.error('❌ Failed to load invoicing rules:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to load invoicing rules',
+      message: error.message,
+      sourcePath: INVOICING_RULES_PATH,
+      configuredFromEnv: INVOICING_RULES_FROM_ENV
+    })
+  }
+})
+
 // Set no-cache headers for HTML files
 app.use((req, res, next) => {
   if (req.url.endsWith('.html') || req.url === '/' || req.url === '/dashboard' || req.url === '/products') {
@@ -7817,26 +7856,6 @@ app.use((error, req, res, next) => {
   })
 })
 
-app.get('/api/invoicing-rules', async (req, res) => {
-  try {
-    const cache = await loadInvoicingRulesFromFile()
-    res.json({
-      success: true,
-      rules: cache.config,
-      loadedAt: cache.loadedAt,
-      sourcePath: cache.sourcePath
-    })
-  } catch (error) {
-    console.error('❌ Failed to load invoicing rules:', error.message)
-    res.status(500).json({
-      success: false,
-      error: 'Failed to load invoicing rules',
-      message: error.message,
-      sourcePath: INVOICING_RULES_PATH
-    })
-  }
-})
-
 app.listen(PORT, async () => {
   console.log(`🚀 Bevvi Order Tracking System server running on port ${PORT}`)
   console.log(`📊 API available at http://localhost:${PORT}/api`)
@@ -7875,9 +7894,20 @@ app.listen(PORT, async () => {
   await loadAllProducts()
   try {
     await loadInvoicingRulesFromFile(true)
-    console.log(`📋 Invoicing rules API: GET /api/invoicing-rules (${INVOICING_RULES_PATH})`)
+    console.log(
+      `📋 Invoicing rules API: GET /api/invoicing-rules (${INVOICING_RULES_PATH})${
+        INVOICING_RULES_FROM_ENV ? ' [INVOICING_RULES_PATH]' : ' [default]'
+      }`
+    )
   } catch (error) {
     console.warn(`⚠️ Could not load invoicing rules on startup: ${error.message}`)
+    console.warn(
+      `⚠️ Expected file at ${INVOICING_RULES_PATH}${
+        INVOICING_RULES_FROM_ENV
+          ? ' — check INVOICING_RULES_PATH in .env or host env vars'
+          : ' — set INVOICING_RULES_PATH or add docs/Bevvi-Invoicing-Rules.md'
+      }`
+    )
   }
   console.log(`✅ Server ready with products cache loaded`)
 
