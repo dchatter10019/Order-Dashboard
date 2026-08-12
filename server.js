@@ -52,6 +52,12 @@ async function loadInvoicingRulesFromFile(force = false) {
 
   const markdown = await fs.readFile(INVOICING_RULES_PATH, 'utf8')
   const config = parseInvoicingRulesMarkdown(markdown)
+  const ruleCount =
+    (config.flatFeeRetailers?.length || 0) +
+    (config.customerOverrides?.length || 0) +
+    (config.retailerRates?.tenPercent?.length || 0) +
+    (config.retailerRates?.fifteenPercent?.length || 0) +
+    (config.retailerRates?.twentyFivePercent?.length || 0)
   invoicingRulesCache = {
     mtimeMs: stat.mtimeMs,
     config,
@@ -60,6 +66,11 @@ async function loadInvoicingRulesFromFile(force = false) {
   }
 
   console.log(`📋 Invoicing rules loaded from ${INVOICING_RULES_PATH}`)
+  if (ruleCount === 0) {
+    console.warn(
+      `⚠️ Invoicing rules file parsed zero retailer/customer rules — all fees will default to ${Math.round((config.defaultRate ?? 0.2) * 100)}%. Check that headings match the expected markdown format (legacy or August 2026 spec).`
+    )
+  }
   return invoicingRulesCache
 }
 
