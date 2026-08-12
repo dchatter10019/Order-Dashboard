@@ -545,33 +545,126 @@ const getStoreName = (store) => store.name || store.Name || store.storeName || '
 function RetailerStripeAccountDisplay({ storeName }) {
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [stripeQuery, setStripeQuery] = useState('')
+  const [stripeMatches, setStripeMatches] = useState([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [selectedStripeTarget, setSelectedStripeTarget] = useState('')
+  const [saveLoading, setSaveLoading] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [showStripePicker, setShowStripePicker] = useState(false)
+  const pickerRef = useRef(null)
+
+  const reloadAccountInfo = useCallback(async (name) => {
+    const trimmed = String(name || '').trim()
+    if (!trimmed) {
+      setInfo(null)
+      return
+    }
+    setLoading(true)
+    try {
+      const response = await apiFetch(
+        `/api/manual-order/retailer-stripe-account?storeName=${encodeURIComponent(trimmed)}`
+      )
+      const data = await parseApiJsonResponse(response)
+      setInfo(data)
+    } catch {
+      setInfo({ settlementType: 'error' })
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
     const name = String(storeName || '').trim()
     if (!name) {
       setInfo(null)
       setLoading(false)
+      setStripeQuery('')
+      setSelectedStripeTarget('')
+      setSaveError('')
       return undefined
     }
 
+    setStripeQuery('')
+    setSelectedStripeTarget('')
+    setSaveError('')
+    reloadAccountInfo(name)
+  }, [storeName, reloadAccountInfo])
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (pickerRef.current && !pickerRef.current.contains(event.target)) {
+        setShowStripePicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    const q = stripeQuery.trim()
+    if (!showStripePicker) return undefined
+
     let cancelled = false
-    setLoading(true)
-    apiFetch(`/api/manual-order/retailer-stripe-account?storeName=${encodeURIComponent(name)}`)
-      .then((response) => parseApiJsonResponse(response))
-      .then((data) => {
-        if (!cancelled) setInfo(data)
-      })
-      .catch(() => {
-        if (!cancelled) setInfo({ settlementType: 'error' })
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+    const timer = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const response = await apiFetch(
+          `/api/manual-order/stripe-accounts?q=${encodeURIComponent(q)}`
+        )
+        const data = await parseApiJsonResponse(response)
+        if (!cancelled) {
+          setStripeMatches(Array.isArray(data.accounts) ? data.accounts : [])
+        }
+      } catch {
+        if (!cancelled) setStripeMatches([])
+      } finally {
+        if (!cancelled) setSearchLoading(false)
+      }
+    }, q ? 250 : 0)
 
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
-  }, [storeName])
+  }, [stripeQuery, showStripePicker])
+
+  const handleSelectStripeAccount = (account) => {
+    const label = account.businessName || account.id
+    setSelectedStripeTarget(label)
+    setStripeQuery(label)
+    setShowStripePicker(false)
+    setSaveError('')
+  }
+
+  const handleSaveStripeAlias = async () => {
+    const name = String(storeName || '').trim()
+    const target = String(selectedStripeTarget || stripeQuery || '').trim()
+    if (!name || !target) {
+      setSaveError('Select or enter the Stripe business name for this retailer.')
+      return
+    }
+
+    setSaveLoading(true)
+    setSaveError('')
+    try {
+      const response = await apiFetch('/api/manual-order/retailer-stripe-alias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeName: name, stripeTarget: target })
+      })
+      const data = await parseApiJsonResponse(response)
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || data.error || 'Failed to save Stripe mapping')
+      }
+      setInfo(data)
+      setShowStripePicker(false)
+    } catch (error) {
+      setSaveError(error.message || 'Failed to save Stripe mapping')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
 
   if (!storeName) return null
 
@@ -614,9 +707,79 @@ function RetailerStripeAccountDisplay({ storeName }) {
   }
 
   return (
-    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-      <span className="font-medium">Stripe account:</span> Not configured for this retailer.
-      Payment links will fail until a Connect account is mapped.
+    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-950">
+      <p className="font-medium">Stripe account not linked for this retailer.</p>
+      <p className="mt-1 text-amber-900">
+        Search for the correct Stripe Connect business name and save the mapping.
+      </p>
+      <div className="relative mt-3" ref={pickerRef}>
+        <label htmlFor="stripeBusinessLookup" className="sr-only">
+          Stripe business name
+        </label>
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+            <input
+              id="stripeBusinessLookup"
+              type="text"
+              value={stripeQuery}
+              onChange={(e) => {
+                setStripeQuery(e.target.value)
+                setSelectedStripeTarget('')
+                setShowStripePicker(true)
+                setSaveError('')
+              }}
+              onFocus={() => setShowStripePicker(true)}
+              placeholder="e.g. Delancey's Orchard LLC"
+              className="w-full rounded-md border border-amber-300 bg-white py-2 pl-8 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+            {showStripePicker && (
+              <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                {searchLoading ? (
+                  <p className="flex items-center gap-2 px-3 py-2 text-sm text-gray-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Searching Stripe accounts…
+                  </p>
+                ) : stripeMatches.length === 0 ? (
+                  <p className="px-3 py-2 text-sm text-gray-500">No matching Stripe accounts.</p>
+                ) : (
+                  stripeMatches.map((account) => {
+                    const label = account.businessName || account.id
+                    return (
+                      <button
+                        key={account.id}
+                        type="button"
+                        onClick={() => handleSelectStripeAccount(account)}
+                        className="block w-full border-b border-gray-100 px-3 py-2 text-left text-sm hover:bg-amber-50 last:border-b-0"
+                      >
+                        <span className="font-medium text-gray-900">{label}</span>
+                        {account.email ? (
+                          <span className="mt-0.5 block text-xs text-gray-500">{account.email}</span>
+                        ) : null}
+                        <span className="mt-0.5 block font-mono text-[11px] text-gray-400">{account.id}</span>
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleSaveStripeAlias}
+            disabled={saveLoading}
+            className="inline-flex items-center gap-1.5 rounded-md bg-amber-700 px-3 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saveLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Link account
+          </button>
+        </div>
+      </div>
+      {saveError ? (
+        <p className="mt-2 text-sm text-red-700" role="alert">
+          {saveError}
+        </p>
+      ) : null}
     </div>
   )
 }

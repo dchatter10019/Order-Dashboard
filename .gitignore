@@ -37,6 +37,7 @@ logs
 # Local payment link registry (contains customer emails)
 data/manual-order-payment-links.json
 data/notified-order-keys.json
+data/stripe-retailer-name-aliases.json
 
 # Runtime data
 pids

@@ -3826,6 +3826,161 @@ function applyStripeStoreAccountEnvOverrides(targetMap) {
   return applied
 }
 
+/** Bevvi store name → Stripe account business name (or acct_ id). Used when emails/metadata differ. */
+const DEFAULT_STRIPE_RETAILER_NAME_ALIASES = {
+  Freshco: "Delancey's Orchard LLC"
+}
+
+const STRIPE_RETAILER_ALIASES_PATH = path.join(__dirname, 'data', 'stripe-retailer-name-aliases.json')
+
+let stripeRetailerAliasesFromFile = {}
+
+async function loadStripeRetailerAliasesFromFile() {
+  try {
+    const raw = await fs.readFile(STRIPE_RETAILER_ALIASES_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    stripeRetailerAliasesFromFile =
+      parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.warn('⚠️ Could not load stripe-retailer-name-aliases.json:', error.message)
+    }
+    stripeRetailerAliasesFromFile = {}
+  }
+  return stripeRetailerAliasesFromFile
+}
+
+function resolveStripeTargetToAccountId(stripeTarget, targetMap, accounts = []) {
+  const directAcct = String(stripeTarget || '').trim()
+  if (directAcct.startsWith('acct_')) {
+    const known = (accounts || []).some((entry) => entry.id === directAcct)
+    return known ? directAcct : null
+  }
+
+  const stripeKey = normalizeRetailerStoreNameKey(stripeTarget)
+  if (stripeKey && targetMap[stripeKey]) {
+    return targetMap[stripeKey]
+  }
+
+  const normalizedTarget = String(stripeTarget || '').trim().toLowerCase()
+  for (const account of accounts || []) {
+    const businessName = String(account.businessName || '').trim().toLowerCase()
+    if (businessName && businessName === normalizedTarget) {
+      return account.id
+    }
+  }
+
+  return null
+}
+
+function applyStripeRetailerNameAliasEntry(targetMap, storeName, stripeTarget, accounts, overwrite = false) {
+  const storeKey = normalizeRetailerStoreNameKey(storeName)
+  if (!storeKey || storeKey === 'total wine manual') return false
+  if (targetMap[storeKey] && !overwrite) return false
+
+  const accountId = resolveStripeTargetToAccountId(stripeTarget, targetMap, accounts)
+  if (!accountId) return false
+
+  targetMap[storeKey] = accountId
+  return true
+}
+
+function applyStripeRetailerNameAliases(targetMap, accounts = []) {
+  let applied = 0
+
+  for (const [storeName, stripeTarget] of Object.entries(DEFAULT_STRIPE_RETAILER_NAME_ALIASES)) {
+    if (applyStripeRetailerNameAliasEntry(targetMap, storeName, stripeTarget, accounts, false)) {
+      applied += 1
+    }
+  }
+
+  for (const [storeName, stripeTarget] of Object.entries(stripeRetailerAliasesFromFile)) {
+    if (applyStripeRetailerNameAliasEntry(targetMap, storeName, stripeTarget, accounts, true)) {
+      applied += 1
+    }
+  }
+
+  const raw = process.env.STRIPE_RETAILER_NAME_ALIASES_JSON
+  if (raw) {
+    try {
+      for (const [storeName, stripeTarget] of Object.entries(JSON.parse(raw))) {
+        if (applyStripeRetailerNameAliasEntry(targetMap, storeName, stripeTarget, accounts, true)) {
+          applied += 1
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ Invalid STRIPE_RETAILER_NAME_ALIASES_JSON:', error.message)
+    }
+  }
+
+  return applied
+}
+
+async function saveStripeRetailerNameAlias(storeName, stripeTarget) {
+  const name = String(storeName || '').trim()
+  const target = String(stripeTarget || '').trim()
+  if (!name) {
+    throw new Error('storeName is required')
+  }
+  if (!target) {
+    throw new Error('stripeTarget is required')
+  }
+
+  if (!stripeConnectedAccountsCache.loadedAt) {
+    await refreshStripeConnectedAccountsCache()
+  }
+
+  const accountId = resolveStripeTargetToAccountId(
+    target,
+    stripeConnectedAccountsCache.byStoreName,
+    stripeConnectedAccountsCache.accounts
+  )
+  if (!accountId) {
+    throw new Error(`No Stripe Connect account found for "${target}"`)
+  }
+
+  await loadStripeRetailerAliasesFromFile()
+  stripeRetailerAliasesFromFile[name] = target
+  await fs.mkdir(path.dirname(STRIPE_RETAILER_ALIASES_PATH), { recursive: true })
+  await fs.writeFile(
+    STRIPE_RETAILER_ALIASES_PATH,
+    `${JSON.stringify(stripeRetailerAliasesFromFile, null, 2)}\n`,
+    'utf8'
+  )
+
+  const storeKey = normalizeRetailerStoreNameKey(name)
+  stripeConnectedAccountsCache.byStoreName[storeKey] = accountId
+
+  return {
+    storeName: name,
+    stripeTarget: target,
+    stripeAccountId: accountId
+  }
+}
+
+function searchStripeConnectedAccounts(query, limit = 20) {
+  const q = String(query || '').trim().toLowerCase()
+  const accounts = stripeConnectedAccountsCache.accounts || []
+  const matches = accounts.filter((account) => {
+    if (!q) return true
+    const haystack = [
+      account.businessName,
+      account.email,
+      account.id
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return haystack.includes(q)
+  })
+
+  return matches.slice(0, limit).map((account) => ({
+    id: account.id,
+    businessName: account.businessName || null,
+    email: account.email || null
+  }))
+}
+
 let stripeConnectedAccountsCache = {
   byStoreName: {},
   accounts: [],
@@ -3874,6 +4029,7 @@ async function refreshStripeConnectedAccountsCache() {
   const accounts = []
 
   if (!stripe) {
+    applyStripeRetailerNameAliases(byStoreName, accounts)
     const envOverrides = applyStripeStoreAccountEnvOverrides(byStoreName)
     stripeConnectedAccountsCache = {
       byStoreName,
@@ -3907,6 +4063,7 @@ async function refreshStripeConnectedAccountsCache() {
     }
 
     const emailMatches = await matchStripeAccountsToBevviStoresByEmail(byStoreName, accounts)
+    const nameAliases = applyStripeRetailerNameAliases(byStoreName, accounts)
     const envOverrides = applyStripeStoreAccountEnvOverrides(byStoreName)
 
     stripeConnectedAccountsCache = {
@@ -3914,16 +4071,19 @@ async function refreshStripeConnectedAccountsCache() {
       accounts,
       loadedAt: new Date().toISOString(),
       emailMatches,
+      nameAliases,
       envOverrides
     }
 
     console.log(
       `💳 Stripe Connect cache: ${accounts.length} accounts, ${Object.keys(byStoreName).length} retailer mappings` +
         (emailMatches ? ` (${emailMatches} by store email)` : '') +
+        (nameAliases ? ` (${nameAliases} name alias${nameAliases === 1 ? '' : 'es'})` : '') +
         (envOverrides ? ` (${envOverrides} env override${envOverrides === 1 ? '' : 's'})` : '')
     )
   } catch (error) {
     console.warn('⚠️ Could not load Stripe connected accounts from API:', error.message)
+    applyStripeRetailerNameAliases(byStoreName, accounts)
     applyStripeStoreAccountEnvOverrides(byStoreName)
     stripeConnectedAccountsCache = {
       byStoreName,
@@ -5408,7 +5568,7 @@ async function createStripePaymentLinkForManualOrder(input) {
   if (!settleOnBevviPlatform && !stripeAccountId) {
     return {
       skipped: true,
-      reason: `No Stripe connected account configured for retailer "${storeName || 'Unknown'}". Add it to STRIPE_STORE_ACCOUNTS_JSON.`
+      reason: `No Stripe connected account configured for retailer "${storeName || 'Unknown'}". Link the retailer to a Stripe Connect account in Manual Order Add.`
     }
   }
 
@@ -6198,6 +6358,67 @@ app.get('/api/manual-order/retailer-stripe-account', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to resolve retailer Stripe account',
+      message: error.message
+    })
+  }
+})
+
+app.get('/api/manual-order/stripe-accounts', async (req, res) => {
+  try {
+    if (!stripe) {
+      return res.status(503).json({
+        success: false,
+        error: 'Stripe is not configured on the server'
+      })
+    }
+
+    if (!stripeConnectedAccountsCache.loadedAt) {
+      await refreshStripeConnectedAccountsCache()
+    }
+
+    res.json({
+      success: true,
+      accounts: searchStripeConnectedAccounts(req.query.q, 25)
+    })
+  } catch (error) {
+    console.error('❌ Error searching Stripe accounts:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to search Stripe accounts',
+      message: error.message
+    })
+  }
+})
+
+app.post('/api/manual-order/retailer-stripe-alias', async (req, res) => {
+  try {
+    if (!stripe) {
+      return res.status(503).json({
+        success: false,
+        error: 'Stripe is not configured on the server'
+      })
+    }
+
+    const storeName = String(req.body?.storeName || '').trim()
+    const stripeTarget = String(req.body?.stripeTarget || req.body?.stripeBusinessName || '').trim()
+    if (!storeName || !stripeTarget) {
+      return res.status(400).json({
+        success: false,
+        error: 'storeName and stripeTarget are required'
+      })
+    }
+
+    const saved = await saveStripeRetailerNameAlias(storeName, stripeTarget)
+    res.json({
+      success: true,
+      ...getRetailerStripeAccountInfo(storeName),
+      mappedTo: saved.stripeTarget
+    })
+  } catch (error) {
+    console.error('❌ Error saving retailer Stripe alias:', error.message)
+    res.status(400).json({
+      success: false,
+      error: 'Failed to save retailer Stripe alias',
       message: error.message
     })
   }
@@ -7883,6 +8104,8 @@ app.listen(PORT, async () => {
   console.log(`   POST /api/products/add-from-upc - Enrich + add product`)
   console.log(`   POST /api/manual-order - Submit manual order (validates products against cache)`)
   console.log(`   GET  /api/manual-order/retailer-stripe-account?storeName= - Stripe Connect account for retailer`)
+  console.log(`   GET  /api/manual-order/stripe-accounts?q= - Search Stripe Connect accounts`)
+  console.log(`   POST /api/manual-order/retailer-stripe-alias - Link Bevvi retailer to Stripe account`)
   console.log(`   POST /api/manual-order/calculate-tax - Estimate sales tax via Stripe Tax`)
   console.log(`   POST /api/manual-order/parse-receipt - Scan receipt image/PDF into order fields`)
   console.log(`   GET  /api/manual-order/payment-link?orderNumber= - Look up Stripe payment link for manual order`)
@@ -7923,6 +8146,7 @@ app.listen(PORT, async () => {
   console.log(`✅ Server ready with products cache loaded`)
 
   if (stripe) {
+    await loadStripeRetailerAliasesFromFile()
     console.log(`💳 Loading Stripe connected accounts from API...`)
     await refreshStripeConnectedAccountsCache()
   }
