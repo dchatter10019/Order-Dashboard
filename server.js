@@ -4444,10 +4444,22 @@ async function calculateManualOrderStripeTax({
       : Promise.resolve({ tax: 0, calculationId: null })
   ])
 
+  const retailSubtotal = sumManualOrderLineItems(retailLines)
+  const fallbackTaxes = applyManualOrderStateTaxFallback({
+    state,
+    retailTax: retailTaxResult.tax,
+    serviceTax: serviceTaxResult.tax,
+    retailSubtotal,
+    serviceAmount
+  })
+
   return {
     success: true,
-    salesTax: retailTaxResult.tax,
-    serviceChargeTax: serviceTaxResult.tax,
+    salesTax: fallbackTaxes.salesTax,
+    serviceChargeTax: fallbackTaxes.serviceChargeTax,
+    salesTaxSource: fallbackTaxes.salesTaxSource,
+    serviceChargeTaxSource: fallbackTaxes.serviceChargeTaxSource,
+    stateFallbackRate: fallbackTaxes.stateFallbackRate,
     taxableSubtotal: sumManualOrderLineItems(lines),
     calculationId: retailTaxResult.calculationId
   }
@@ -4616,6 +4628,72 @@ function parseMoneyValue(value) {
 
 function sumManualOrderLineItems(lines) {
   return (lines || []).reduce((sum, line) => sum + line.unitAmount * line.quantity, 0)
+}
+
+/** Stripe Tax may return 0 when nexus is not registered for a state; use published state rates as fallback. */
+const DEFAULT_STATE_SALES_TAX_FALLBACK_RATES = {
+  KY: 0.06
+}
+
+function resolveStateSalesTaxFallbackRate(state) {
+  const stateCode = String(state || '').trim().toUpperCase()
+  if (!stateCode) return null
+
+  let rates = { ...DEFAULT_STATE_SALES_TAX_FALLBACK_RATES }
+  const raw = process.env.MANUAL_ORDER_STATE_TAX_FALLBACK_JSON
+  if (raw) {
+    try {
+      rates = { ...rates, ...JSON.parse(raw) }
+    } catch (error) {
+      console.warn('⚠️ Invalid MANUAL_ORDER_STATE_TAX_FALLBACK_JSON:', error.message)
+    }
+  }
+
+  const rate = rates[stateCode]
+  return typeof rate === 'number' && rate > 0 ? rate : null
+}
+
+function applyManualOrderStateTaxFallback({
+  state,
+  retailTax,
+  serviceTax,
+  retailSubtotal,
+  serviceAmount
+}) {
+  const fallbackRate = resolveStateSalesTaxFallbackRate(state)
+  if (!fallbackRate) {
+    return {
+      salesTax: retailTax,
+      serviceChargeTax: serviceTax,
+      salesTaxSource: 'stripe',
+      serviceChargeTaxSource: 'stripe',
+      stateFallbackRate: null
+    }
+  }
+
+  let salesTax = retailTax
+  let serviceChargeTax = serviceTax
+  let salesTaxSource = 'stripe'
+  let serviceChargeTaxSource = 'stripe'
+
+  if (salesTax <= 0 && retailSubtotal > 0) {
+    salesTax = Math.round(retailSubtotal * fallbackRate * 100) / 100
+    salesTaxSource = 'state_fallback'
+  }
+  if (serviceChargeTax <= 0 && serviceAmount > 0) {
+    serviceChargeTax = Math.round(serviceAmount * fallbackRate * 100) / 100
+    serviceChargeTaxSource = 'state_fallback'
+  }
+
+  return {
+    salesTax,
+    serviceChargeTax,
+    salesTaxSource,
+    serviceChargeTaxSource,
+    stateFallbackRate: salesTaxSource === 'state_fallback' || serviceChargeTaxSource === 'state_fallback'
+      ? fallbackRate
+      : null
+  }
 }
 
 function computeManualOrderProductSubtotal(matchedProducts = []) {

@@ -1124,8 +1124,12 @@ const ManualOrderAdd = () => {
   const [salesTaxManualOverride, setSalesTaxManualOverride] = useState(false)
   const [salesTaxLoading, setSalesTaxLoading] = useState(false)
   const [salesTaxError, setSalesTaxError] = useState(null)
+  const [salesTaxNotice, setSalesTaxNotice] = useState(null)
   const [service, setService] = useState('0')
   const [serviceChargeTax, setServiceChargeTax] = useState('0')
+  const [serviceChargeTaxFromStripe, setServiceChargeTaxFromStripe] = useState(false)
+  const [serviceChargeTaxManualOverride, setServiceChargeTaxManualOverride] = useState(false)
+  const [serviceChargeTaxNotice, setServiceChargeTaxNotice] = useState(null)
   const [shipping, setShipping] = useState('0')
   const [additionalFees, setAdditionalFees] = useState('0')
   const [tipPercent, setTipPercent] = useState('0')
@@ -1334,6 +1338,14 @@ const ManualOrderAdd = () => {
     setService(charge === 0 ? '0' : charge.toFixed(2))
   }, [subTotal])
 
+  const autoServiceCharge = useMemo(() => Math.round(subTotal * 0.1 * 100) / 100, [subTotal])
+
+  const serviceForTax = useMemo(() => {
+    const parsed = parseFloat(service)
+    if (!Number.isNaN(parsed) && parsed > 0) return parsed
+    return autoServiceCharge
+  }, [service, autoServiceCharge])
+
   const estimatedTotal = useMemo(() => {
     const add = (v) => parseFloat(v) || 0
     return (
@@ -1404,7 +1416,7 @@ const ManualOrderAdd = () => {
     }),
     delivery,
     shipping,
-    service,
+    service: serviceForTax > 0 ? String(serviceForTax) : '0',
     engraving,
     additionalFees,
     tip,
@@ -1417,7 +1429,7 @@ const ManualOrderAdd = () => {
     lineItems,
     delivery,
     shipping,
-    service,
+    serviceForTax,
     engraving,
     additionalFees,
     tip,
@@ -1442,10 +1454,9 @@ const ManualOrderAdd = () => {
     if (!taxCalculationInput.zip) {
       setSalesTaxFromStripe(false)
       setSalesTaxError(null)
-      return undefined
-    }
-
-    if (salesTaxManualOverride) {
+      setSalesTaxNotice(null)
+      setServiceChargeTaxFromStripe(false)
+      setServiceChargeTaxNotice(null)
       return undefined
     }
 
@@ -1456,6 +1467,19 @@ const ManualOrderAdd = () => {
       const canCalculateTax = hasTaxableProductsForCalculation(products, input.subTotal)
 
       if (!canCalculateTax) {
+        if (!salesTaxManualOverride) {
+          setSalesTaxFromStripe(false)
+          setSalesTaxError(null)
+          setSalesTaxNotice(
+            input.subTotal > 0
+              ? 'Add a product name and price on each line to calculate sales tax automatically.'
+              : null
+          )
+        }
+        if (!serviceChargeTaxManualOverride) {
+          setServiceChargeTaxFromStripe(false)
+          setServiceChargeTaxNotice(null)
+        }
         return
       }
 
@@ -1463,7 +1487,13 @@ const ManualOrderAdd = () => {
       taxRequestSeqRef.current = requestSeq
 
       setSalesTaxLoading(true)
-      setSalesTaxError(null)
+      if (!salesTaxManualOverride) {
+        setSalesTaxError(null)
+        setSalesTaxNotice(null)
+      }
+      if (!serviceChargeTaxManualOverride) {
+        setServiceChargeTaxNotice(null)
+      }
       try {
         const response = await apiFetch('/api/manual-order/calculate-tax', {
           method: 'POST',
@@ -1489,13 +1519,57 @@ const ManualOrderAdd = () => {
         }
         const taxAmount = data.salesTax ?? 0
         const serviceTaxAmount = data.serviceChargeTax ?? 0
-        setSalesTax(taxAmount === 0 ? '0' : taxAmount.toFixed(2))
-        setServiceChargeTax(serviceTaxAmount === 0 ? '0' : serviceTaxAmount.toFixed(2))
-        setSalesTaxFromStripe(true)
+        const taxableSubtotal = data.taxableSubtotal ?? 0
+        const serviceAmount = parseFloat(input.service) || 0
+
+        if (!salesTaxManualOverride) {
+          setSalesTax(taxAmount === 0 ? '0' : taxAmount.toFixed(2))
+          setSalesTaxFromStripe(data.salesTaxSource !== 'state_fallback')
+          if (data.salesTaxSource === 'state_fallback' && data.stateFallbackRate != null) {
+            setSalesTaxNotice(
+              `Stripe Tax returned $0 for ${input.state || 'this state'} — using ${Math.round(data.stateFallbackRate * 1000) / 10}% state sales tax fallback.`
+            )
+          } else if (taxableSubtotal <= 0 && input.subTotal > 0) {
+            setSalesTaxNotice(
+              'Stripe could not calculate tax for these products. Check that each line has a valid product name and price.'
+            )
+          } else if (taxAmount === 0 && taxableSubtotal > 0) {
+            setSalesTaxNotice(
+              'Stripe calculated $0 sales tax for this delivery address. Enter tax manually if your jurisdiction requires it.'
+            )
+          } else {
+            setSalesTaxNotice(null)
+          }
+        }
+
+        if (!serviceChargeTaxManualOverride) {
+          setServiceChargeTax(serviceTaxAmount === 0 ? '0' : serviceTaxAmount.toFixed(2))
+          setServiceChargeTaxFromStripe(data.serviceChargeTaxSource !== 'state_fallback')
+          if (data.serviceChargeTaxSource === 'state_fallback' && data.stateFallbackRate != null) {
+            setServiceChargeTaxNotice(
+              `Stripe Tax returned $0 for ${input.state || 'this state'} — using ${Math.round(data.stateFallbackRate * 1000) / 10}% on the service charge.`
+            )
+          } else if (serviceAmount > 0 && serviceTaxAmount === 0) {
+            setServiceChargeTaxNotice(
+              'Stripe calculated $0 tax on the service charge for this delivery address. Enter it manually if required.'
+            )
+          } else if (serviceAmount <= 0) {
+            setServiceChargeTaxNotice(null)
+          } else {
+            setServiceChargeTaxNotice(null)
+          }
+        }
       } catch (e) {
         if (cancelled || requestSeq !== taxRequestSeqRef.current) return
-        setSalesTaxError(e.message || 'Could not calculate sales tax')
-        setSalesTaxFromStripe(false)
+        if (!salesTaxManualOverride) {
+          setSalesTaxError(e.message || 'Could not calculate sales tax')
+          setSalesTaxFromStripe(false)
+          setSalesTaxNotice(null)
+        }
+        if (!serviceChargeTaxManualOverride) {
+          setServiceChargeTaxFromStripe(false)
+          setServiceChargeTaxNotice(null)
+        }
       } finally {
         if (!cancelled && requestSeq === taxRequestSeqRef.current) {
           setSalesTaxLoading(false)
@@ -1507,10 +1581,11 @@ const ManualOrderAdd = () => {
       cancelled = true
       window.clearTimeout(timeoutId)
     }
-  }, [taxCalculationInput, salesTaxManualOverride, hasTaxableProductsForCalculation])
+  }, [taxCalculationInput, salesTaxManualOverride, serviceChargeTaxManualOverride, hasTaxableProductsForCalculation])
 
   useEffect(() => {
     setSalesTaxManualOverride(false)
+    setServiceChargeTaxManualOverride(false)
   }, [
     taxCalculationInput.zip,
     taxCalculationInput.streetAddress,
@@ -2166,7 +2241,6 @@ const ManualOrderAdd = () => {
                 ['discount', discount, setDiscount, 'Discount'],
                 ['engraving', engraving, setEngraving, 'Engraving'],
                 ['service', service, setService, 'Service (10% of subtotal)'],
-                ['serviceChargeTax', serviceChargeTax, setServiceChargeTax, 'Service charge tax'],
                 ['delivery', delivery, setDelivery, 'Delivery'],
                 ['shipping', shipping, setShipping, 'Shipping'],
                 ['additionalFees', additionalFees, setAdditionalFees, 'Additional Fees']
@@ -2186,6 +2260,42 @@ const ManualOrderAdd = () => {
                   />
                 </div>
               ))}
+              <div>
+                <label htmlFor="serviceChargeTax" className={labelClass}>
+                  Service charge tax
+                  {serviceChargeTaxFromStripe && !serviceChargeTaxManualOverride && (
+                    <span className="ml-1 text-xs font-normal text-gray-500">(from Stripe)</span>
+                  )}
+                  {serviceChargeTaxManualOverride && (
+                    <span className="ml-1 text-xs font-normal text-gray-500">(manual)</span>
+                  )}
+                  {salesTaxLoading && (
+                    <Loader2 className="ml-1 inline h-3.5 w-3.5 animate-spin text-bevvi-primary-600" aria-hidden="true" />
+                  )}
+                </label>
+                <input
+                  id="serviceChargeTax"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={serviceChargeTax}
+                  onChange={(e) => {
+                    setServiceChargeTax(e.target.value)
+                    setServiceChargeTaxFromStripe(false)
+                    setServiceChargeTaxManualOverride(true)
+                    setServiceChargeTaxNotice(null)
+                  }}
+                  className={inputClass}
+                />
+                {serviceChargeTaxNotice && (
+                  <p className="mt-1 text-xs text-amber-700">{serviceChargeTaxNotice}</p>
+                )}
+                {(parseFloat(service) || 0) <= 0 && (parseFloat(serviceForTax) || 0) <= 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Service charge tax applies to the 10% service fee on products.
+                  </p>
+                )}
+              </div>
               <div>
                 <label htmlFor="tipPercent" className={labelClass}>
                   Tip (% of product cost)
@@ -2214,6 +2324,9 @@ const ManualOrderAdd = () => {
                   {salesTaxFromStripe && !salesTaxManualOverride && (
                     <span className="ml-1 text-xs font-normal text-gray-500">(from Stripe)</span>
                   )}
+                  {!salesTaxFromStripe && !salesTaxManualOverride && salesTaxNotice?.includes('fallback') && (
+                    <span className="ml-1 text-xs font-normal text-gray-500">(state fallback)</span>
+                  )}
                   {salesTaxManualOverride && (
                     <span className="ml-1 text-xs font-normal text-gray-500">(manual)</span>
                   )}
@@ -2232,15 +2345,19 @@ const ManualOrderAdd = () => {
                     setSalesTaxFromStripe(false)
                     setSalesTaxManualOverride(true)
                     setSalesTaxError(null)
+                    setSalesTaxNotice(null)
                   }}
                   className={inputClass}
                 />
                 {salesTaxError && (
                   <p className="mt-1 text-xs text-amber-700">{salesTaxError}</p>
                 )}
+                {salesTaxNotice && !salesTaxError && (
+                  <p className="mt-1 text-xs text-amber-700">{salesTaxNotice}</p>
+                )}
                 {!zip?.trim() && (
                   <p className="mt-1 text-xs text-gray-500">
-                    Add a delivery address to calculate tax automatically, or enter tax manually.
+                    Add a delivery address with ZIP to calculate tax automatically, or enter tax manually.
                   </p>
                 )}
               </div>
