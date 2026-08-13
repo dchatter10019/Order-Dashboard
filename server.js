@@ -4053,7 +4053,9 @@ async function refreshStripeConnectedAccountsCache() {
           email: account.email || null,
           businessName: account.business_profile?.name || account.company?.name || null,
           chargesEnabled: account.charges_enabled === true,
-          payoutsEnabled: account.payouts_enabled === true
+          payoutsEnabled: account.payouts_enabled === true,
+          cardPaymentsActive: account.capabilities?.card_payments === 'active',
+          transfersActive: account.capabilities?.transfers === 'active'
         })
         registerStripeAccountStoreAliases(byStoreName, account)
       }
@@ -4135,6 +4137,86 @@ function getRetailerStripeAccountInfo(storeName) {
 function buildStripeConnectRequestOptions(stripeAccountId) {
   if (!stripeAccountId) return undefined
   return { stripeAccount: stripeAccountId }
+}
+
+async function getStripeConnectedAccountCapabilities(stripeAccountId) {
+  const accountId = String(stripeAccountId || '').trim()
+  if (!accountId.startsWith('acct_')) {
+    return { cardPaymentsActive: false, transfersActive: false, chargesEnabled: false }
+  }
+
+  if (!stripeConnectedAccountsCache.loadedAt) {
+    await refreshStripeConnectedAccountsCache()
+  }
+
+  const cached = (stripeConnectedAccountsCache.accounts || []).find((entry) => entry.id === accountId)
+  if (
+    cached &&
+    typeof cached.cardPaymentsActive === 'boolean' &&
+    typeof cached.transfersActive === 'boolean'
+  ) {
+    return {
+      cardPaymentsActive: cached.cardPaymentsActive,
+      transfersActive: cached.transfersActive,
+      chargesEnabled: cached.chargesEnabled === true
+    }
+  }
+
+  const account = await stripe.accounts.retrieve(accountId)
+  return {
+    cardPaymentsActive: account.capabilities?.card_payments === 'active',
+    transfersActive: account.capabilities?.transfers === 'active',
+    chargesEnabled: account.charges_enabled === true
+  }
+}
+
+/** When a Connect account cannot accept cards, charge on Bevvi platform and transfer to the retailer. */
+async function resolveManualOrderInvoiceSettlement({ storeName, stripeAccountId }) {
+  const settleOnBevviPlatform = usesBevviPlatformSettlement(storeName)
+  if (settleOnBevviPlatform || !stripeAccountId) {
+    return {
+      invoiceApiAccountId: null,
+      retailerAccountId: stripeAccountId || null,
+      useDestinationCharge: false,
+      settlementType: settleOnBevviPlatform ? 'bevvi_platform' : 'unconfigured'
+    }
+  }
+
+  const capabilities = await getStripeConnectedAccountCapabilities(stripeAccountId)
+  if (capabilities.cardPaymentsActive) {
+    return {
+      invoiceApiAccountId: stripeAccountId,
+      retailerAccountId: stripeAccountId,
+      useDestinationCharge: false,
+      settlementType: 'connected_account'
+    }
+  }
+
+  if (capabilities.transfersActive) {
+    console.warn(
+      `⚠️ Stripe Connect account ${stripeAccountId} cannot accept card payments — using platform invoice with transfer to retailer`
+    )
+    return {
+      invoiceApiAccountId: null,
+      retailerAccountId: stripeAccountId,
+      useDestinationCharge: true,
+      settlementType: 'platform_destination'
+    }
+  }
+
+  return {
+    invoiceApiAccountId: stripeAccountId,
+    retailerAccountId: stripeAccountId,
+    useDestinationCharge: false,
+    settlementType: 'connected_account',
+    blockedReason:
+      `Stripe Connect account for "${storeName || 'this retailer'}" cannot accept card payments. ` +
+      'Enable card payments on the connected account in Stripe Dashboard, or ensure transfers are active.'
+  }
+}
+
+const MANUAL_ORDER_INVOICE_PAYMENT_SETTINGS = {
+  payment_method_types: ['card', 'link']
 }
 
 function extractStripeAccountIdFromInvoiceUrl(url) {
@@ -4573,11 +4655,15 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
     }
 
     if (String(storedId).startsWith('in_')) {
-      const stripeAccountId = resolveManualOrderStripeAccountId({
+      const retailerAccountId = resolveManualOrderStripeAccountId({
         stripeAccountId: cached.stripeAccountId,
         url: cached.url
       })
-      const connectOpts = buildStripeConnectRequestOptions(stripeAccountId)
+      const invoiceApiAccountId =
+        cached.invoiceApiAccountId === 'platform' || cached.settlementType === 'platform_destination'
+          ? null
+          : retailerAccountId
+      const connectOpts = buildStripeConnectRequestOptions(invoiceApiAccountId)
       const invoice = await stripe.invoices.retrieve(storedId, {}, connectOpts)
       if (invoice.status === 'open' && invoice.hosted_invoice_url) {
         return {
@@ -4587,12 +4673,13 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
           paymentLinkId: invoice.id,
           paymentType: 'invoice',
           livemode: invoice.livemode,
-          stripeAccountId: stripeAccountId || cached.stripeAccountId || null,
+          stripeAccountId: retailerAccountId || cached.stripeAccountId || null,
+          invoiceApiAccountId: invoiceApiAccountId || 'platform',
           stripeDashboardUrl: buildStripeConnectDashboardUrl(
             'invoice',
             invoice.id,
             invoice.livemode,
-            stripeAccountId
+            invoiceApiAccountId ? retailerAccountId : null
           ),
           orderNumber,
           customerEmail: cached.customerEmail || invoice.customer_email || invoice.metadata?.customerEmail || null,
@@ -5234,46 +5321,52 @@ async function findStripeCheckoutSessionForOrder(orderNumber) {
 async function findStripeInvoicesForOrder(orderNumber, stripeAccountId = null) {
   if (!stripe || !orderNumber) return []
 
+  const accountIds = []
+  if (stripeAccountId) accountIds.push(stripeAccountId)
+  if (!accountIds.includes(null)) accountIds.push(null)
+
   const matches = []
   const seen = new Set()
-  const connectOpts = buildStripeConnectRequestOptions(stripeAccountId)
-
-  try {
-    const searchResult = await stripe.invoices.search(
-      {
-        query: `metadata['orderNumber']:'${orderNumber}'`,
-        limit: 20
-      },
-      connectOpts
-    )
-    for (const invoice of searchResult.data || []) {
-      if (invoice.metadata?.source === 'manual-order' && !seen.has(invoice.id)) {
-        seen.add(invoice.id)
-        matches.push(invoice)
-      }
-    }
-    if (matches.length > 0) return matches
-  } catch (error) {
-    console.warn('Stripe invoice search unavailable, falling back to list:', error.message)
-  }
-
-  let startingAfter = null
-  for (let page = 0; page < 5; page++) {
-    const params = { limit: 100 }
-    if (startingAfter) params.starting_after = startingAfter
-
-    const result = await stripe.invoices.list(params, connectOpts)
-    for (const invoice of result.data) {
-      if (invoice.metadata?.orderNumber === orderNumber && invoice.metadata?.source === 'manual-order') {
-        if (!seen.has(invoice.id)) {
+  for (const accountId of accountIds) {
+    const connectOpts = buildStripeConnectRequestOptions(accountId)
+    try {
+      const searchResult = await stripe.invoices.search(
+        {
+          query: `metadata['orderNumber']:'${orderNumber}'`,
+          limit: 20
+        },
+        connectOpts
+      )
+      for (const invoice of searchResult.data || []) {
+        if (invoice.metadata?.source === 'manual-order' && !seen.has(invoice.id)) {
           seen.add(invoice.id)
           matches.push(invoice)
         }
       }
+    } catch (error) {
+      if (accountId === stripeAccountId) {
+        console.warn('Stripe invoice search unavailable, falling back to list:', error.message)
+      }
     }
 
-    if (!result.has_more || result.data.length === 0) break
-    startingAfter = result.data[result.data.length - 1].id
+    let startingAfter = null
+    for (let page = 0; page < 5; page++) {
+      const params = { limit: 100 }
+      if (startingAfter) params.starting_after = startingAfter
+
+      const result = await stripe.invoices.list(params, connectOpts)
+      for (const invoice of result.data) {
+        if (invoice.metadata?.orderNumber === orderNumber && invoice.metadata?.source === 'manual-order') {
+          if (!seen.has(invoice.id)) {
+            seen.add(invoice.id)
+            matches.push(invoice)
+          }
+        }
+      }
+
+      if (!result.has_more || result.data.length === 0) break
+      startingAfter = result.data[result.data.length - 1].id
+    }
   }
 
   return matches
@@ -5289,8 +5382,12 @@ async function findStripeInvoiceForOrder(orderNumber) {
   if (!openInvoice) return null
 
   const stripeTaxAmount = extractStripeInvoiceTaxDollars(openInvoice)
-  const stripeAccountId = storedAccountId || openInvoice.metadata?.stripeAccountId || null
-  const resolvedAccountId = stripeAccountId && stripeAccountId !== 'platform' ? stripeAccountId : null
+  const retailerAccountId = storedAccountId || openInvoice.metadata?.stripeAccountId || null
+  const resolvedAccountId = retailerAccountId && retailerAccountId !== 'platform' ? retailerAccountId : null
+  const invoiceOnPlatform =
+    openInvoice.metadata?.invoiceOnPlatform === 'true' ||
+    openInvoice.metadata?.settlementType === 'platform_destination' ||
+    openInvoice.metadata?.useDestinationCharge === 'true'
 
   return {
     url: openInvoice.hosted_invoice_url,
@@ -5302,9 +5399,11 @@ async function findStripeInvoiceForOrder(orderNumber) {
       'invoice',
       openInvoice.id,
       openInvoice.livemode,
-      resolvedAccountId
+      invoiceOnPlatform ? null : resolvedAccountId
     ),
     stripeAccountId: resolvedAccountId,
+    invoiceApiAccountId: invoiceOnPlatform ? 'platform' : resolvedAccountId,
+    settlementType: openInvoice.metadata?.settlementType || (resolvedAccountId ? 'connected_account' : 'bevvi_platform'),
     orderNumber,
     customerEmail: openInvoice.customer_email || openInvoice.metadata?.customerEmail || null,
     automaticTax: openInvoice.metadata?.automaticTax === 'true',
@@ -5542,13 +5641,13 @@ async function createAndFinalizeManualOrderStripeInvoice({
   customerId,
   lines,
   useAutomaticTaxOnInvoice,
-  stripeAccountId,
+  invoiceApiAccountId,
   connectOpts,
   invoiceParamsBase,
   userDiscount,
   orderNumber,
   input,
-  useConnectedAccount
+  applyPlatformFee
 }) {
   const { taxableLines, shippingCents } = partitionManualOrderLinesForAutomaticTax(lines)
 
@@ -5556,16 +5655,17 @@ async function createAndFinalizeManualOrderStripeInvoice({
     customerId,
     taxableLines,
     useAutomaticTaxOnInvoice,
-    stripeAccountId
+    invoiceApiAccountId
   )
 
   const invoiceParams = {
     ...invoiceParamsBase,
     customer: customerId,
-    automatic_tax: { enabled: useAutomaticTaxOnInvoice }
+    automatic_tax: { enabled: useAutomaticTaxOnInvoice },
+    payment_settings: MANUAL_ORDER_INVOICE_PAYMENT_SETTINGS
   }
 
-  if (useConnectedAccount) {
+  if (applyPlatformFee) {
     const platformFeeCents = await computeManualOrderPlatformFeeCents(
       normalizeManualOrderPaymentInput(input),
       { useAutomaticTax: useAutomaticTaxOnInvoice }
@@ -5581,7 +5681,7 @@ async function createAndFinalizeManualOrderStripeInvoice({
   }
 
   if (userDiscount > 0) {
-    const discountCoupon = await createStripeDiscountCoupon(userDiscount, orderNumber, stripeAccountId)
+    const discountCoupon = await createStripeDiscountCoupon(userDiscount, orderNumber, invoiceApiAccountId)
     if (discountCoupon) {
       invoiceParams.discounts = [{ coupon: discountCoupon.id }]
     }
@@ -5601,6 +5701,10 @@ async function createAndFinalizeManualOrderStripeInvoice({
 async function createStripePaymentLinkForManualOrder(input) {
   if (!stripe) {
     return { skipped: true, reason: 'Stripe is not configured on the server' }
+  }
+
+  if (!stripeConnectedAccountsCache.loadedAt) {
+    await refreshStripeConnectedAccountsCache()
   }
 
   const {
@@ -5721,18 +5825,77 @@ async function createStripePaymentLinkForManualOrder(input) {
   const customerEmail = String(email || '').trim()
 
   if (useAutomaticTax) {
-    const connectOpts = buildStripeConnectRequestOptions(stripeAccountId)
+    const invoiceSettlement = await resolveManualOrderInvoiceSettlement({ storeName, stripeAccountId })
+    if (invoiceSettlement.blockedReason) {
+      return { skipped: true, reason: invoiceSettlement.blockedReason }
+    }
+
+    const {
+      invoiceApiAccountId,
+      retailerAccountId,
+      useDestinationCharge,
+      settlementType: invoiceSettlementType
+    } = invoiceSettlement
+    const connectOpts = buildStripeConnectRequestOptions(invoiceApiAccountId)
+    const applyPlatformFee = Boolean(retailerAccountId) && !settleOnBevviPlatform
+
     if (settleOnBevviPlatform) {
       console.log('💳 Creating Bevvi platform invoice (Total Wine Manual — full payment to Bevvi):', {
         orderNumber: orderNumber || null,
         storeName
       })
+    } else if (useDestinationCharge) {
+      console.log('💳 Creating platform invoice with transfer to retailer:', {
+        orderNumber: orderNumber || null,
+        storeName,
+        retailerAccountId
+      })
     } else {
       console.log('💳 Creating connected-account invoice:', {
         orderNumber: orderNumber || null,
         storeName,
-        stripeAccountId
+        stripeAccountId: retailerAccountId
       })
+    }
+
+    const invoiceMetadata = {
+      ...sharedMetadata,
+      settlementType: invoiceSettlementType,
+      invoiceOnPlatform: invoiceApiAccountId ? 'false' : 'true',
+      useDestinationCharge: useDestinationCharge ? 'true' : 'false'
+    }
+
+    const useAutomaticTaxOnInvoice = !useDestinationCharge
+    let invoiceLines = lines
+    if (useDestinationCharge) {
+      invoiceLines = buildManualOrderStripeLineItems({
+        matchedProducts,
+        delivery,
+        shipping,
+        service,
+        serviceChargeTax,
+        networkServiceCharge,
+        giftNoteCharge,
+        tip,
+        salesTax,
+        useAutomaticTax: false
+      })
+      const manualExpectedPayable = resolveManualOrderExpectedPayable({
+        useAutomaticTax: false,
+        orderTotal,
+        preTaxTotal,
+        salesTax,
+        serviceChargeTax
+      })
+      ;({ lines: invoiceLines } = reconcileManualOrderLineItems(
+        invoiceLines,
+        userDiscount,
+        manualExpectedPayable
+      ))
+      invoiceMetadata.automaticTax = 'false'
+      if (parseMoneyValue(salesTax) > 0) {
+        invoiceMetadata.taxFallback = 'true'
+      }
     }
 
     const customer = await stripe.customers.create({
@@ -5752,31 +5915,34 @@ async function createStripePaymentLinkForManualOrder(input) {
     const invoiceParamsBase = {
       collection_method: 'send_invoice',
       days_until_due: 30,
-      metadata: sharedMetadata,
+      metadata: invoiceMetadata,
       description: buildManualOrderStripeInvoiceMemo({
         externalOrderNumber: externalPoNumber,
         orderNumber
       }),
-      custom_fields: buildManualOrderStripeInvoiceCustomFields(externalPoNumber)
+      custom_fields: buildManualOrderStripeInvoiceCustomFields(externalPoNumber),
+      ...(useDestinationCharge && retailerAccountId
+        ? { transfer_data: { destination: retailerAccountId } }
+        : {})
     }
 
     let invoice = await createAndFinalizeManualOrderStripeInvoice({
       customerId: customer.id,
-      lines,
-      useAutomaticTaxOnInvoice: true,
-      stripeAccountId,
+      lines: invoiceLines,
+      useAutomaticTaxOnInvoice,
+      invoiceApiAccountId,
       connectOpts,
       invoiceParamsBase,
       userDiscount,
       orderNumber,
       input,
-      useConnectedAccount
+      applyPlatformFee
     })
 
-    let usedManualTaxFallback = false
-    let finalLineCount = lines.length
+    let usedManualTaxFallback = useDestinationCharge
+    let finalLineCount = invoiceLines.length
 
-    if (manualOrderInvoiceNeedsManualTaxFallback(invoice, expectedOrderTotal, salesTax)) {
+    if (!useDestinationCharge && manualOrderInvoiceNeedsManualTaxFallback(invoice, expectedOrderTotal, salesTax)) {
       console.warn(
         `⚠️ Stripe automatic tax did not collect expected sales tax on invoice ${invoice.id} — recreating with explicit tax lines`
       )
@@ -5832,12 +5998,12 @@ async function createStripePaymentLinkForManualOrder(input) {
         customerId: fallbackCustomer.id,
         lines: manualLines,
         useAutomaticTaxOnInvoice: false,
-        stripeAccountId,
+        invoiceApiAccountId,
         connectOpts,
         invoiceParamsBase: {
           ...invoiceParamsBase,
           metadata: {
-            ...sharedMetadata,
+            ...invoiceMetadata,
             automaticTax: 'false',
             taxFallback: 'true'
           }
@@ -5845,7 +6011,7 @@ async function createStripePaymentLinkForManualOrder(input) {
         userDiscount,
         orderNumber,
         input,
-        useConnectedAccount
+        applyPlatformFee
       })
     }
 
@@ -5863,10 +6029,11 @@ async function createStripePaymentLinkForManualOrder(input) {
         'invoice',
         invoice.id,
         invoice.livemode,
-        stripeAccountId
+        useDestinationCharge ? null : retailerAccountId
       ),
-      stripeAccountId: stripeAccountId || null,
-      settlementType: settleOnBevviPlatform ? 'bevvi_platform' : 'connected_account',
+      stripeAccountId: retailerAccountId || null,
+      invoiceApiAccountId: invoiceApiAccountId || 'platform',
+      settlementType: invoiceSettlementType,
       platformFeeAmount: platformFeeCents > 0 ? platformFeeCents / 100 : null,
       totalAmount: invoiceTotal || expectedOrderTotal,
       expectedOrderTotal,
