@@ -22,7 +22,6 @@ const ProductManagement = () => {
     { name: 'airculinaire' },
     { name: 'sendoso' },
     { name: 'ongoody' },
-    { name: 'gourmetinflight' },
     { name: 'nuveen' }
   ])
   const [selectedProduct, setSelectedProduct] = useState(null) // Store full product object instead of just name
