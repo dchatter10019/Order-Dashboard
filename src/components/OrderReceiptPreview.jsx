@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Printer } from 'lucide-react'
-import { buildOrderReceiptModel, formatReceiptMoney } from '../utils/orderReceipt'
+import { buildOrderReceiptModel, buildReceiptAddressLines, formatReceiptMoney } from '../utils/orderReceipt'
 import { printOrderReceipt } from '../utils/printOrderReceipt'
 import receiptStyles from './OrderReceiptPreview.css?inline'
 import './OrderReceiptPreview.css'
@@ -83,7 +83,10 @@ function ReceiptPageFooter({ page = 1, totalPages = 1 }) {
   )
 }
 
-function ReceiptDocument({ receipt, addressLines }) {
+function ReceiptDocument({ receipt, deliveredAddressLines, billToAddressLines }) {
+  const deliveredSectionNum = receipt.billTo ? 3 : 2
+  const statusSectionNum = receipt.billTo ? 4 : 3
+
   return (
     <div className="order-receipt-document">
       <div className="order-receipt-page">
@@ -166,14 +169,29 @@ function ReceiptDocument({ receipt, addressLines }) {
           </div>
 
           <div className="order-receipt-right">
-            <SectionTitle num="02">DELIVERED TO</SectionTitle>
+            {receipt.billTo && (
+              <>
+                <SectionTitle num="02">BILL TO</SectionTitle>
+                <div className="order-receipt-address-box order-receipt-bill-to-box">
+                  <p className="order-receipt-address-name">{receipt.billTo.name}</p>
+                  {billToAddressLines.length > 0 ? (
+                    billToAddressLines.map((line) => (
+                      <p key={line} className="order-receipt-address-line">{line}</p>
+                    ))
+                  ) : null}
+                  <p className="order-receipt-address-line">{receipt.billTo.country}</p>
+                </div>
+              </>
+            )}
+
+            <SectionTitle num={deliveredSectionNum}>DELIVERED TO</SectionTitle>
             <div className="order-receipt-address-box">
               <p className="order-receipt-address-name">{receipt.deliveredTo.name}</p>
               {receipt.deliveredTo.company && (
                 <p className="order-receipt-address-company">{receipt.deliveredTo.company}</p>
               )}
-              {addressLines.length > 0 ? (
-                addressLines.map((line) => (
+              {deliveredAddressLines.length > 0 ? (
+                deliveredAddressLines.map((line) => (
                   <p key={line} className="order-receipt-address-line">{line}</p>
                 ))
               ) : receipt.deliveredTo.fallbackAddress ? (
@@ -205,7 +223,7 @@ function ReceiptDocument({ receipt, addressLines }) {
             )}
 
             <div className="order-receipt-status-section">
-              <SectionTitle num="03">ORDER STATUS</SectionTitle>
+              <SectionTitle num={statusSectionNum}>ORDER STATUS</SectionTitle>
               <div className="order-receipt-status-row">
                 {receipt.statusSteps.map((step) => (
                   <div
@@ -305,11 +323,8 @@ const OrderReceiptPreview = ({ order, orderDetails, className = '', variant = 'f
 
   if (!receipt) return null
 
-  const addressLines = [
-    receipt.deliveredTo.street,
-    receipt.deliveredTo.apt,
-    [receipt.deliveredTo.city, receipt.deliveredTo.state, receipt.deliveredTo.zip].filter(Boolean).join(', ')
-  ].filter(Boolean)
+  const deliveredAddressLines = buildReceiptAddressLines(receipt.deliveredTo)
+  const billToAddressLines = buildReceiptAddressLines(receipt.billTo)
 
   const showScale = variant !== 'full' && scale < 0.999
 
@@ -343,7 +358,11 @@ const OrderReceiptPreview = ({ order, orderDetails, className = '', variant = 'f
               width: `${RECEIPT_DOC_WIDTH}px`
             }}
           >
-            <ReceiptDocument receipt={receipt} addressLines={addressLines} />
+            <ReceiptDocument
+              receipt={receipt}
+              deliveredAddressLines={deliveredAddressLines}
+              billToAddressLines={billToAddressLines}
+            />
           </div>
         </div>
       </div>

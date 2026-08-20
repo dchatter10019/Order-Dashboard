@@ -3741,6 +3741,63 @@ async function clearManualOrderPaymentLink(orderNumber) {
   await saveManualOrderPaymentLinks(store)
 }
 
+const MANUAL_ORDER_BILL_TO_PATH = path.join(__dirname, 'data', 'manual-order-bill-to.json')
+
+function normalizeManualOrderBillTo(input = {}) {
+  const name = String(input.billToName ?? input.name ?? '').trim()
+  const streetAddress = String(input.billToStreetAddress ?? input.streetAddress ?? '').trim()
+  const city = String(input.billToCity ?? input.city ?? '').trim()
+  const state = String(input.billToState ?? input.state ?? '').trim().toUpperCase().slice(0, 2)
+  const zip = String(input.billToZip ?? input.zip ?? '').trim().replace(/[^\d-]/g, '').slice(0, 10)
+  const country = String(input.billToCountry ?? input.country ?? 'US').trim().toUpperCase() || 'US'
+
+  if (!name && !streetAddress && !city && !state && !zip) return null
+
+  return {
+    name,
+    streetAddress,
+    city,
+    state,
+    zip,
+    country: country === 'US' ? 'United States' : country
+  }
+}
+
+async function readManualOrderBillToStore() {
+  try {
+    const raw = await fs.readFile(MANUAL_ORDER_BILL_TO_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+async function saveManualOrderBillToStore(store) {
+  await fs.mkdir(path.dirname(MANUAL_ORDER_BILL_TO_PATH), { recursive: true })
+  await fs.writeFile(MANUAL_ORDER_BILL_TO_PATH, JSON.stringify(store, null, 2))
+}
+
+async function saveManualOrderBillTo(orderNumber, billToInput = {}) {
+  const normalized = normalizeManualOrderBillTo(billToInput)
+  if (!orderNumber || !normalized) return null
+
+  const store = await readManualOrderBillToStore()
+  store[orderNumber] = {
+    ...normalized,
+    orderNumber,
+    savedAt: new Date().toISOString()
+  }
+  await saveManualOrderBillToStore(store)
+  return store[orderNumber]
+}
+
+async function getManualOrderBillTo(orderNumber) {
+  if (!orderNumber) return null
+  const store = await readManualOrderBillToStore()
+  return store[orderNumber] || null
+}
+
 function buildStripeDashboardUrl(type, id, livemode) {
   const prefix = livemode ? 'https://dashboard.stripe.com' : 'https://dashboard.stripe.com/test'
   if (type === 'invoice') return `${prefix}/invoices/${id}`
@@ -6441,7 +6498,13 @@ app.post('/api/manual-order', async (req, res) => {
       shipping = 0,
       additionalFees = 0,
       networkServiceCharge = 0,
-      tip = 0
+      tip = 0,
+      billToName,
+      billToStreetAddress,
+      billToCity,
+      billToState,
+      billToZip,
+      billToCountry
     } = req.body || {}
 
     if (!Array.isArray(lineItems) || lineItems.length === 0) {
@@ -6540,7 +6603,26 @@ app.post('/api/manual-order', async (req, res) => {
       tip: formatManualOrderMoney(tip),
       total: formatManualOrderMoney(total),
       zip: String(zip).trim(),
-      email: String(email).trim()
+      email: String(email).trim(),
+      ...(() => {
+        const billTo = normalizeManualOrderBillTo({
+          billToName,
+          billToStreetAddress,
+          billToCity,
+          billToState,
+          billToZip,
+          billToCountry
+        })
+        if (!billTo) return {}
+        return {
+          billToName: billTo.name,
+          billToStreetAddress: billTo.streetAddress,
+          billToCity: billTo.city,
+          billToState: billTo.state,
+          billToZip: billTo.zip,
+          billToCountry: billTo.country
+        }
+      })()
     }
 
     console.log('📤 Submitting manual order:', { storeName: payload.storeName, email: payload.email, products: matchedProducts.length })
@@ -6554,6 +6636,17 @@ app.post('/api/manual-order', async (req, res) => {
     })
 
     const orderNumber = extractManualOrderNumber(response.data)
+    const billTo = normalizeManualOrderBillTo({
+      billToName,
+      billToStreetAddress,
+      billToCity,
+      billToState,
+      billToZip,
+      billToCountry
+    })
+    if (orderNumber && billTo) {
+      await saveManualOrderBillTo(orderNumber, billTo)
+    }
 
     res.json({
       success: true,
@@ -6561,7 +6654,8 @@ app.post('/api/manual-order', async (req, res) => {
       orderNumber,
       orderTotal: total,
       matchedProducts,
-      payload
+      payload,
+      billTo
     })
   } catch (error) {
     console.error('Error submitting manual order:', error.message)
@@ -7173,6 +7267,13 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
         data.taxes = stripeTaxAmount
         data.salesTax = stripeTaxAmount
         data.stripeTaxPopulated = true
+      }
+    }
+
+    if (isManualOrder) {
+      const billTo = await getManualOrderBillTo(orderNumber)
+      if (billTo) {
+        data.billTo = billTo
       }
     }
 

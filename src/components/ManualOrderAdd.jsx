@@ -336,7 +336,16 @@ function ProductLineRow({ index, item, validation, onChange, onChangeFields, onR
   )
 }
 
-function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, labelClass }) {
+function AddressLookupField({
+  value,
+  onChange,
+  onResolved,
+  onClear,
+  inputClass,
+  labelClass,
+  label = 'Delivery address',
+  inputId = 'customerAddress'
+}) {
   const [predictions, setPredictions] = useState([])
   const [isSearching, setIsSearching] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
@@ -463,11 +472,11 @@ function AddressLookupField({ value, onChange, onResolved, onClear, inputClass, 
 
   return (
     <div className="sm:col-span-2 relative" ref={containerRef}>
-      <label htmlFor="customerAddress" className={labelClass}>Delivery address</label>
+      <label htmlFor={inputId} className={labelClass}>{label}</label>
       <div className="relative">
         <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
         <input
-          id="customerAddress"
+          id={inputId}
           type="text"
           value={value}
           onChange={(e) => {
@@ -1114,6 +1123,12 @@ const ManualOrderAdd = () => {
   const [city, setCity] = useState('')
   const [state, setState] = useState('')
   const [zip, setZip] = useState('')
+  const [billToName, setBillToName] = useState('')
+  const [billToAddressInput, setBillToAddressInput] = useState('')
+  const [billToStreetAddress, setBillToStreetAddress] = useState('')
+  const [billToCity, setBillToCity] = useState('')
+  const [billToState, setBillToState] = useState('')
+  const [billToZip, setBillToZip] = useState('')
   const [orderDate, setOrderDate] = useState(todayInputValue())
   const [externalOrderNumber, setExternalOrderNumber] = useState('')
   const [delivery, setDelivery] = useState('0')
@@ -1162,6 +1177,12 @@ const ManualOrderAdd = () => {
     setCity('')
     setState('')
     setZip('')
+    setBillToName('')
+    setBillToAddressInput('')
+    setBillToStreetAddress('')
+    setBillToCity('')
+    setBillToState('')
+    setBillToZip('')
     setOrderDate(todayInputValue())
     setExternalOrderNumber('')
     setDelivery('0')
@@ -1647,6 +1668,11 @@ const ManualOrderAdd = () => {
     zip: addressOverride?.zip ?? zip,
     orderDate,
     externalOrderNumber,
+    billToName: billToName.trim() || undefined,
+    billToStreetAddress: billToStreetAddress.trim() || undefined,
+    billToCity: billToCity.trim() || undefined,
+    billToState: billToState.trim() || undefined,
+    billToZip: billToZip.trim() || undefined,
     delivery,
     discount,
     engraving,
@@ -2198,6 +2224,46 @@ const ManualOrderAdd = () => {
                   setCity('')
                   setState('')
                   setZip('')
+                }}
+              />
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="text-base font-semibold text-gray-900">Bill to <span className="text-sm font-normal text-gray-500">(optional)</span></h3>
+            <p className="text-sm text-gray-600">
+              Person or company name and billing address. Shown on the PDF receipt when provided.
+            </p>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label htmlFor="billToName" className={labelClass}>Bill to name</label>
+                <input
+                  id="billToName"
+                  type="text"
+                  value={billToName}
+                  onChange={(e) => setBillToName(e.target.value)}
+                  placeholder="Person or company name"
+                  className={inputClass}
+                />
+              </div>
+              <AddressLookupField
+                value={billToAddressInput}
+                onChange={setBillToAddressInput}
+                inputClass={inputClass}
+                labelClass={labelClass}
+                label="Bill to address"
+                inputId="billToAddress"
+                onResolved={(parsed) => {
+                  setBillToStreetAddress(parsed.streetAddress || '')
+                  setBillToCity(parsed.city || '')
+                  setBillToState(parsed.state || '')
+                  setBillToZip(parsed.zip || '')
+                }}
+                onClear={() => {
+                  setBillToStreetAddress('')
+                  setBillToCity('')
+                  setBillToState('')
+                  setBillToZip('')
                 }}
               />
             </div>

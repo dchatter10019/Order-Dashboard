@@ -173,6 +173,31 @@ function productBadgeText(sizeLabel) {
   return `${sizeLabel} · SINGLE BOTTLE`
 }
 
+function pickBillTo(orderDetails) {
+  const raw = orderDetails?.billTo
+  if (!raw || typeof raw !== 'object') return null
+
+  const name = String(raw.name || raw.billToName || '').trim()
+  const street = String(raw.streetAddress || raw.billToStreetAddress || '').trim()
+  const city = String(raw.city || raw.billToCity || '').trim()
+  const state = String(raw.state || raw.billToState || '').trim()
+  const zip = String(raw.zip || raw.billToZip || raw.zipcode || '').trim()
+  const country = String(raw.country || raw.billToCountry || 'United States').trim() || 'United States'
+
+  if (!name && !street && !city && !state && !zip) return null
+
+  return { name: name || '—', street, city, state, zip, country }
+}
+
+function buildReceiptAddressLines(address) {
+  if (!address) return []
+  return [
+    address.street,
+    address.apt,
+    [address.city, address.state, address.zip].filter(Boolean).join(', ')
+  ].filter(Boolean)
+}
+
 /** Build a receipt view-model from dashboard order + getOrderInfo payload. */
 export function buildOrderReceiptModel(order, orderDetails) {
   if (!order) return null
@@ -212,6 +237,8 @@ export function buildOrderReceiptModel(order, orderDetails) {
     orderDetails?.orderId ??
     orderDetails?.id ??
     null
+
+  const billTo = pickBillTo(orderDetails)
 
   return {
     orderNumber: orderDetails?.corpOrderNum || order.ordernum || order.id,
@@ -270,6 +297,7 @@ export function buildOrderReceiptModel(order, orderDetails) {
       phone: recipient?.phoneNum || order.phone || '',
       fallbackAddress
     },
+    billTo,
     deliveryWindow: formatDeliveryWindow(order, orderDetails, recipient),
     statusSteps: buildStatusSteps(order.status),
     totalPaid,

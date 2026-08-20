@@ -391,6 +391,10 @@
   padding: 14px 14px 12px;
 }
 
+.order-receipt-bill-to-box {
+  margin-bottom: 18px;
+}
+
 .order-receipt-address-name {
   margin: 0;
   font-size: 18px;
