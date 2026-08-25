@@ -5,6 +5,7 @@ import { formatDollarAmount } from '../utils/formatCurrency'
 import { buildPaymentEmailMailto } from '../utils/paymentLink'
 import PageHeader from './ui/PageHeader'
 import { TAB_COPY } from '../constants/brand'
+import ManualOrderBulkUpload from './ManualOrderBulkUpload'
 
 const emptyLineItem = () => ({ query: '', name: '', size: '', quantity: '1', price: '' })
 
@@ -1112,6 +1113,7 @@ function ReceiptScanSection({ onParsed, stores, disabled }) {
 }
 
 const ManualOrderAdd = () => {
+  const [orderMode, setOrderMode] = useState('single')
   const [lineItems, setLineItems] = useState([emptyLineItem()])
   const [stores, setStores] = useState([])
   const [storeName, setStoreName] = useState('')
@@ -1895,10 +1897,51 @@ const ManualOrderAdd = () => {
         <PageHeader
           icon={ShoppingCart}
           title={TAB_COPY['manual-order'].title}
-          description="Search curated products, build the order, and email a seamless Stripe payment link to your customer."
+          description={
+            orderMode === 'bulk'
+              ? 'Upload a spreadsheet with multiple shipping addresses. Tax is calculated per recipient, then one consolidated order is created in Bevvi.'
+              : 'Search curated products, build the order, and email a seamless Stripe payment link to your customer.'
+          }
         />
 
-        {submitSuccessNotice && (
+        <div className="mb-6 inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+          <button
+            type="button"
+            onClick={() => setOrderMode('single')}
+            className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+              orderMode === 'single'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Single order
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrderMode('bulk')}
+            className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+              orderMode === 'bulk'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            Bulk spreadsheet
+          </button>
+        </div>
+
+        {orderMode === 'bulk' ? (
+          <ManualOrderBulkUpload
+            stores={stores}
+            loadingStores={loadingStores}
+            loadStores={loadStores}
+            RetailerCombobox={RetailerCombobox}
+            RetailerStripeAccountDisplay={RetailerStripeAccountDisplay}
+            AddressLookupField={AddressLookupField}
+            todayInputValue={todayInputValue}
+          />
+        ) : null}
+
+        {orderMode === 'single' && submitSuccessNotice && (
           <div
             className="mb-6 rounded-lg border border-green-200 bg-green-50 px-6 py-8 text-center"
             role="status"
@@ -1920,7 +1963,7 @@ const ManualOrderAdd = () => {
           </div>
         )}
 
-        {submitResponse && (showPaymentLinkPrompt || submitResponse.paymentLink?.url || paymentLinkError) && (
+        {orderMode === 'single' && submitResponse && (showPaymentLinkPrompt || submitResponse.paymentLink?.url || paymentLinkError) && (
           <div className="mb-6 space-y-4">
             {showPaymentLinkPrompt && !submitResponse.paymentLink?.url && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
@@ -2086,6 +2129,8 @@ const ManualOrderAdd = () => {
           </div>
         )}
 
+        {orderMode === 'single' ? (
+          <>
         <ReceiptScanSection
           onParsed={applyParsedReceipt}
           stores={stores}
@@ -2479,6 +2524,8 @@ const ManualOrderAdd = () => {
             )}
           </button>
         </form>
+          </>
+        ) : null}
       </div>
     </div>
   )

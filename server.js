@@ -35,6 +35,12 @@ const {
   addNotifiedKeysForDate
 } = require('./lib/orderNotificationStore.cjs')
 
+const {
+  parseBulkOrderSpreadsheet,
+  parseUsAddressFallback,
+  normalizeZip
+} = require('./lib/manualOrderBulkSpreadsheet.cjs')
+
 const INVOICING_RULES_PATH = resolveInvoicingRulesPath()
 
 let invoicingRulesCache = {
@@ -3718,7 +3724,11 @@ async function saveManualOrderPaymentLinks(store) {
 }
 
 async function saveManualOrderPaymentLink(orderNumber, paymentLink) {
-  if (!orderNumber || !paymentLink?.url) return
+  if (!orderNumber || !paymentLink) return
+  const hasUrl = Boolean(paymentLink.url)
+  const isPaidInvoice = paymentLink.invoiceStatus === 'paid' || paymentLink.status === 'paid'
+  if (!hasUrl && !isPaidInvoice) return
+
   const store = await readManualOrderPaymentLinks()
   const stripeAccountId = resolveManualOrderStripeAccountId({
     stripeAccountId: paymentLink.stripeAccountId,
@@ -3796,6 +3806,260 @@ async function getManualOrderBillTo(orderNumber) {
   if (!orderNumber) return null
   const store = await readManualOrderBillToStore()
   return store[orderNumber] || null
+}
+
+const MANUAL_ORDER_BULK_RECIPIENTS_PATH = path.join(__dirname, 'data', 'manual-order-bulk-recipients.json')
+
+async function readBulkOrderRecipientsStore() {
+  try {
+    const raw = await fs.readFile(MANUAL_ORDER_BULK_RECIPIENTS_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+async function saveBulkOrderRecipientsStore(store) {
+  await fs.mkdir(path.dirname(MANUAL_ORDER_BULK_RECIPIENTS_PATH), { recursive: true })
+  await fs.writeFile(MANUAL_ORDER_BULK_RECIPIENTS_PATH, JSON.stringify(store, null, 2))
+}
+
+function serializeBulkOrderRecipientRow(row) {
+  return {
+    bulkRowId: row.bulkRowId || null,
+    rowIndex: row.rowIndex ?? null,
+    displayIndex: row.displayIndex ?? null,
+    sourceFile: row.sourceFile || null,
+    customerName: row.customerName || null,
+    firstName: row.firstName || null,
+    lastName: row.lastName || null,
+    companyName: row.companyName || null,
+    email: row.email || null,
+    streetAddress: row.streetAddress || null,
+    city: row.city || null,
+    state: row.state || null,
+    zip: row.zip || null,
+    productPrice: row.productPrice ?? null,
+    shipping: row.shipping ?? null,
+    service: row.service ?? null,
+    giftNote: row.giftNote ?? null,
+    salesTax: row.salesTax ?? null,
+    serviceChargeTax: row.serviceChargeTax ?? null,
+    orderTotal: row.orderTotal ?? null
+  }
+}
+
+async function saveBulkOrderRecipients(orderNumber, { rows = [], externalOrderNumber, companyName } = {}) {
+  if (!orderNumber || !Array.isArray(rows) || rows.length === 0) return null
+
+  const store = await readBulkOrderRecipientsStore()
+  store[orderNumber] = {
+    orderNumber,
+    externalOrderNumber: String(externalOrderNumber || '').trim() || null,
+    companyName: String(companyName || '').trim() || null,
+    recipientCount: rows.length,
+    savedAt: new Date().toISOString(),
+    recipients: rows.map(serializeBulkOrderRecipientRow)
+  }
+  await saveBulkOrderRecipientsStore(store)
+  return store[orderNumber]
+}
+
+async function getBulkOrderRecipients(orderNumber) {
+  if (!orderNumber) return null
+  const store = await readBulkOrderRecipientsStore()
+  return store[orderNumber] || null
+}
+
+function resolveBulkSingleOrderAddress({
+  billToName,
+  billToStreetAddress,
+  billToCity,
+  billToState,
+  billToZip,
+  billToCountry,
+  rows = []
+}) {
+  const billTo = normalizeManualOrderBillTo({
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  })
+  if (billTo?.streetAddress && billTo?.city && billTo?.state && billTo?.zip) {
+    return {
+      streetAddress: billTo.streetAddress,
+      city: billTo.city,
+      state: billTo.state,
+      zip: billTo.zip,
+      source: 'billTo'
+    }
+  }
+
+  const firstComplete = (Array.isArray(rows) ? rows : []).find(
+    (row) =>
+      String(row?.streetAddress || '').trim() &&
+      String(row?.city || '').trim() &&
+      String(row?.state || '').trim() &&
+      normalizeZip(row?.zip)
+  )
+  if (firstComplete) {
+    return {
+      streetAddress: String(firstComplete.streetAddress).trim(),
+      city: String(firstComplete.city).trim(),
+      state: String(firstComplete.state).trim().toUpperCase().slice(0, 2),
+      zip: normalizeZip(firstComplete.zip),
+      source: 'firstRecipient'
+    }
+  }
+
+  return null
+}
+
+function buildBulkSingleOrderProducts(rows, product, productQuantity = 1) {
+  const productName = String(product?.name || '').trim()
+  const productSize = String(product?.size || '').trim()
+  const perRecipientQty = parseInt(productQuantity, 10) || 1
+  const priceCounts = new Map()
+
+  for (const row of rows) {
+    const price = parseFloat(row?.productPrice)
+    if (Number.isNaN(price) || price < 0) continue
+    priceCounts.set(price, (priceCounts.get(price) || 0) + 1)
+  }
+
+  return [...priceCounts.entries()].map(([price, recipientCount]) => ({
+    name: productName,
+    size: productSize,
+    quantity: recipientCount * perRecipientQty,
+    price
+  }))
+}
+
+function sumBulkOrderField(rows, picker) {
+  return Math.round(
+    (Array.isArray(rows) ? rows : []).reduce((sum, row) => sum + (parseFloat(picker(row)) || 0), 0) * 100
+  ) / 100
+}
+
+async function submitBulkSingleManualOrder(input) {
+  const {
+    storeName,
+    companyName,
+    email,
+    orderDate,
+    externalOrderNumber,
+    product,
+    rows = [],
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  } = input || {}
+
+  const productName = String(product?.name || '').trim()
+  const productSize = String(product?.size || '').trim()
+  const productQuantity = parseInt(product?.quantity, 10) || 1
+
+  if (!storeName || !email) {
+    return { success: false, status: 400, error: 'storeName and email are required' }
+  }
+  if (!productName || !productSize) {
+    return { success: false, status: 400, error: 'product.name and product.size are required' }
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { success: false, status: 400, error: 'At least one row is required' }
+  }
+
+  const rowsMissingTax = rows.filter((row) => row?.salesTax == null)
+  if (rowsMissingTax.length > 0) {
+    return {
+      success: false,
+      status: 400,
+      error: 'Calculate tax for all rows before creating the order'
+    }
+  }
+
+  const address = resolveBulkSingleOrderAddress({
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry,
+    rows
+  })
+  if (!address) {
+    return {
+      success: false,
+      status: 400,
+      error: 'Bill to address or at least one complete recipient address is required'
+    }
+  }
+
+  const products = buildBulkSingleOrderProducts(rows, product, productQuantity)
+  if (products.length === 0) {
+    return { success: false, status: 400, error: 'No valid product prices found in spreadsheet rows' }
+  }
+
+  const invoiceCustomerName = String(billToName || companyName || 'Bulk order').trim()
+  const customerNames = resolveBulkOrderCustomerNames({ billToName, companyName, rows })
+
+  const result = await submitManualOrderCore({
+    storeName,
+    companyName: String(companyName || '').trim(),
+    email: String(email).trim(),
+    customerName: customerNames.customerName || invoiceCustomerName,
+    firstName: customerNames.firstName,
+    lastName: customerNames.lastName,
+    streetAddress: address.streetAddress,
+    city: address.city,
+    state: address.state,
+    zip: address.zip,
+    orderDate,
+    externalOrderNumber,
+    products,
+    shipping: sumBulkOrderField(rows, (row) => row.shipping),
+    service: sumBulkOrderField(rows, (row) => row.service),
+    engraving: sumBulkOrderField(rows, (row) => row.giftNote),
+    salesTax: sumBulkOrderField(rows, (row) => row.salesTax),
+    serviceChargeTax: sumBulkOrderField(rows, (row) => row.serviceChargeTax),
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  })
+
+  if (!result.success) {
+    return result
+  }
+
+  if (result.orderNumber) {
+    await saveBulkOrderRecipients(result.orderNumber, {
+      rows,
+      externalOrderNumber,
+      companyName
+    })
+  }
+
+  return {
+    ...result,
+    mode: 'single',
+    recipientCount: rows.length,
+    addressSource: address.source,
+    summary: {
+      rowCount: rows.length,
+      recipientCount: rows.length,
+      orderNumbers: result.orderNumber ? [result.orderNumber] : []
+    }
+  }
 }
 
 function buildStripeDashboardUrl(type, id, livemode) {
@@ -4668,10 +4932,12 @@ async function enrichPaymentLinkWithInvoiceTax(paymentLink) {
 
   try {
     const stripeAccountId = paymentLink.stripeAccountId || null
+    const invoiceApiAccountId =
+      paymentLink.invoiceApiAccountId === 'platform' ? null : stripeAccountId
     const invoice = await stripe.invoices.retrieve(
       invoiceId,
       {},
-      buildStripeConnectRequestOptions(stripeAccountId)
+      buildStripeConnectRequestOptions(invoiceApiAccountId)
     )
     const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
     if (stripeTaxAmount == null) return paymentLink
@@ -4682,12 +4948,66 @@ async function enrichPaymentLinkWithInvoiceTax(paymentLink) {
   }
 }
 
-async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
-  if (!cached?.url) return null
-  if (!stripe) return cached
+function buildManualOrderInvoicePaymentRecord(invoice, { cached = {}, orderNumber } = {}) {
+  if (!invoice?.id) return null
 
-  const storedId = cached.paymentLinkId || cached.invoiceId || null
-  if (!storedId) return cached
+  const isPaid = invoice.status === 'paid'
+  const isOpen = invoice.status === 'open'
+  if (!isPaid && !(isOpen && invoice.hosted_invoice_url)) return null
+
+  const retailerAccountId = resolveManualOrderStripeAccountId({
+    stripeAccountId: cached.stripeAccountId || invoice.metadata?.stripeAccountId,
+    url: cached.url
+  })
+  const resolvedAccountId = retailerAccountId && retailerAccountId !== 'platform' ? retailerAccountId : null
+  const invoiceOnPlatform =
+    cached.invoiceApiAccountId === 'platform' ||
+    invoice.metadata?.invoiceOnPlatform === 'true' ||
+    invoice.metadata?.settlementType === 'platform_destination' ||
+    invoice.metadata?.useDestinationCharge === 'true'
+  const invoiceApiAccountId = invoiceOnPlatform ? null : resolvedAccountId
+
+  const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
+  const totalAmount = Math.round(invoice.total || 0) / 100
+  const paidAtUnix = invoice.status_transitions?.paid_at
+
+  return {
+    url: isOpen ? invoice.hosted_invoice_url : null,
+    paymentLinkId: invoice.id,
+    invoiceId: invoice.id,
+    paymentType: 'invoice',
+    invoiceStatus: invoice.status,
+    livemode: invoice.livemode,
+    stripeDashboardUrl: buildStripeConnectDashboardUrl(
+      'invoice',
+      invoice.id,
+      invoice.livemode,
+      invoiceOnPlatform ? null : resolvedAccountId
+    ),
+    stripeAccountId: resolvedAccountId,
+    invoiceApiAccountId: invoiceOnPlatform ? 'platform' : resolvedAccountId,
+    settlementType:
+      invoice.metadata?.settlementType || (resolvedAccountId ? 'connected_account' : 'bevvi_platform'),
+    orderNumber: orderNumber || invoice.metadata?.orderNumber || null,
+    customerEmail:
+      cached.customerEmail || invoice.customer_email || invoice.metadata?.customerEmail || null,
+    automaticTax: cached.automaticTax ?? invoice.metadata?.automaticTax === 'true',
+    recipientZip: cached.recipientZip || invoice.metadata?.recipientZip || null,
+    stripeTaxAmount,
+    totalAmount: totalAmount || cached.totalAmount || null,
+    paidAt: paidAtUnix ? new Date(paidAtUnix * 1000).toISOString() : null
+  }
+}
+
+async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
+  const storedId = cached?.paymentLinkId || cached?.invoiceId || null
+  if (!cached?.url && !storedId) return null
+  if (!stripe) {
+    if (cached.invoiceStatus === 'paid' || cached.status === 'paid') return { ...cached, orderNumber }
+    return cached?.url ? { ...cached, orderNumber } : null
+  }
+
+  if (!storedId) return cached?.url ? { ...cached, orderNumber } : null
 
   try {
     if (String(storedId).startsWith('plink_')) {
@@ -4722,34 +5042,19 @@ async function resolveStoredManualOrderPaymentLink(cached, orderNumber) {
           : retailerAccountId
       const connectOpts = buildStripeConnectRequestOptions(invoiceApiAccountId)
       const invoice = await stripe.invoices.retrieve(storedId, {}, connectOpts)
-      if (invoice.status === 'open' && invoice.hosted_invoice_url) {
-        return {
-          ...cached,
-          url: invoice.hosted_invoice_url,
-          invoiceId: invoice.id,
-          paymentLinkId: invoice.id,
-          paymentType: 'invoice',
-          livemode: invoice.livemode,
-          stripeAccountId: retailerAccountId || cached.stripeAccountId || null,
-          invoiceApiAccountId: invoiceApiAccountId || 'platform',
-          stripeDashboardUrl: buildStripeConnectDashboardUrl(
-            'invoice',
-            invoice.id,
-            invoice.livemode,
-            invoiceApiAccountId ? retailerAccountId : null
-          ),
-          orderNumber,
-          customerEmail: cached.customerEmail || invoice.customer_email || invoice.metadata?.customerEmail || null,
-          automaticTax: cached.automaticTax ?? invoice.metadata?.automaticTax === 'true',
-          recipientZip: cached.recipientZip || invoice.metadata?.recipientZip || null,
-          stripeTaxAmount: extractStripeInvoiceTaxDollars(invoice)
-        }
+      const record = buildManualOrderInvoicePaymentRecord(invoice, { cached, orderNumber })
+      if (record) return record
+
+      if (invoice.status === 'void' || invoice.status === 'uncollectible') {
+        await clearManualOrderPaymentLink(orderNumber)
       }
-      await clearManualOrderPaymentLink(orderNumber)
       return null
     }
   } catch (error) {
     console.warn('Could not validate stored payment resource:', storedId, error.message)
+    if (cached.invoiceStatus === 'paid' || cached.status === 'paid') {
+      return { ...cached, orderNumber }
+    }
     if (cached?.url) {
       return {
         ...cached,
@@ -5431,42 +5736,15 @@ async function findStripeInvoicesForOrder(orderNumber, stripeAccountId = null) {
 
 async function findStripeInvoiceForOrder(orderNumber) {
   const store = await readManualOrderPaymentLinks()
-  const storedAccountId = store[orderNumber]?.stripeAccountId || null
+  const cached = store[orderNumber] || {}
+  const storedAccountId = cached.stripeAccountId || null
   const invoices = await findStripeInvoicesForOrder(orderNumber, storedAccountId)
-  const openInvoice = invoices.find(
-    (invoice) => invoice.status === 'open' && invoice.hosted_invoice_url
-  )
-  if (!openInvoice) return null
+  const invoice =
+    invoices.find((entry) => entry.status === 'open' && entry.hosted_invoice_url) ||
+    invoices.find((entry) => entry.status === 'paid')
+  if (!invoice) return null
 
-  const stripeTaxAmount = extractStripeInvoiceTaxDollars(openInvoice)
-  const retailerAccountId = storedAccountId || openInvoice.metadata?.stripeAccountId || null
-  const resolvedAccountId = retailerAccountId && retailerAccountId !== 'platform' ? retailerAccountId : null
-  const invoiceOnPlatform =
-    openInvoice.metadata?.invoiceOnPlatform === 'true' ||
-    openInvoice.metadata?.settlementType === 'platform_destination' ||
-    openInvoice.metadata?.useDestinationCharge === 'true'
-
-  return {
-    url: openInvoice.hosted_invoice_url,
-    paymentLinkId: openInvoice.id,
-    invoiceId: openInvoice.id,
-    paymentType: 'invoice',
-    livemode: openInvoice.livemode,
-    stripeDashboardUrl: buildStripeConnectDashboardUrl(
-      'invoice',
-      openInvoice.id,
-      openInvoice.livemode,
-      invoiceOnPlatform ? null : resolvedAccountId
-    ),
-    stripeAccountId: resolvedAccountId,
-    invoiceApiAccountId: invoiceOnPlatform ? 'platform' : resolvedAccountId,
-    settlementType: openInvoice.metadata?.settlementType || (resolvedAccountId ? 'connected_account' : 'bevvi_platform'),
-    orderNumber,
-    customerEmail: openInvoice.customer_email || openInvoice.metadata?.customerEmail || null,
-    automaticTax: openInvoice.metadata?.automaticTax === 'true',
-    recipientZip: openInvoice.metadata?.recipientZip || null,
-    stripeTaxAmount
-  }
+  return buildManualOrderInvoicePaymentRecord(invoice, { cached, orderNumber })
 }
 
 async function archiveManualOrderStripeInvoice(invoiceId, stripeAccountId = null) {
@@ -5668,12 +5946,20 @@ async function getManualOrderPaymentLink(orderNumber, { skipStripeScan = false }
 
   const store = await readManualOrderPaymentLinks()
   const cached = store[orderNumber]
-  if (cached?.url) {
+  if (cached && (cached.url || cached.invoiceId || cached.paymentLinkId)) {
     const resolved = await resolveStoredManualOrderPaymentLink(cached, orderNumber)
-    if (resolved) paymentLink = resolved
+    if (resolved) {
+      paymentLink = resolved
+      const statusChanged =
+        resolved.invoiceStatus !== cached.invoiceStatus ||
+        (resolved.invoiceStatus === 'paid' && Boolean(cached.url) && !resolved.url)
+      if (statusChanged) {
+        await saveManualOrderPaymentLink(orderNumber, resolved)
+      }
+    }
   }
 
-  if (!paymentLink && !skipStripeScan) {
+  if (!paymentLink) {
     const fromInvoice = await findStripeInvoiceForOrder(orderNumber)
     if (fromInvoice) {
       await saveManualOrderPaymentLink(orderNumber, fromInvoice)
@@ -6141,12 +6427,893 @@ async function createStripePaymentLinkForManualOrder(input) {
   }
 }
 
+function buildCombinedBulkStripeLines({ rows, productLabel, matchedProduct }) {
+  const lines = []
+  const priceCounts = new Map()
+
+  for (const row of rows) {
+    const price = parseFloat(row.productPrice)
+    if (Number.isNaN(price) || price < 0) continue
+    priceCounts.set(price, (priceCounts.get(price) || 0) + 1)
+  }
+
+  const productTaxCode = matchedProduct
+    ? resolveManualOrderProductTaxCode(matchedProduct)
+    : STRIPE_TAX_CODES.ALCOHOL_WINE
+
+  for (const [price, quantity] of priceCounts.entries()) {
+    lines.push({
+      type: 'product',
+      name: `${productLabel} — ${quantity} recipient${quantity === 1 ? '' : 's'}`,
+      unitAmount: price,
+      quantity,
+      taxCode: productTaxCode
+    })
+  }
+
+  const sumField = (picker) =>
+    Math.round(rows.reduce((sum, row) => sum + (parseFloat(picker(row)) || 0), 0) * 100) / 100
+
+  const totalShipping = sumField((row) => row.shipping)
+  const totalService = sumField((row) => row.service)
+  const totalGift = sumField((row) => row.giftNote)
+
+  const feeLines = [
+    ['shipping', 'Shipping (all recipients)', totalShipping],
+    ['service', 'Service charge (all recipients)', totalService],
+    ['engraving', 'Gift note (all recipients)', totalGift]
+  ]
+
+  for (const [feeType, name, amount] of feeLines) {
+    if (amount > 0) {
+      lines.push({
+        type: 'fee',
+        feeType,
+        name,
+        unitAmount: amount,
+        quantity: 1,
+        taxCode: resolveStripeTaxCodeForFeeType(feeType)
+      })
+    }
+  }
+
+  for (const stateEntry of aggregateBulkOrderTaxesByState(rows)) {
+    if (stateEntry.salesTax > 0) {
+      lines.push({
+        type: 'fee',
+        feeType: 'salesTax',
+        name: `Sales tax — ${stateEntry.state} (${stateEntry.recipientCount} recipient${stateEntry.recipientCount === 1 ? '' : 's'}, aggregated)`,
+        unitAmount: stateEntry.salesTax,
+        quantity: 1,
+        taxCode: resolveStripeTaxCodeForFeeType('salesTax')
+      })
+    }
+    if (stateEntry.serviceChargeTax > 0) {
+      lines.push({
+        type: 'fee',
+        feeType: 'serviceChargeTax',
+        name: `Service charge tax — ${stateEntry.state} (${stateEntry.recipientCount} recipient${stateEntry.recipientCount === 1 ? '' : 's'}, aggregated)`,
+        unitAmount: stateEntry.serviceChargeTax,
+        quantity: 1,
+        taxCode: resolveStripeTaxCodeForFeeType('serviceChargeTax')
+      })
+    }
+  }
+
+  return lines
+}
+
+function aggregateBulkOrderTaxesByState(rows = []) {
+  const byState = new Map()
+
+  for (const row of rows) {
+    const state = String(row?.state || '').trim().toUpperCase().slice(0, 2)
+    if (!state) continue
+    const entry = byState.get(state) || { salesTax: 0, serviceChargeTax: 0, recipientCount: 0 }
+    entry.salesTax += parseFloat(row.salesTax) || 0
+    entry.serviceChargeTax += parseFloat(row.serviceChargeTax) || 0
+    entry.recipientCount += 1
+    byState.set(state, entry)
+  }
+
+  return [...byState.entries()]
+    .map(([state, totals]) => ({
+      state,
+      salesTax: Math.round(totals.salesTax * 100) / 100,
+      serviceChargeTax: Math.round(totals.serviceChargeTax * 100) / 100,
+      totalTax:
+        Math.round((totals.salesTax + totals.serviceChargeTax) * 100) / 100,
+      recipientCount: totals.recipientCount
+    }))
+    .filter((entry) => entry.totalTax > 0)
+    .sort((a, b) => a.state.localeCompare(b.state))
+}
+
+function buildCombinedBulkInvoiceMemo({ externalOrderNumber, orderNumbers, recipientCount, companyName }) {
+  const memoLines = [
+    `Combined bulk order — ${recipientCount} gift shipment${recipientCount === 1 ? '' : 's'}`,
+    companyName ? `Company: ${companyName}` : null,
+    `External Order / PO: ${normalizeExternalOrderNumber(externalOrderNumber) || '—'}`
+  ]
+  if (Array.isArray(orderNumbers) && orderNumbers.length > 0) {
+    const preview = orderNumbers.slice(0, 15).join(', ')
+    const suffix =
+      orderNumbers.length > 15 ? ` … +${orderNumbers.length - 15} more Bevvi orders` : ''
+    memoLines.push(`Bevvi orders: ${preview}${suffix}`)
+  }
+  return memoLines.filter(Boolean).join('\n').slice(0, 500)
+}
+
+function resolveCombinedBulkPaymentReference({ externalOrderNumber, orderNumbers }) {
+  const firstOrder = Array.isArray(orderNumbers) ? orderNumbers.find(Boolean) : null
+  if (firstOrder) return String(firstOrder).trim().slice(0, 120)
+  const po = normalizeExternalOrderNumber(externalOrderNumber)
+  if (po) return `BULK-PO-${po}`.slice(0, 120)
+  return `BULK-${Date.now()}`
+}
+
+async function createCombinedBulkStripeInvoice(input) {
+  if (!stripe) {
+    return { skipped: true, reason: 'Stripe is not configured on the server' }
+  }
+
+  await ensureProductsCacheLoaded()
+
+  if (stripe && !stripeConnectedAccountsCache.loadedAt) {
+    await refreshStripeConnectedAccountsCache()
+  }
+
+  const {
+    storeName,
+    email,
+    companyName,
+    customerName,
+    externalOrderNumber,
+    rows = [],
+    orderNumbers = [],
+    product,
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  } = input || {}
+
+  const productName = String(product?.name || '').trim()
+  const productSize = String(product?.size || '').trim()
+  if (!storeName || !email) {
+    return { skipped: true, reason: 'storeName and email are required' }
+  }
+  if (!productName || !productSize) {
+    return { skipped: true, reason: 'product.name and product.size are required' }
+  }
+
+  const invoiceRows = (Array.isArray(rows) ? rows : []).filter(
+    (row) =>
+      row?.salesTax != null &&
+      String(row?.streetAddress || '').trim() &&
+      String(row?.city || '').trim() &&
+      String(row?.state || '').trim() &&
+      normalizeZip(row?.zip)
+  )
+  if (invoiceRows.length === 0) {
+    return {
+      skipped: true,
+      reason: 'No rows with calculated tax and complete addresses are available for a combined invoice'
+    }
+  }
+
+  const matchedTemplate = enrichManualOrderProductsForTax([
+    { name: productName, size: productSize, quantity: 1, price: 0 }
+  ])
+  if (matchedTemplate.length === 0) {
+    return { skipped: true, reason: 'Could not resolve catalog product for combined invoice' }
+  }
+  const matchedProduct = matchedTemplate[0]
+  const productLabel = matchedProduct.name || productName
+
+  const sumField = (picker) =>
+    Math.round(invoiceRows.reduce((sum, row) => sum + (parseFloat(picker(row)) || 0), 0) * 100) / 100
+
+  const totalSalesTax = sumField((row) => row.salesTax)
+  const totalServiceChargeTax = sumField((row) => row.serviceChargeTax)
+  const totalService = sumField((row) => row.service)
+  const totalShipping = sumField((row) => row.shipping)
+  const totalGift = sumField((row) => row.giftNote)
+  const preTaxTotal = sumField(
+    (row) =>
+      (parseFloat(row.productPrice) || 0) +
+      (parseFloat(row.shipping) || 0) +
+      (parseFloat(row.service) || 0) +
+      (parseFloat(row.giftNote) || 0)
+  )
+  const orderTotal = Math.round((preTaxTotal + totalSalesTax + totalServiceChargeTax) * 100) / 100
+
+  const billTo = normalizeManualOrderBillTo({
+    billToName: billToName || companyName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  })
+  const billingSource = billTo?.streetAddress
+    ? {
+        streetAddress: billTo.streetAddress,
+        city: billTo.city,
+        state: billTo.state,
+        zip: billTo.zip,
+        country: billTo.country || 'US'
+      }
+    : {
+        streetAddress: invoiceRows[0].streetAddress,
+        city: invoiceRows[0].city,
+        state: invoiceRows[0].state,
+        zip: normalizeZip(invoiceRows[0].zip),
+        country: 'US'
+      }
+
+  const shippingAddress = buildStripeShippingAddress(billingSource)
+  if (!shippingAddress) {
+    return { skipped: true, reason: 'A billing address with zip is required for the combined invoice' }
+  }
+
+  const settleOnBevviPlatform = usesBevviPlatformSettlement(storeName)
+  const stripeAccountId = resolveRetailerStripeAccountId(storeName)
+  if (!settleOnBevviPlatform && !stripeAccountId) {
+    return {
+      skipped: true,
+      reason: `No Stripe connected account configured for retailer "${storeName}".`
+    }
+  }
+
+  const bulkReference = resolveCombinedBulkPaymentReference({ externalOrderNumber, orderNumbers })
+  const primaryOrderNumber = (orderNumbers || []).find(Boolean) || bulkReference
+  const customerEmail = String(email).trim()
+  const invoiceCustomerName = String(customerName || companyName || billTo?.name || 'Customer').trim()
+
+  const priceCounts = new Map()
+  for (const row of invoiceRows) {
+    const price = parseFloat(row.productPrice) || 0
+    priceCounts.set(price, (priceCounts.get(price) || 0) + 1)
+  }
+  const matchedProducts = [...priceCounts.entries()].map(([price, quantity]) => ({
+    ...matchedProduct,
+    price,
+    quantity
+  }))
+
+  const paymentInput = normalizeManualOrderPaymentInput({
+    orderNumber: bulkReference,
+    email: customerEmail,
+    customerName: invoiceCustomerName,
+    storeName,
+    matchedProducts,
+    streetAddress: billingSource.streetAddress,
+    city: billingSource.city,
+    state: billingSource.state,
+    zip: billingSource.zip,
+    country: billingSource.country,
+    salesTax: totalSalesTax,
+    serviceChargeTax: totalServiceChargeTax,
+    service: totalService,
+    shipping: totalShipping,
+    giftNoteCharge: totalGift,
+    engraving: totalGift,
+    preTaxTotal,
+    orderTotal,
+    totalAmount: orderTotal,
+    externalOrderNumber
+  })
+
+  const invoiceSettlement = await resolveManualOrderInvoiceSettlement({ storeName, stripeAccountId })
+  if (invoiceSettlement.blockedReason) {
+    return { skipped: true, reason: invoiceSettlement.blockedReason }
+  }
+
+  const {
+    invoiceApiAccountId,
+    retailerAccountId,
+    useDestinationCharge,
+    settlementType: invoiceSettlementType
+  } = invoiceSettlement
+  const connectOpts = buildStripeConnectRequestOptions(invoiceApiAccountId)
+  const applyPlatformFee = Boolean(retailerAccountId) && !settleOnBevviPlatform
+
+  let lines = buildCombinedBulkStripeLines({
+    rows: invoiceRows,
+    productLabel,
+    matchedProduct
+  })
+  ;({ lines } = reconcileManualOrderLineItems(lines, 0, preTaxTotal))
+
+  if (lines.length === 0) {
+    return { skipped: true, reason: 'No line items available for combined invoice' }
+  }
+
+  const externalPoNumber = normalizeExternalOrderNumber(externalOrderNumber)
+  const sharedMetadata = {
+    source: 'manual-order',
+    bulkCombined: 'true',
+    orderNumber: primaryOrderNumber,
+    externalOrderNumber: externalPoNumber || '',
+    storeName: storeName || '',
+    customerEmail: customerEmail || '',
+    customerName: invoiceCustomerName || '',
+    recipientCount: String(invoiceRows.length),
+    orderNumbers: (orderNumbers || []).slice(0, 20).join(','),
+    automaticTax: 'false',
+    stripeAccountId: stripeAccountId || 'platform',
+    settlementType: invoiceSettlementType,
+    invoiceOnPlatform: invoiceApiAccountId ? 'false' : 'true',
+    useDestinationCharge: useDestinationCharge ? 'true' : 'false'
+  }
+
+  const invoiceParamsBase = {
+    collection_method: 'send_invoice',
+    days_until_due: 30,
+    metadata: sharedMetadata,
+    description: buildCombinedBulkInvoiceMemo({
+      externalOrderNumber: externalPoNumber,
+      orderNumbers,
+      recipientCount: invoiceRows.length,
+      companyName
+    }),
+    custom_fields: buildManualOrderStripeInvoiceCustomFields(externalPoNumber),
+    ...(useDestinationCharge && retailerAccountId
+      ? { transfer_data: { destination: retailerAccountId } }
+      : {})
+  }
+
+  const customer = await stripe.customers.create({
+    email: customerEmail || undefined,
+    name: invoiceCustomerName || undefined,
+    shipping: {
+      name: invoiceCustomerName || 'Customer',
+      address: shippingAddress
+    },
+    metadata: {
+      source: 'manual-order-bulk',
+      bulkReference
+    }
+  }, connectOpts)
+
+  const invoice = await createAndFinalizeManualOrderStripeInvoice({
+    customerId: customer.id,
+    lines,
+    useAutomaticTaxOnInvoice: false,
+    invoiceApiAccountId,
+    connectOpts,
+    invoiceParamsBase,
+    userDiscount: 0,
+    orderNumber: primaryOrderNumber,
+    input: paymentInput,
+    applyPlatformFee
+  })
+
+  const stripeTaxAmount = extractStripeInvoiceTaxDollars(invoice)
+  const platformFeeCents = Number(invoice.application_fee_amount) || 0
+  const invoiceTotal = Math.round(invoice.total) / 100
+  const stateTaxBreakdown = aggregateBulkOrderTaxesByState(invoiceRows)
+
+  const paymentLink = {
+    url: invoice.hosted_invoice_url,
+    paymentLinkId: invoice.id,
+    invoiceId: invoice.id,
+    paymentType: 'invoice',
+    invoiceStatus: invoice.status,
+    livemode: invoice.livemode,
+    stripeDashboardUrl: buildStripeConnectDashboardUrl(
+      'invoice',
+      invoice.id,
+      invoice.livemode,
+      useDestinationCharge ? null : retailerAccountId
+    ),
+    stripeAccountId: retailerAccountId || null,
+    invoiceApiAccountId: invoiceApiAccountId || 'platform',
+    settlementType: invoiceSettlementType,
+    platformFeeAmount: platformFeeCents > 0 ? platformFeeCents / 100 : null,
+    totalAmount: invoiceTotal || orderTotal,
+    expectedOrderTotal: orderTotal,
+    bulkCombined: true,
+    recipientCount: invoiceRows.length,
+    orderNumbers,
+    bulkReference,
+    orderNumber: primaryOrderNumber,
+    customerEmail: customerEmail || null,
+    stripeTaxAmount,
+    automaticTax: false,
+    taxFallback: true,
+    stateTaxBreakdown
+  }
+
+  await saveManualOrderPaymentLink(primaryOrderNumber, paymentLink)
+  if (bulkReference && bulkReference !== primaryOrderNumber) {
+    await saveManualOrderPaymentLink(bulkReference, paymentLink)
+  }
+
+  return paymentLink
+}
+
 function splitCustomerName(fullName) {
   const trimmed = String(fullName || '').trim()
   if (!trimmed) return { firstName: '', lastName: '' }
   const parts = trimmed.split(/\s+/)
   if (parts.length === 1) return { firstName: parts[0], lastName: '' }
   return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
+}
+
+function ensureManualOrderPersonName(firstName, lastName) {
+  const first = String(firstName || '').trim()
+  let last = String(lastName || '').trim()
+  if (first && !last) last = first
+  if (!first && last) return { firstName: last, lastName: last }
+  if (!first && !last) return { firstName: '', lastName: '' }
+  return { firstName: first, lastName: last }
+}
+
+function resolveBulkOrderCustomerNames({ billToName, companyName, rows = [] }) {
+  const billTo = String(billToName || '').trim()
+  if (billTo) {
+    const split = splitCustomerName(billTo)
+    const names = ensureManualOrderPersonName(split.firstName, split.lastName)
+    if (names.firstName) {
+      return { ...names, customerName: billTo }
+    }
+  }
+
+  const firstRow = Array.isArray(rows) ? rows.find(Boolean) : null
+  if (firstRow) {
+    const rowFirst = String(firstRow.firstName || '').trim()
+    const rowLast = String(firstRow.lastName || '').trim()
+    const fromRow = ensureManualOrderPersonName(rowFirst, rowLast)
+    if (fromRow.firstName) {
+      const customerName =
+        String(firstRow.customerName || '').trim() ||
+        `${fromRow.firstName} ${fromRow.lastName}`.trim()
+      return { ...fromRow, customerName }
+    }
+
+    const splitCustomer = splitCustomerName(firstRow.customerName)
+    const fromCustomer = ensureManualOrderPersonName(
+      splitCustomer.firstName,
+      splitCustomer.lastName
+    )
+    if (fromCustomer.firstName) {
+      return {
+        ...fromCustomer,
+        customerName: String(firstRow.customerName || '').trim() || fromCustomer.firstName
+      }
+    }
+  }
+
+  const company = String(companyName || '').trim()
+  if (company) {
+    const split = splitCustomerName(company)
+    const names = ensureManualOrderPersonName(split.firstName, split.lastName)
+    if (names.firstName) {
+      return { ...names, customerName: company }
+    }
+  }
+
+  return { firstName: 'Bulk', lastName: 'Order', customerName: 'Bulk Order' }
+}
+
+async function geocodeUsAddressString(address) {
+  const raw = String(address || '').trim()
+  if (!raw) return { success: false, error: 'Address is required' }
+
+  const fallback = parseUsAddressFallback(raw)
+  if (!GOOGLE_MAPS_API_KEY) {
+    if (fallback?.zip) {
+      return { success: true, formattedAddress: raw, ...fallback, source: 'parsed' }
+    }
+    return { success: false, error: 'Google Maps API key not configured and address could not be parsed' }
+  }
+
+  try {
+    const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: {
+        address: raw,
+        components: 'country:US',
+        key: GOOGLE_MAPS_API_KEY
+      },
+      timeout: 10000
+    })
+
+    const status = response.data?.status
+    if (status === 'OK' && response.data.results?.length) {
+      const top = response.data.results[0]
+      const parsed = parseGoogleAddressComponents(top.address_components)
+      if (parsed.zip) {
+        return {
+          success: true,
+          formattedAddress: top.formatted_address || raw,
+          ...parsed,
+          source: 'google'
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Bulk geocode failed:', raw, error.message)
+  }
+
+  if (fallback?.zip) {
+    return { success: true, formattedAddress: raw, ...fallback, source: 'parsed' }
+  }
+  return { success: false, error: 'Could not resolve address' }
+}
+
+function rowHasStructuredBulkAddress(row) {
+  return Boolean(
+    String(row?.streetAddress || '').trim() &&
+      String(row?.city || '').trim() &&
+      String(row?.state || '').trim() &&
+      normalizeZip(row?.zip)
+  )
+}
+
+async function geocodeBulkOrderRows(rows, { concurrency = 4 } = {}) {
+  const results = [...rows]
+  let index = 0
+
+  async function worker() {
+    while (index < results.length) {
+      const currentIndex = index++
+      const row = results[currentIndex]
+
+      if (rowHasStructuredBulkAddress(row)) {
+        const zip = normalizeZip(row.zip)
+        const state = String(row.state || '')
+          .trim()
+          .toUpperCase()
+          .slice(0, 2)
+        results[currentIndex] = {
+          ...row,
+          zip,
+          state,
+          formattedAddress:
+            row.formattedAddress ||
+            `${String(row.streetAddress).trim()}, ${String(row.city).trim()}, ${state} ${zip}`,
+          geocodeStatus: row.geocodeStatus === 'spreadsheet' ? 'spreadsheet' : 'structured',
+          geocodeError: null
+        }
+        continue
+      }
+
+      if (!row?.addressRaw) {
+        results[currentIndex] = {
+          ...row,
+          geocodeStatus: 'failed',
+          geocodeError: 'Missing address'
+        }
+        continue
+      }
+
+      if (row.geocodeStatus === 'google') {
+        results[currentIndex] = row
+        continue
+      }
+
+      const geocoded = await geocodeUsAddressString(row.addressRaw)
+      if (geocoded.success) {
+        results[currentIndex] = {
+          ...row,
+          streetAddress: geocoded.streetAddress || row.streetAddress || '',
+          city: geocoded.city || row.city || '',
+          state: geocoded.state || row.state || '',
+          zip: geocoded.zip || row.zip || '',
+          formattedAddress: geocoded.formattedAddress || row.addressRaw,
+          geocodeStatus: geocoded.source || 'google',
+          geocodeError: null
+        }
+      } else {
+        results[currentIndex] = {
+          ...row,
+          geocodeStatus: 'failed',
+          geocodeError: geocoded.error || 'Could not resolve address'
+        }
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, results.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
+async function calculateBulkOrderRowTax(row, rowIndex, matchedProductsTemplate) {
+  const streetAddress = String(row.streetAddress || '').trim()
+  const city = String(row.city || '').trim()
+  const state = String(row.state || '').trim()
+  const zip = String(row.zip || '').trim()
+  const productPrice = parseFloat(row.productPrice)
+  const shipping = parseFloat(row.shipping || 0) || 0
+  const service = parseFloat(row.service || 0) || 0
+  const giftNote = parseFloat(row.giftNote || 0) || 0
+
+  if (!streetAddress || !city || !state || !zip) {
+    return {
+      bulkRowId: row.bulkRowId || null,
+      rowIndex: row.rowIndex ?? rowIndex + 1,
+      success: false,
+      error: 'Address must be geocoded before calculating tax'
+    }
+  }
+  if (Number.isNaN(productPrice) || productPrice < 0) {
+    return {
+      bulkRowId: row.bulkRowId || null,
+      rowIndex: row.rowIndex ?? rowIndex + 1,
+      success: false,
+      error: 'Invalid product price'
+    }
+  }
+
+  const matchedProducts = matchedProductsTemplate.map((entry) => ({
+    ...entry,
+    price: productPrice
+  }))
+
+  const taxResult = await calculateManualOrderStripeTax({
+    matchedProducts,
+    streetAddress,
+    city,
+    state,
+    zip,
+    shipping,
+    service,
+    engraving: giftNote
+  })
+
+  if (taxResult.skipped) {
+    return {
+      bulkRowId: row.bulkRowId || null,
+      rowIndex: row.rowIndex ?? rowIndex + 1,
+      success: false,
+      error: taxResult.reason || 'Tax calculation skipped'
+    }
+  }
+
+  const salesTax = taxResult.salesTax ?? 0
+  const serviceChargeTax = taxResult.serviceChargeTax ?? 0
+  const preTaxTotal = productPrice + shipping + service + giftNote
+  const orderTotal = Math.round((preTaxTotal + salesTax + serviceChargeTax) * 100) / 100
+
+  return {
+    bulkRowId: row.bulkRowId || null,
+    rowIndex: row.rowIndex ?? rowIndex + 1,
+    success: true,
+    salesTax,
+    serviceChargeTax,
+    salesTaxSource: taxResult.salesTaxSource,
+    serviceChargeTaxSource: taxResult.serviceChargeTaxSource,
+    stateFallbackRate: taxResult.stateFallbackRate,
+    preTaxTotal,
+    orderTotal
+  }
+}
+
+async function calculateBulkOrderTaxResults(rows, matchedProductsTemplate, { concurrency = 5 } = {}) {
+  const results = new Array(rows.length)
+  let index = 0
+
+  async function worker() {
+    while (index < rows.length) {
+      const currentIndex = index++
+      results[currentIndex] = await calculateBulkOrderRowTax(
+        rows[currentIndex] || {},
+        currentIndex,
+        matchedProductsTemplate
+      )
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, rows.length) }, () => worker())
+  await Promise.all(workers)
+  return results
+}
+
+function formatBevviManualOrderApiError(error) {
+  const bevviError = error?.response?.data?.error
+  const message =
+    (typeof bevviError === 'object' && bevviError?.message) ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unknown error'
+  return {
+    status: error?.response?.status || 500,
+    message,
+    details: error?.response?.data || null
+  }
+}
+
+async function submitManualOrderCore(body) {
+  await ensureProductsCacheLoaded()
+
+  const {
+    products: lineItems,
+    storeName,
+    companyName,
+    customerName,
+    firstName: firstNameInput,
+    lastName: lastNameInput,
+    email,
+    streetAddress,
+    city,
+    state,
+    zip,
+    orderDate,
+    externalOrderNumber,
+    delivery = 0,
+    discount = 0,
+    engraving = 0,
+    salesTax = 0,
+    service = 0,
+    serviceChargeTax = 0,
+    shipping = 0,
+    additionalFees = 0,
+    networkServiceCharge = 0,
+    tip = 0,
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  } = body || {}
+
+  if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    return { success: false, status: 400, error: 'At least one product is required' }
+  }
+  if (!storeName || !email || !streetAddress || !city || !state || !zip) {
+    return {
+      success: false,
+      status: 400,
+      error: 'storeName, email, streetAddress, city, state, and zip are required'
+    }
+  }
+
+  const splitName = splitCustomerName(customerName)
+  let firstName = (firstNameInput || splitName.firstName || '').trim()
+  let lastName = (lastNameInput || splitName.lastName || '').trim()
+  if (firstName && !lastName) lastName = firstName
+  if (!firstName && lastName) firstName = lastName
+  if (!firstName) {
+    return { success: false, status: 400, error: 'Customer name is required' }
+  }
+
+  const matchedProducts = []
+  const productErrors = []
+  for (let i = 0; i < lineItems.length; i++) {
+    const item = lineItems[i] || {}
+    const name = String(item.name || '').trim()
+    const size = String(item.size || '').trim()
+    const quantity = parseInt(item.quantity, 10)
+    const price = parseFloat(item.price)
+    const effectiveSize = size || parseSizeFromCombinedName(name) || ''
+
+    if (!name || !effectiveSize || !quantity || quantity < 1 || Number.isNaN(price) || price < 0) {
+      productErrors.push({ index: i, name, size, message: 'Each product needs name, size, quantity, and price' })
+      continue
+    }
+
+    const matched = findProductInCache(name, size || effectiveSize)
+    if (!matched) {
+      productErrors.push({
+        index: i,
+        name,
+        size: size || effectiveSize,
+        message: size || effectiveSize
+          ? 'Product not found in master list — pick a suggestion that includes bottle size (e.g. 750 ML)'
+          : 'Product not found — include size in your search (e.g. "Perrier Jouet Grand Brut 750 ML")'
+      })
+      continue
+    }
+
+    matchedProducts.push({
+      name: String(matched.name || buildManualOrderProductName(matched)).trim(),
+      price,
+      quantity,
+      category: matched.category,
+      subCategory: matched.subCategory,
+      taxCode: resolveStripeTaxCodeForCatalogProduct(matched)
+    })
+  }
+
+  if (productErrors.length > 0) {
+    return { success: false, status: 400, error: 'Product validation failed', productErrors }
+  }
+
+  const subTotal = matchedProducts.reduce((sum, p) => sum + p.price * p.quantity, 0)
+  const additionalFeesAmount = resolveManualOrderAdditionalFees({ additionalFees, networkServiceCharge })
+  const total =
+    subTotal +
+    parseFloat(delivery || 0) +
+    parseFloat(salesTax || 0) +
+    parseFloat(service || 0) +
+    parseFloat(serviceChargeTax || 0) +
+    parseFloat(shipping || 0) +
+    parseFloat(tip || 0) +
+    parseFloat(engraving || 0) +
+    additionalFeesAmount -
+    parseFloat(discount || 0)
+
+  const payload = {
+    city: String(city).trim(),
+    companyName: String(companyName || '').trim(),
+    delivery: formatManualOrderMoney(delivery),
+    discount: formatManualOrderMoney(discount),
+    engraving: formatManualOrderMoney(engraving),
+    firstName,
+    lastName,
+    orderDate: formatManualOrderDate(orderDate),
+    externalOrderNumber: String(externalOrderNumber || '').trim(),
+    products: JSON.stringify(matchedProducts),
+    salesTax: formatManualOrderMoney(salesTax),
+    service: formatManualOrderMoney(service),
+    serviceChargeTax: formatManualOrderMoney(serviceChargeTax),
+    shipping: formatManualOrderMoney(shipping),
+    networkServiceCharge: formatManualOrderMoney(additionalFeesAmount),
+    state: String(state).trim(),
+    storeName: String(storeName).trim(),
+    streetAddress: String(streetAddress).trim(),
+    subTotal: formatManualOrderMoney(subTotal),
+    tip: formatManualOrderMoney(tip),
+    total: formatManualOrderMoney(total),
+    zip: String(zip).trim(),
+    email: String(email).trim(),
+    ...(() => {
+      const billTo = normalizeManualOrderBillTo({
+        billToName,
+        billToStreetAddress,
+        billToCity,
+        billToState,
+        billToZip,
+        billToCountry
+      })
+      if (!billTo) return {}
+      return {
+        billToName: billTo.name,
+        billToStreetAddress: billTo.streetAddress,
+        billToCity: billTo.city,
+        billToState: billTo.state,
+        billToZip: billTo.zip,
+        billToCountry: billTo.country
+      }
+    })()
+  }
+
+  const response = await axios.post('https://api.getbevvi.com/api/shopifyorders/manualOrderAPI', payload, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    timeout: 30000
+  })
+
+  const orderNumber = extractManualOrderNumber(response.data)
+  const billTo = normalizeManualOrderBillTo({
+    billToName,
+    billToStreetAddress,
+    billToCity,
+    billToState,
+    billToZip,
+    billToCountry
+  })
+  if (orderNumber && billTo) {
+    await saveManualOrderBillTo(orderNumber, billTo)
+  }
+
+  return {
+    success: true,
+    data: response.data,
+    orderNumber,
+    orderTotal: total,
+    matchedProducts,
+    payload,
+    billTo
+  }
 }
 
 // Product search endpoint - searches cached products
@@ -6473,170 +7640,279 @@ app.post('/api/manual-order/parse-receipt', async (req, res) => {
 // Submit manual order to Bevvi after validating products against cache
 app.post('/api/manual-order', async (req, res) => {
   try {
+    const result = await submitManualOrderCore(req.body || {})
+    if (!result.success) {
+      return res.status(result.status || 400).json(result)
+    }
+
+    console.log('📤 Submitting manual order:', {
+      storeName: result.payload.storeName,
+      email: result.payload.email,
+      products: result.matchedProducts.length
+    })
+
+    res.json(result)
+  } catch (error) {
+    console.error('Error submitting manual order:', error.message)
+    if (error.response?.data) {
+      console.error('Bevvi manual order response:', JSON.stringify(error.response.data))
+    }
+    const formatted = formatBevviManualOrderApiError(error)
+    res.status(formatted.status).json({
+      success: false,
+      error: 'Failed to submit manual order',
+      message: formatted.message,
+      details: formatted.details
+    })
+  }
+})
+
+app.post('/api/manual-order/parse-spreadsheet', async (req, res) => {
+  req.setTimeout(600000)
+  res.setTimeout(600000)
+  try {
+    const { dataBase64, fileName, geocode = true } = req.body || {}
+    if (!dataBase64) {
+      return res.status(400).json({ success: false, error: 'dataBase64 is required' })
+    }
+
+    const byteLength = Buffer.byteLength(String(dataBase64), 'base64')
+    if (byteLength > 10 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'File must be under 10 MB' })
+    }
+
+    console.log('📊 Parsing bulk spreadsheet:', fileName || 'upload.xlsx', `(geocode=${geocode !== false && geocode !== 'false'})`)
+
+    const buffer = Buffer.from(String(dataBase64), 'base64')
+    const parsed = parseBulkOrderSpreadsheet(buffer, fileName || 'upload.xlsx')
+    if (!parsed.success) {
+      return res.status(422).json(parsed)
+    }
+
+    let rows = parsed.rows
+    const shouldGeocode = geocode !== false && geocode !== 'false'
+    if (shouldGeocode) {
+      rows = await geocodeBulkOrderRows(rows)
+    }
+
+    const geocodeFailures = rows.filter((row) => row.geocodeStatus === 'failed').length
+    console.log(
+      `✅ Parsed bulk spreadsheet: ${rows.length} rows` +
+        (shouldGeocode ? `, ${geocodeFailures} geocode failure(s)` : ' (geocode deferred)')
+    )
+
+    res.json({
+      ...parsed,
+      rows,
+      geocoded: shouldGeocode,
+      geocodeFailures
+    })
+  } catch (error) {
+    console.error('Error parsing bulk order spreadsheet:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to parse spreadsheet',
+      message: error.message
+    })
+  }
+})
+
+app.post('/api/manual-order/bulk-geocode', async (req, res) => {
+  req.setTimeout(600000)
+  res.setTimeout(600000)
+  try {
+    const { rows = [] } = req.body || {}
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one row is required' })
+    }
+
+    console.log(`🌍 Geocoding ${rows.length} bulk order row(s)...`)
+    const geocodedRows = await geocodeBulkOrderRows(rows)
+    const geocodeFailures = geocodedRows.filter((row) => row.geocodeStatus === 'failed').length
+    console.log(`✅ Bulk geocode complete: ${geocodedRows.length - geocodeFailures}/${geocodedRows.length} resolved`)
+
+    res.json({
+      success: true,
+      rows: geocodedRows,
+      geocodeFailures
+    })
+  } catch (error) {
+    console.error('Error geocoding bulk order rows:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to geocode addresses',
+      message: error.message
+    })
+  }
+})
+
+app.post('/api/manual-order/bulk-calculate-tax', async (req, res) => {
+  req.setTimeout(600000)
+  res.setTimeout(600000)
+  try {
     await ensureProductsCacheLoaded()
 
-    const {
-      products: lineItems,
-      storeName,
-      companyName,
-      customerName,
-      firstName: firstNameInput,
-      lastName: lastNameInput,
-      email,
-      streetAddress,
-      city,
-      state,
-      zip,
-      orderDate,
-      externalOrderNumber,
-      delivery = 0,
-      discount = 0,
-      engraving = 0,
-      salesTax = 0,
-      service = 0,
-      serviceChargeTax = 0,
-      shipping = 0,
-      additionalFees = 0,
-      networkServiceCharge = 0,
-      tip = 0,
-      billToName,
-      billToStreetAddress,
-      billToCity,
-      billToState,
-      billToZip,
-      billToCountry
-    } = req.body || {}
+    const { product, rows = [] } = req.body || {}
+    const productName = String(product?.name || '').trim()
+    const productSize = String(product?.size || '').trim()
+    const productQuantity = parseInt(product?.quantity, 10) || 1
 
-    if (!Array.isArray(lineItems) || lineItems.length === 0) {
-      return res.status(400).json({ success: false, error: 'At least one product is required' })
-    }
-    if (!storeName || !email || !streetAddress || !city || !state || !zip) {
+    if (!productName || !productSize) {
       return res.status(400).json({
         success: false,
-        error: 'storeName, email, streetAddress, city, state, and zip are required'
+        error: 'product.name and product.size are required for bulk tax calculation'
+      })
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'At least one row is required' })
+    }
+
+    const productInputs = [
+      {
+        name: productName,
+        size: productSize,
+        quantity: productQuantity,
+        price: 0
+      }
+    ]
+    const matchedProductsTemplate = enrichManualOrderProductsForTax(productInputs)
+    if (matchedProductsTemplate.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Could not resolve product for tax calculation'
       })
     }
 
-    const splitName = splitCustomerName(customerName)
-    const firstName = (firstNameInput || splitName.firstName || '').trim()
-    const lastName = (lastNameInput || splitName.lastName || '').trim()
-    if (!firstName) {
-      return res.status(400).json({ success: false, error: 'Customer name is required' })
-    }
+    console.log(`🧾 Calculating bulk tax for ${rows.length} row(s)...`)
+    const results = await calculateBulkOrderTaxResults(rows, matchedProductsTemplate)
+    const successCount = results.filter((entry) => entry.success).length
+    console.log(`✅ Bulk tax complete: ${successCount}/${rows.length} row(s)`)
 
-    const matchedProducts = []
-    const productErrors = []
-    for (let i = 0; i < lineItems.length; i++) {
-      const item = lineItems[i] || {}
-      const name = String(item.name || '').trim()
-      const size = String(item.size || '').trim()
-      const quantity = parseInt(item.quantity, 10)
-      const price = parseFloat(item.price)
-      const effectiveSize = size || parseSizeFromCombinedName(name) || ''
+    const totalSalesTax = results.reduce((sum, entry) => sum + (entry.salesTax || 0), 0)
+    const totalServiceChargeTax = results.reduce((sum, entry) => sum + (entry.serviceChargeTax || 0), 0)
+    const grandTotal = results.reduce((sum, entry) => sum + (entry.orderTotal || 0), 0)
 
-      if (!name || !effectiveSize || !quantity || quantity < 1 || Number.isNaN(price) || price < 0) {
-        productErrors.push({ index: i, name, size, message: 'Each product needs name, size, quantity, and price' })
-        continue
+    res.json({
+      success: true,
+      results,
+      summary: {
+        rowCount: rows.length,
+        successCount,
+        failureCount: rows.length - successCount,
+        totalSalesTax: Math.round(totalSalesTax * 100) / 100,
+        totalServiceChargeTax: Math.round(totalServiceChargeTax * 100) / 100,
+        grandTotal: Math.round(grandTotal * 100) / 100
       }
+    })
+  } catch (error) {
+    console.error('Error calculating bulk manual order tax:', error.message)
+    res.status(500).json({
+      success: false,
+      error: 'Failed to calculate bulk tax',
+      message: error.message
+    })
+  }
+})
 
-      const matched = findProductInCache(name, size || effectiveSize)
-      if (!matched) {
-        productErrors.push({
-          index: i,
-          name,
-          size: size || effectiveSize,
-          message: size || effectiveSize
-            ? 'Product not found in master list — pick a suggestion that includes bottle size (e.g. 750 ML)'
-            : 'Product not found — include size in your search (e.g. "Perrier Jouet Grand Brut 750 ML")'
-        })
-        continue
-      }
-
-      matchedProducts.push({
-        name: String(matched.name || buildManualOrderProductName(matched)).trim(),
-        price,
-        quantity,
-        category: matched.category,
-        subCategory: matched.subCategory,
-        taxCode: resolveStripeTaxCodeForCatalogProduct(matched)
-      })
+app.post('/api/manual-order/bulk', async (req, res) => {
+  req.setTimeout(120000)
+  res.setTimeout(120000)
+  try {
+    const result = await submitBulkSingleManualOrder(req.body || {})
+    if (!result.success) {
+      return res.status(result.status || 400).json(result)
     }
 
-    if (productErrors.length > 0) {
-      return res.status(400).json({ success: false, error: 'Product validation failed', productErrors })
-    }
-
-    const subTotal = matchedProducts.reduce((sum, p) => sum + p.price * p.quantity, 0)
-    const additionalFeesAmount = resolveManualOrderAdditionalFees({ additionalFees, networkServiceCharge })
-    const total =
-      subTotal +
-      parseFloat(delivery || 0) +
-      parseFloat(salesTax || 0) +
-      parseFloat(service || 0) +
-      parseFloat(serviceChargeTax || 0) +
-      parseFloat(shipping || 0) +
-      parseFloat(tip || 0) +
-      parseFloat(engraving || 0) +
-      additionalFeesAmount -
-      parseFloat(discount || 0)
-
-    const payload = {
-      city: String(city).trim(),
-      companyName: String(companyName || '').trim(),
-      delivery: formatManualOrderMoney(delivery),
-      discount: formatManualOrderMoney(discount),
-      engraving: formatManualOrderMoney(engraving),
-      firstName,
-      lastName,
-      orderDate: formatManualOrderDate(orderDate),
-      externalOrderNumber: String(externalOrderNumber || '').trim(),
-      products: JSON.stringify(matchedProducts),
-      salesTax: formatManualOrderMoney(salesTax),
-      service: formatManualOrderMoney(service),
-      serviceChargeTax: formatManualOrderMoney(serviceChargeTax),
-      shipping: formatManualOrderMoney(shipping),
-      networkServiceCharge: formatManualOrderMoney(additionalFeesAmount),
-      state: String(state).trim(),
-      storeName: String(storeName).trim(),
-      streetAddress: String(streetAddress).trim(),
-      subTotal: formatManualOrderMoney(subTotal),
-      tip: formatManualOrderMoney(tip),
-      total: formatManualOrderMoney(total),
-      zip: String(zip).trim(),
-      email: String(email).trim(),
-      ...(() => {
-        const billTo = normalizeManualOrderBillTo({
-          billToName,
-          billToStreetAddress,
-          billToCity,
-          billToState,
-          billToZip,
-          billToCountry
-        })
-        if (!billTo) return {}
-        return {
-          billToName: billTo.name,
-          billToStreetAddress: billTo.streetAddress,
-          billToCity: billTo.city,
-          billToState: billTo.state,
-          billToZip: billTo.zip,
-          billToCountry: billTo.country
-        }
-      })()
-    }
-
-    console.log('📤 Submitting manual order:', { storeName: payload.storeName, email: payload.email, products: matchedProducts.length })
-
-    const response = await axios.post('https://api.getbevvi.com/api/shopifyorders/manualOrderAPI', payload, {
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json'
-      },
-      timeout: 30000
+    console.log('📤 Submitted bulk spreadsheet as single manual order:', {
+      orderNumber: result.orderNumber,
+      recipientCount: result.recipientCount,
+      storeName: result.payload?.storeName
     })
 
-    const orderNumber = extractManualOrderNumber(response.data)
-    const billTo = normalizeManualOrderBillTo({
+    res.json({
+      success: true,
+      mode: 'single',
+      orderNumber: result.orderNumber,
+      orderTotal: result.orderTotal,
+      recipientCount: result.recipientCount,
+      addressSource: result.addressSource,
+      matchedProducts: result.matchedProducts,
+      summary: result.summary
+    })
+  } catch (error) {
+    console.error('Error submitting bulk manual order:', error.message)
+    if (error.response?.data) {
+      console.error('Bevvi bulk order response:', JSON.stringify(error.response.data))
+    }
+    const formatted = formatBevviManualOrderApiError(error)
+    res.status(formatted.status).json({
+      success: false,
+      error: 'Failed to submit bulk order',
+      message: formatted.message,
+      details: formatted.details
+    })
+  }
+})
+
+app.post('/api/manual-order/bulk/combined-invoice', async (req, res) => {
+  try {
+    const {
+      storeName,
+      companyName,
+      email,
+      customerName,
+      externalOrderNumber,
+      product,
+      rows = [],
+      orderNumbers = [],
+      billToName,
+      billToStreetAddress,
+      billToCity,
+      billToState,
+      billToZip,
+      billToCountry,
+      regenerate = false
+    } = req.body || {}
+
+    const bulkReference = resolveCombinedBulkPaymentReference({ externalOrderNumber, orderNumbers })
+    const lookupOrderNumber =
+      (Array.isArray(orderNumbers) ? orderNumbers.find(Boolean) : null) || bulkReference
+
+    if (!regenerate) {
+      const existingLink = await getManualOrderPaymentLink(lookupOrderNumber, { skipStripeScan: true })
+      if (existingLink?.invoiceStatus === 'paid' || existingLink?.status === 'paid') {
+        return res.json({ success: true, paymentLink: existingLink, existing: true, paid: true })
+      }
+      if (existingLink?.url) {
+        return res.json({ success: true, paymentLink: existingLink, existing: true })
+      }
+    } else if (lookupOrderNumber) {
+      const store = await readManualOrderPaymentLinks()
+      await clearManualOrderPaymentLink(lookupOrderNumber)
+      if (bulkReference !== lookupOrderNumber) {
+        await clearManualOrderPaymentLink(bulkReference)
+      }
+      const archiveActions = await archiveManualOrderStripePaymentResources(
+        store[lookupOrderNumber] || store[bulkReference],
+        lookupOrderNumber
+      )
+      if (archiveActions.length > 0) {
+        console.log('🗑️ Archived previous combined bulk invoice:', {
+          bulkReference,
+          archiveActions
+        })
+      }
+    }
+
+    const paymentLink = await createCombinedBulkStripeInvoice({
+      storeName,
+      companyName,
+      email,
+      customerName: customerName || companyName,
+      externalOrderNumber,
+      product,
+      rows,
+      orderNumbers,
       billToName,
       billToStreetAddress,
       billToCity,
@@ -6644,32 +7920,25 @@ app.post('/api/manual-order', async (req, res) => {
       billToZip,
       billToCountry
     })
-    if (orderNumber && billTo) {
-      await saveManualOrderBillTo(orderNumber, billTo)
+
+    if (paymentLink?.skipped) {
+      return res.status(paymentLink.reason?.includes('tax') ? 400 : 503).json({
+        success: false,
+        error: paymentLink.reason
+      })
     }
 
     res.json({
       success: true,
-      data: response.data,
-      orderNumber,
-      orderTotal: total,
-      matchedProducts,
-      payload,
-      billTo
+      paymentLink,
+      regenerated: Boolean(regenerate)
     })
   } catch (error) {
-    console.error('Error submitting manual order:', error.message)
-    const bevviError = error.response?.data?.error
-    const bevviMessage =
-      (typeof bevviError === 'object' && bevviError?.message) ||
-      error.response?.data?.message ||
-      error.message
-    const status = error.response?.status || 500
-    res.status(status).json({
+    console.error('Error creating combined bulk Stripe invoice:', error.message)
+    res.status(500).json({
       success: false,
-      error: 'Failed to submit manual order',
-      message: bevviMessage,
-      details: error.response?.data || null
+      error: 'Failed to create combined Stripe invoice',
+      message: error.message
     })
   }
 })
@@ -6900,6 +8169,9 @@ app.post('/api/manual-order/payment-link', async (req, res) => {
       !shouldRegenerate && normalizedOrderNumber
         ? await getManualOrderPaymentLink(normalizedOrderNumber)
         : null
+    if (existingLink?.invoiceStatus === 'paid' || existingLink?.status === 'paid') {
+      return res.json({ success: true, paymentLink: existingLink, existing: true, paid: true })
+    }
     if (existingLink?.url) {
       return res.json({ success: true, paymentLink: existingLink, existing: true })
     }
@@ -7274,6 +8546,10 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
       const billTo = await getManualOrderBillTo(orderNumber)
       if (billTo) {
         data.billTo = billTo
+      }
+      const bulkRecipients = await getBulkOrderRecipients(orderNumber)
+      if (bulkRecipients) {
+        data.bulkRecipients = bulkRecipients
       }
     }
 
@@ -8454,6 +9730,11 @@ app.listen(PORT, async () => {
   console.log(`   POST /api/manual-order/retailer-stripe-alias - Link Bevvi retailer to Stripe account`)
   console.log(`   POST /api/manual-order/calculate-tax - Estimate sales tax via Stripe Tax`)
   console.log(`   POST /api/manual-order/parse-receipt - Scan receipt image/PDF into order fields`)
+  console.log(`   POST /api/manual-order/parse-spreadsheet - Parse bulk order spreadsheet (xlsx/csv)`)
+  console.log(`   POST /api/manual-order/bulk-geocode - Geocode bulk spreadsheet addresses`)
+  console.log(`   POST /api/manual-order/bulk-calculate-tax - Calculate sales tax per recipient row`)
+  console.log(`   POST /api/manual-order/bulk - Submit spreadsheet rows as one consolidated manual order`)
+  console.log(`   POST /api/manual-order/bulk/combined-invoice - Create one Stripe invoice for a bulk batch`)
   console.log(`   GET  /api/manual-order/payment-link?orderNumber= - Look up Stripe payment link for manual order`)
   console.log(`   POST /api/manual-order/payment-link - Create Stripe payment link for manual order`)
   console.log(`   POST /api/manual-order/payment-link/void - Void Stripe invoice for manual order`)

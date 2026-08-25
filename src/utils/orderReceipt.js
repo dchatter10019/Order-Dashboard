@@ -189,7 +189,7 @@ function pickBillTo(orderDetails) {
   return { name: name || '—', street, city, state, zip, country }
 }
 
-function buildReceiptAddressLines(address) {
+export function buildReceiptAddressLines(address) {
   if (!address) return []
   return [
     address.street,

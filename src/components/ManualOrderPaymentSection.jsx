@@ -36,6 +36,14 @@ const RegenerateInvoiceButton = ({ onClick, disabled, isWorking, className = '',
 
 const PAYMENT_LINK_LOOKUP_TIMEOUT_MS = 30000
 
+function isPaidManualOrderPaymentLink(paymentLink) {
+  return paymentLink?.invoiceStatus === 'paid' || paymentLink?.status === 'paid'
+}
+
+function isActiveManualOrderPaymentLink(paymentLink) {
+  return Boolean(paymentLink?.url) || isPaidManualOrderPaymentLink(paymentLink)
+}
+
 const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDetails, detailsError, onStripeTaxResolved }) => {
   const [paymentLink, setPaymentLink] = useState(null)
   const [stripeConfigured, setStripeConfigured] = useState(true)
@@ -88,7 +96,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDet
         return
       }
       setStripeConfigured(data.configured !== false)
-      setPaymentLink(data.paymentLink?.url ? data.paymentLink : null)
+      setPaymentLink(isActiveManualOrderPaymentLink(data.paymentLink) ? data.paymentLink : null)
       setRegenerateSuccess(false)
       setVoidSuccess(false)
     } catch (e) {
@@ -170,6 +178,11 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDet
         setError(data.paymentLink.reason || 'Invoice was not created')
         return
       }
+      if (isPaidManualOrderPaymentLink(data.paymentLink)) {
+        setPaymentLink(data.paymentLink)
+        setRegenerateSuccess(false)
+        return
+      }
       if (!data.paymentLink?.url) {
         setError('Invoice payment URL was not returned by the server')
         return
@@ -231,6 +244,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDet
   const regenerateDisabled = isCreating || isVoiding || isLoading || !canManagePaymentLink
   const voidDisabled = isCreating || isVoiding || isLoading
   const detailsStillLoading = isLoadingDetails || (!orderDetails && !detailsError)
+  const invoicePaid = isPaidManualOrderPaymentLink(paymentLink)
 
   return (
     <div className="space-y-4 rounded-lg border border-indigo-100 bg-white p-4 shadow-sm">
@@ -254,7 +268,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDet
         </div>
       ) : null}
 
-      {stripeConfigured && !isLoading && !paymentLink?.url && !detailsStillLoading ? (
+      {stripeConfigured && !isLoading && !isActiveManualOrderPaymentLink(paymentLink) && !detailsStillLoading ? (
         <p className="text-xs text-gray-500">
           Creates an itemized Stripe invoice with automatic tax for the recipient zip.
         </p>
@@ -294,6 +308,55 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDet
               )}
             </button>
           </div>
+        </div>
+      ) : invoicePaid ? (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-4 text-sm text-green-900">
+          <p className="font-semibold">Invoice paid</p>
+          <p className="mt-1 text-green-800">
+            The Stripe invoice for order <strong>{paymentLink.orderNumber || orderNumber}</strong> has been paid in full.
+          </p>
+          {(paymentLink.orderNumber || paymentLink.totalAmount != null || paymentLink.invoiceId) && (
+            <p className="mt-1 text-green-800">
+              {paymentLink.orderNumber ? (
+                <span className="mr-4">
+                  Order: <strong>{paymentLink.orderNumber}</strong>
+                </span>
+              ) : null}
+              {paymentLink.totalAmount != null ? (
+                <span className="mr-4">
+                  Total: <strong>{formatDollarAmount(paymentLink.totalAmount)}</strong>
+                </span>
+              ) : paymentContext?.totalAmount != null ? (
+                <span className="mr-4">
+                  Total: <strong>{formatDollarAmount(paymentContext.totalAmount)}</strong>
+                </span>
+              ) : null}
+              {paymentLink.invoiceId ? (
+                <span>
+                  Stripe ID:{' '}
+                  <strong className="font-mono text-xs">{paymentLink.invoiceId}</strong>
+                </span>
+              ) : null}
+            </p>
+          )}
+          {paymentLink.stripeTaxAmount != null ? (
+            <p className="mt-1 text-green-800">
+              Invoice tax: <strong>{formatDollarAmount(paymentLink.stripeTaxAmount)}</strong>
+            </p>
+          ) : null}
+          {paymentLink.stripeDashboardUrl ? (
+            <div className="mt-3">
+              <a
+                href={paymentLink.stripeDashboardUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-md border border-green-300 bg-white px-3 py-2 text-sm font-medium text-green-900 hover:bg-green-100"
+              >
+                <ExternalLink className="mr-2 h-4 w-4" />
+                View in Stripe
+              </a>
+            </div>
+          ) : null}
         </div>
       ) : paymentLink?.url ? (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-4 text-sm text-indigo-900">
@@ -479,7 +542,7 @@ const ManualOrderPaymentSection = ({ order, orderDetails, isActive, isLoadingDet
         </div>
       )}
 
-      {error && !isLoading && !paymentLink?.url ? (
+      {error && !isLoading && !isActiveManualOrderPaymentLink(paymentLink) ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <p className="text-sm text-red-700" role="alert">{error}</p>
           <button

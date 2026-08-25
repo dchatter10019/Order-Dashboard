@@ -92,9 +92,14 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const fetchSeqRef = useRef(0)
+  const ordersFetchAbortRef = useRef(null)
+  const ordersFetchKindRef = useRef(null)
+  const ordersFetchGenerationRef = useRef(0)
+  const dateRangeRef = useRef(null)
+  const fetchOrdersRef = useRef(null)
   const [apiError, setApiError] = useState(null)
   const [dateRange, setDateRange] = useState(defaultOrdersDateRange)
+  dateRangeRef.current = dateRange
   const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected'])
   const [deliveryFilter, setDeliveryFilter] = useState([])
   
@@ -610,15 +615,29 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   // Fetch orders function (wrapped in useCallback to avoid dependency issues)
   const fetchOrders = useCallback(async ({ background = false } = {}) => {
-    const seq = ++fetchSeqRef.current
+    if (background && ordersFetchKindRef.current === 'foreground') {
+      return
+    }
+
+    const generation = ++ordersFetchGenerationRef.current
+
+    if (ordersFetchAbortRef.current) {
+      ordersFetchAbortRef.current.abort()
+    }
+    const controller = new AbortController()
+    ordersFetchAbortRef.current = controller
+    ordersFetchKindRef.current = background ? 'background' : 'foreground'
+
+    const isCurrentFetch = () => generation === ordersFetchGenerationRef.current
+
+    const activeDateRange = dateRangeRef.current
 
     try {
       // Validate date range before making API call
-      const dateRangeError = getOrderDateRangeError(dateRange)
+      const dateRangeError = getOrderDateRangeError(activeDateRange)
       if (dateRangeError) {
-        setApiError(dateRangeError)
-        if (!background) {
-          setIsLoading(false)
+        if (isCurrentFetch()) {
+          setApiError(dateRangeError)
         }
         return
       }
@@ -635,11 +654,13 @@ const Dashboard = ({ onSwitchToAI }) => {
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
       const clientTz = encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)
-      const apiUrl = `/api/orders?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}&timeZone=${clientTz}&t=${timestamp}&r=${randomId}`
-      console.log(`📅 Fetching orders: ${dateRange.startDate} to ${dateRange.endDate}${background ? ' (background)' : ''}`)
+      const apiUrl = `/api/orders?startDate=${activeDateRange.startDate}&endDate=${activeDateRange.endDate}&timeZone=${clientTz}&t=${timestamp}&r=${randomId}`
+      console.log(`📅 Fetching orders: ${activeDateRange.startDate} to ${activeDateRange.endDate}${background ? ' (background)' : ''}`)
 
       const response = await apiFetch(apiUrl, {
         cache: 'no-store',
+        signal: controller.signal,
+        timeoutMs: 180000,
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
@@ -647,9 +668,7 @@ const Dashboard = ({ onSwitchToAI }) => {
         }
       })
 
-      if (seq !== fetchSeqRef.current) {
-        return
-      }
+      if (!isCurrentFetch()) return
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -666,9 +685,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       const data = await response.json()
       console.log(`✅ Received ${data.data?.length || 0} orders ${data.cached ? '(cached)' : ''}${data.chunked ? ` (${data.chunks} chunks)` : ''}`)
 
-      if (seq !== fetchSeqRef.current) {
-        return
-      }
+      if (!isCurrentFetch()) return
 
       // Only update orders after ALL data is retrieved (not during chunking)
       if (data.data && Array.isArray(data.data)) {
@@ -676,11 +693,6 @@ const Dashboard = ({ onSwitchToAI }) => {
         markOrdersSeen(data.data)
       } else if (!background) {
         setOrders([])
-      }
-
-      // Clear loading state AFTER orders are set to prevent number jumping
-      if (!background) {
-        setIsLoading(false)
       }
 
       // Update last refresh time
@@ -691,9 +703,8 @@ const Dashboard = ({ onSwitchToAI }) => {
       const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
       setNextRefreshTime(nextRefresh)
     } catch (error) {
-      if (seq !== fetchSeqRef.current) {
-        return
-      }
+      if (!isCurrentFetch()) return
+      if (error?.name === 'AbortError') return
       console.error('❌ Error fetching orders:', error)
       if (!background) {
         setApiError({
@@ -701,14 +712,20 @@ const Dashboard = ({ onSwitchToAI }) => {
           status: 'Network Error',
           details: error.message
         })
-        setIsLoading(false)
       }
     } finally {
-      if (seq === fetchSeqRef.current && background) {
+      if (!isCurrentFetch()) return
+      ordersFetchAbortRef.current = null
+      ordersFetchKindRef.current = null
+      if (background) {
         setIsRefreshing(false)
+      } else {
+        setIsLoading(false)
       }
     }
-  }, [dateRange, markOrdersSeen])
+  }, [markOrdersSeen])
+
+  fetchOrdersRef.current = fetchOrders
 
   // Auto-refresh functionality
   const toggleAutoRefresh = async () => {
@@ -808,11 +825,8 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   useEffect(() => {
-    // Debounce fetchOrders to prevent rapid API calls when date changes
-    const debounceTimer = setTimeout(() => {
-      fetchOrders()
-    }, 500) // Wait 500ms after last date change before fetching
-    
+    fetchOrdersRef.current?.()
+
     // Update backend auto-refresh with new date range if auto-refresh is active
     if (autoRefresh) {
       const updateBackendAutoRefresh = async () => {
@@ -842,10 +856,15 @@ const Dashboard = ({ onSwitchToAI }) => {
       
       updateBackendAutoRefresh()
     }
-    
-    // Cleanup: cancel the timer if dateRange changes again before it fires
-    return () => clearTimeout(debounceTimer)
-  }, [dateRange, autoRefresh])
+  }, [dateRange.startDate, dateRange.endDate, autoRefresh])
+
+  useEffect(() => {
+    return () => {
+      ordersFetchAbortRef.current?.abort()
+      ordersFetchAbortRef.current = null
+      ordersFetchKindRef.current = null
+    }
+  }, [])
 
   // Real-time updates using Server-Sent Events
   useEffect(() => {
@@ -870,7 +889,7 @@ const Dashboard = ({ onSwitchToAI }) => {
               setLastRefreshTime(new Date(data.refreshTime))
               
               // Refresh in background so the order table stays visible.
-              fetchOrders({ background: true })
+              fetchOrdersRef.current?.({ background: true })
               
               // Show notification to user
               if (data.ordersCount > 0) {
@@ -913,7 +932,7 @@ const Dashboard = ({ onSwitchToAI }) => {
         eventSource.close()
       }
     }
-  }, [fetchOrders])
+  }, [])
 
   // Auto-start auto-refresh when component mounts
   useEffect(() => {

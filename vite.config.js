@@ -6,18 +6,26 @@ import { fileURLToPath } from 'url'
 const projectRoot = path.dirname(fileURLToPath(import.meta.url))
 
 /** Vite dev cannot import named exports from local .cjs files — expose a default export instead. */
-function invoicingRulesCjsInterop() {
+function localCjsDefaultExportInterop() {
   return {
-    name: 'invoicing-rules-cjs-interop',
+    name: 'local-cjs-default-export-interop',
     transform(code, id) {
       const normalized = id.replace(/\\/g, '/')
-      if (!normalized.endsWith('lib/invoicingRulesEngine.cjs')) {
-        return null
+      if (normalized.endsWith('lib/manualOrderBulkSpreadsheet.cjs')) {
+        return {
+          code: code
+            .replace(/const XLSX = require\('xlsx-js-style'\)/, "import XLSX from 'xlsx-js-style'")
+            .replace(/module\.exports\s*=\s*\{/, 'export default {'),
+          map: null
+        }
       }
-      return {
-        code: code.replace(/module\.exports\s*=\s*\{/, 'export default {'),
-        map: null
+      if (normalized.endsWith('lib/invoicingRulesEngine.cjs')) {
+        return {
+          code: code.replace(/module\.exports\s*=\s*\{/, 'export default {'),
+          map: null
+        }
       }
+      return null
     }
   }
 }
@@ -26,17 +34,22 @@ const apiProxy = {
   '/api': {
     target: 'http://localhost:3001',
     changeOrigin: true,
-    timeout: 180000,
-    proxyTimeout: 180000
+    // Bulk manual orders / tax can run many minutes — match server timeouts.
+    timeout: 600000,
+    proxyTimeout: 600000
   }
 }
 
 export default defineConfig({
-  plugins: [react(), invoicingRulesCjsInterop()],
+  plugins: [react(), localCjsDefaultExportInterop()],
   resolve: {
     alias: {
-      '@lib/invoicing-rules': path.resolve(projectRoot, 'lib/invoicingRulesEngineClient.js')
+      '@lib/invoicing-rules': path.resolve(projectRoot, 'lib/invoicingRulesEngineClient.js'),
+      '@lib/bulk-spreadsheet': path.resolve(projectRoot, 'lib/manualOrderBulkSpreadsheetClient.js')
     }
+  },
+  optimizeDeps: {
+    include: ['xlsx-js-style']
   },
   server: {
     port: 3000,

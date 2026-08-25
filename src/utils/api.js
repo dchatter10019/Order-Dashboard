@@ -26,23 +26,52 @@ export const getApiBaseUrl = () => {
  * @returns {Promise<Response>}
  */
 export const apiFetch = async (endpoint, options = {}) => {
-  const { timeoutMs, ...fetchOptions } = options
+  const { timeoutMs, signal: externalSignal, ...fetchOptions } = options
   const baseUrl = getApiBaseUrl()
   const url = `${baseUrl}${endpoint}`
 
   console.log(`🌐 API Request: ${url}`)
 
-  if (!timeoutMs) {
+  if (!timeoutMs && !externalSignal) {
     return fetch(url, fetchOptions)
   }
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  const timeoutId = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null
+
+  const onExternalAbort = () => controller.abort()
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort()
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+    }
+  }
+
   try {
     return await fetch(url, { ...fetchOptions, signal: controller.signal })
   } finally {
-    clearTimeout(timeoutId)
+    if (timeoutId) clearTimeout(timeoutId)
+    if (externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort)
+    }
   }
+}
+
+/** User-facing message for fetch failures (timeouts, proxy drops, offline). */
+export function formatApiFetchError(error, { longRunning = false } = {}) {
+  if (error?.name === 'AbortError') {
+    return longRunning
+      ? 'Request timed out. Large batches can take several minutes — check Bevvi for created orders before retrying.'
+      : 'Request timed out.'
+  }
+  const message = String(error?.message || '')
+  if (message === 'Failed to fetch' || error instanceof TypeError) {
+    return longRunning
+      ? 'Connection lost while waiting for the server. Orders may still have been created in Bevvi — verify before retrying.'
+      : 'Network error — is the backend running on port 3001?'
+  }
+  return message || 'Network error'
 }
 
 /**
