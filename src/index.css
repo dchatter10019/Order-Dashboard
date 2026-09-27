@@ -330,4 +330,9 @@
   .browser-notification-prompt-close {
     @apply absolute right-3 top-3 rounded-md p-1 text-bevvi-dark-400 transition-colors hover:bg-bevvi-50 hover:text-bevvi-800;
   }
+
+  .bevvi-orders-table-row {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 3rem;
+  }
 }

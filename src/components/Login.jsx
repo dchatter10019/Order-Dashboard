@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Eye, EyeOff, Sparkles, Truck, BarChart3 } from 'lucide-react'
 import Logo from './Logo'
 import { BRAND } from '../constants/brand'
+import { apiFetch } from '../utils/api'
 
 const Login = ({ onLogin }) => {
   const [showPassword, setShowPassword] = useState(false)
@@ -17,13 +18,31 @@ const Login = ({ onLogin }) => {
     setError('')
     setIsLoading(true)
 
-    if (credentials.username === 'Bevvi_User' && credentials.password === 'Bevvi_123#') {
-      setTimeout(() => {
-        onLogin('bevvi_auth_token_' + Date.now())
-        setIsLoading(false)
-      }, 1000)
-    } else {
-      setError('Invalid credentials. Please use Bevvi_User / Bevvi_123#')
+    try {
+      const response = await apiFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: credentials.username,
+          password: credentials.password
+        })
+      })
+
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        setError(data.error || 'Sign in failed. Check your username and password.')
+        return
+      }
+
+      if (data.token) {
+        onLogin(data.token)
+      } else {
+        setError('Sign in failed. Please try again.')
+      }
+    } catch {
+      setError('Could not reach the server. Make sure the API is running.')
+    } finally {
       setIsLoading(false)
     }
   }
@@ -94,6 +113,7 @@ const Login = ({ onLogin }) => {
                   name="username"
                   type="text"
                   required
+                  autoComplete="username"
                   className="input-field"
                   placeholder="Enter your username"
                   value={credentials.username}
@@ -109,6 +129,7 @@ const Login = ({ onLogin }) => {
                     name="password"
                     type={showPassword ? 'text' : 'password'}
                     required
+                    autoComplete="current-password"
                     className="input-field pr-10"
                     placeholder="Enter your password"
                     value={credentials.password}
@@ -127,15 +148,6 @@ const Login = ({ onLogin }) => {
                     )}
                   </button>
                 </div>
-              </div>
-
-              <div className="bevvi-callout">
-                <p className="font-medium text-bevvi-900">Demo credentials</p>
-                <p className="mt-1 text-bevvi-dark-600">
-                  Username: <code className="rounded bg-white px-1.5 py-0.5 font-mono text-xs">Bevvi_User</code>
-                  <br />
-                  Password: <code className="rounded bg-white px-1.5 py-0.5 font-mono text-xs">Bevvi_123#</code>
-                </p>
               </div>
 
               <button type="submit" disabled={isLoading} className="btn-primary w-full disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">

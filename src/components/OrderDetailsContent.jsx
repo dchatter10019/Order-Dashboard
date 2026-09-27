@@ -24,6 +24,13 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
   if (!isActive || !order) return null
 
   const displayOrder = mergeOrderWithDetails(order, orderDetails)
+  const recipient = Array.isArray(orderDetails?.recipientorders) ? orderDetails.recipientorders[0] : null
+  const recipientAddressParts = recipient
+    ? [recipient.streetAddress, recipient.aptSuiteNum, recipient.city, recipient.state, recipient.zipcode].filter(Boolean)
+    : []
+  const displayPhone = String(order?.phone || recipient?.phoneNum || '').trim()
+  const displayAddress = String(order?.address || recipientAddressParts.join(', ')).trim()
+  const formatOptionalField = (value) => (value ? value : '—')
 
   const isTimelineRetailer = () => {
     const name = (order?.establishment || '').trim()
@@ -414,14 +421,14 @@ const OrderDetailsContent = ({ order, orderDetails, isActive, isLoadingDetails, 
               <p className="text-sm font-medium text-gray-600">Phone</p>
               <p className="text-gray-900 flex items-center">
                 <Phone className="h-4 w-4 text-gray-400 mr-2" />
-                {order.phone}
+                {formatOptionalField(displayPhone)}
               </p>
             </div>
             <div>
               <p className="text-sm font-medium text-gray-600">Address</p>
               <p className="text-gray-900 flex items-start">
                 <MapPin className="h-4 w-4 text-gray-400 mr-2 mt-0.5 flex-shrink-0" />
-                {order.address}
+                {formatOptionalField(displayAddress)}
               </p>
             </div>
           </div>

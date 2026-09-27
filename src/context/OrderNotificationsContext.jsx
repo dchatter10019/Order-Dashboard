@@ -206,10 +206,24 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
 
     let eventSource = null
     let reconnectTimer = null
+    let reconnectAttempt = 0
+    let disposed = false
+
+    const scheduleReconnect = () => {
+      if (disposed) return
+      const delayMs = Math.min(30000, 2000 * 2 ** reconnectAttempt)
+      reconnectAttempt += 1
+      reconnectTimer = window.setTimeout(connect, delayMs)
+    }
 
     const connect = () => {
+      if (disposed) return
       try {
         eventSource = new EventSource(getApiUrl('/api/events'))
+
+        eventSource.onopen = () => {
+          reconnectAttempt = 0
+        }
 
         eventSource.onmessage = (event) => {
           try {
@@ -217,25 +231,25 @@ export function OrderNotificationsProvider({ children, isAuthenticated }) {
             if (data.type === 'new_orders' && Array.isArray(data.orders)) {
               notifyNewOrders(data.orders)
             }
-          } catch (error) {
-            console.error('Failed to parse order notification event:', error)
+          } catch {
+            /* ignore malformed events */
           }
         }
 
         eventSource.onerror = () => {
           eventSource?.close()
           eventSource = null
-          reconnectTimer = window.setTimeout(connect, 5000)
+          scheduleReconnect()
         }
-      } catch (error) {
-        console.error('Failed to connect to order notifications:', error)
-        reconnectTimer = window.setTimeout(connect, 5000)
+      } catch {
+        scheduleReconnect()
       }
     }
 
     connect()
 
     return () => {
+      disposed = true
       if (reconnectTimer) {
         window.clearTimeout(reconnectTimer)
       }

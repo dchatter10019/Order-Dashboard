@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import CommandInterface from './CommandInterface'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 
@@ -12,16 +12,8 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
   const messages = persistedState.messages
   const lastFetchedRange = persistedState.lastFetchedRange
   
-  // Debug logging
-  useEffect(() => {
-    console.log('🤖 AIAssistant - State from parent:', {
-      orders: orders.length,
-      messagesCount: messages.length,
-      dateRange,
-      persistedState
-    })
-  }, [orders, messages, dateRange, persistedState])
-  
+  const initialFetchDoneRef = useRef(false)
+
   // Update persisted state
   const setOrders = (newOrders) => {
     console.log('📦 AIAssistant - setOrders called with', Array.isArray(newOrders) ? newOrders.length : 'N/A', 'orders')
@@ -64,9 +56,14 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
 
       console.log(`🔍 AI Assistant fetching orders${useStateEnrichment ? ' WITH STATE DATA' : ''}: ${requestedRange.startDate} to ${requestedRange.endDate}`)
       setIsLoading(true)
-      // Clear existing orders so we don't process with stale data
-      setOrders([])
-      setLastFetchedRange(null)
+      const sameRangeAsLast =
+        lastFetchedRange &&
+        lastFetchedRange.startDate === requestedRange.startDate &&
+        lastFetchedRange.endDate === requestedRange.endDate
+      if (!sameRangeAsLast) {
+        setOrders([])
+        setLastFetchedRange(null)
+      }
       
       const timestamp = Date.now()
       const randomId = Math.random().toString(36).substring(7)
@@ -144,13 +141,12 @@ const AIAssistant = ({ persistedState, onStateChange }) => {
     }
   }
 
-  // Handle initial mount - only fetch if no orders exist
+  // Handle initial mount — fetch once if no orders exist
   useEffect(() => {
+    if (initialFetchDoneRef.current) return
+    initialFetchDoneRef.current = true
     if (orders.length === 0) {
-      console.log('🔄 AIAssistant initial mount - no orders, fetching...')
       fetchOrders()
-    } else {
-      console.log('✅ AIAssistant initial mount - using existing', orders.length, 'orders')
     }
     setHasMounted(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -34,7 +34,10 @@ const AppFooter = () => {
                     {ordersStatus.autoRefresh ? 'Auto-refresh on' : 'Auto-refresh off'}
                   </span>
                   <span className="hidden sm:inline">
-                    Auto-refresh: {ordersStatus.autoRefresh ? 'Active (20 min)' : 'Inactive'}
+                    Auto-refresh:{' '}
+                    {ordersStatus.autoRefresh
+                      ? `Active (${ordersStatus.refreshIntervalMinutes ?? 20} min)`
+                      : 'Inactive'}
                   </span>
                 </span>
               </div>

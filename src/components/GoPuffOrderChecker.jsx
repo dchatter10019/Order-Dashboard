@@ -54,6 +54,21 @@ function parseGoPuffApiResult(data) {
   return { ok: true }
 }
 
+function formatGoPuffUserMessage(message, orderNum) {
+  const raw = String(message || '').trim()
+  const notFound = /no corporder found/i.test(raw)
+  if (notFound) {
+    const id = orderNum || raw.split(':').pop()?.trim()
+    return id
+      ? `No GoPuff order was found for “${id}”. Check the order number and try again.`
+      : 'No GoPuff order was found for that number. Check the order number and try again.'
+  }
+  if (raw.startsWith('No CorpOrder Found')) {
+    return formatGoPuffUserMessage(raw.replace(/^No CorpOrder Found:?\s*/i, ''), orderNum)
+  }
+  return raw || 'Something went wrong. Please try again.'
+}
+
 const GoPuffOrderChecker = () => {
   const [orderNumber, setOrderNumber] = useState('')
   const [step, setStep] = useState(STEP.INPUT)
@@ -97,8 +112,7 @@ const GoPuffOrderChecker = () => {
 
       if (!res.ok) {
         setError({
-          message: data?.message || data?.error || `Request failed (${res.status})`,
-          details: data
+          message: formatGoPuffUserMessage(data?.message || data?.error, trimmed)
         })
         return
       }
@@ -106,7 +120,7 @@ const GoPuffOrderChecker = () => {
       const result = parseGoPuffApiResult(data)
       if (!result.ok) {
         setValidationJson(data)
-        setError({ message: result.message, details: data })
+        setError({ message: formatGoPuffUserMessage(result.message, trimmed) })
         return
       }
 
@@ -347,9 +361,6 @@ const GoPuffOrderChecker = () => {
             >
               <p className="font-medium">Something went wrong</p>
               <p className="mt-1">{error.message}</p>
-              {error.details != null && (
-                <JsonPanel title="Error details (JSON)" data={error.details} />
-              )}
             </div>
           )}
 

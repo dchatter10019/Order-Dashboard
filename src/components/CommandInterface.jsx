@@ -3,6 +3,7 @@ import { Send, Sparkles, TrendingUp, Calendar, DollarSign, Package, Trash2, Down
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { apiFetch } from '../utils/api'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
+import { isAggregateRevenueQuery, looksLikeRevenueByCustomerQuery } from '../utils/aiQueryHelpers'
 
 const CommandInterface = ({ 
   orders, 
@@ -26,6 +27,7 @@ const CommandInterface = ({
   const pendingGPTDataRef = useRef(null) // Store GPT-parsed data for pending command
   const loadingTimeoutRef = useRef(null)
   const originalQueryRef = useRef(null) // Store original query when clarification is requested
+  const inputOverrideRef = useRef(null)
   const pendingAddProductsRef = useRef(null)
   const pendingMissingProductsRef = useRef(null)
   const conversationContextRef = useRef({
@@ -624,8 +626,17 @@ const CommandInterface = ({
       lower.includes('retailer') ||
       lower.includes('for retailer')
     const isRevenueByRetailerQuery = hasRevenueValuePattern && hasRetailerPattern
-    
-    
+    const isAOVQuery =
+      gptParsedData?.intent === 'average_order_value' ||
+      gptParsedData?.intent === 'aov_by_retailer' ||
+      gptParsedData?.intent === 'aov' ||
+      (!gptParsedData && (lower.includes('average') || lower.includes('aov')))
+    const hasRetailerMention =
+      lower.includes('from retailer') ||
+      lower.includes('for retailer') ||
+      lower.includes('from store') ||
+      (lower.includes('retailer') && !lower.includes('retailers'))
+
     // If GPT is missing or unclear, fall back to rule-based parsing instead of blocking
     if (!gptParsedData?.intent || gptParsedData?.intent === 'unknown') {
       console.log('⚠️ GPT intent missing/unknown - falling back to rule-based parsing')
@@ -776,7 +787,7 @@ const CommandInterface = ({
     // Revenue by customer query - Check if GPT intent is revenue with customer OR if query text matches pattern
     else if ((gptParsedData?.intent === 'revenue' && gptParsedData?.customer) || 
              (gptParsedData?.intent === 'revenue_by_customer') ||
-             (!gptParsedData && lower.includes('revenue') && (lower.includes(' for ') || lower.includes(' from ') || lower.includes(' of ')))) {
+             (!gptParsedData && looksLikeRevenueByCustomerQuery(command))) {
       console.log('🔍 Entering revenue by customer block')
       
       // Check if we need to fetch data for a date range first
@@ -2250,10 +2261,9 @@ const CommandInterface = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim() || isLoadingData) return
-    
-    // Save input before clearing
-    const userInput = input
+    const userInput = (inputOverrideRef.current ?? input).trim()
+    inputOverrideRef.current = null
+    if (!userInput || isLoadingData) return
     
     // Clear input immediately (like GPT)
     setInput('')
@@ -2474,7 +2484,19 @@ const CommandInterface = ({
           parsedIntent = 'revenue_by_brand'
         }
         
-        if (parseData.parsed.needsClarification && !isAOVRetailerWithDate && !isBrandWithDate) {
+        const skipCustomerClarification =
+          parseData.parsed.clarificationNeeded === 'customer_name' &&
+          isAggregateRevenueQuery(userInput)
+
+        if (skipCustomerClarification && parseData.parsed) {
+          parseData.parsed.needsClarification = false
+          if (!parsedIntent || parsedIntent === 'unknown') {
+            parsedIntent = 'revenue'
+            parseData.parsed.intent = 'revenue'
+          }
+        }
+
+        if (parseData.parsed.needsClarification && !isAOVRetailerWithDate && !isBrandWithDate && !skipCustomerClarification) {
           console.log('🤔 Clarification needed:', parseData.parsed.clarificationNeeded)
           console.log('🔍 AOV+retailer check:', {
             isAOVQueryInInput,
@@ -3042,6 +3064,12 @@ const CommandInterface = ({
     }
     
     // Input already cleared at the start
+  }
+
+  const runSuggestedQuery = (query) => {
+    if (isLoadingData || !String(query || '').trim()) return
+    inputOverrideRef.current = String(query).trim()
+    handleSubmit({ preventDefault: () => {} })
   }
 
   const handleSuggestionClick = (suggestion, originalQuery) => {
@@ -3728,28 +3756,28 @@ const CommandInterface = ({
           <div className="mt-2 max-w-4xl mx-auto grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => setInput('What is the revenue for this month so far?')}
+              onClick={() => runSuggestedQuery('What is the revenue for this month so far?')}
               className="text-left px-3 py-2 bg-bevvi-primary-50 hover:bg-bevvi-primary-100 rounded-lg text-xs text-bevvi-primary-700 hover:text-bevvi-primary-800 transition-all duration-200 border border-bevvi-primary-200 hover:border-bevvi-primary-300"
             >
               Month To Date Revenue
             </button>
             <button
               type="button"
-              onClick={() => setInput('What is the sales tax for this month so far?')}
+              onClick={() => runSuggestedQuery('What is the sales tax for this month so far?')}
               className="text-left px-3 py-2 bg-green-50 hover:bg-green-100 rounded-lg text-xs text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300"
             >
               Month To Date Sales Tax
             </button>
             <button
               type="button"
-              onClick={() => setInput('What was the revenue for last month?')}
+              onClick={() => runSuggestedQuery('What was the revenue for last month?')}
               className="text-left px-3 py-2 bg-purple-50 hover:bg-purple-100 rounded-lg text-xs text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300"
             >
               Revenue for Last Month
             </button>
             <button
               type="button"
-              onClick={() => setInput('What is the year to date revenue?')}
+              onClick={() => runSuggestedQuery('What is the year to date revenue?')}
               className="text-left px-3 py-2 bg-orange-50 hover:bg-orange-100 rounded-lg text-xs text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300"
             >
               YTD Revenue

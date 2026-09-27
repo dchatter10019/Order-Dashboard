@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { pathFromTabId, tabIdFromPathname } from '../constants/dashboardRoutes'
 import { LogOut, Package, FileText, Sparkles, Store, Menu, X, ClipboardCheck, ShoppingCart } from 'lucide-react'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
@@ -10,9 +12,27 @@ import Logo from './Logo'
 import { InvoicingRulesProvider } from '../context/InvoicingRulesContext'
 import { BRAND, TAB_COPY } from '../constants/brand'
 
-const MainDashboard = ({ onLogout }) => {
-  const [activeTab, setActiveTab] = useState('orders')
+const MainDashboard = ({ onLogout, aiAssistantState, onAIAssistantStateChange }) => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState(() => tabIdFromPathname(location.pathname) || 'orders')
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  useEffect(() => {
+    const tabFromUrl = tabIdFromPathname(location.pathname)
+    if (tabFromUrl) {
+      setActiveTab(tabFromUrl)
+    }
+  }, [location.pathname])
+
+  const selectTab = (tabId) => {
+    setActiveTab(tabId)
+    setIsMobileMenuOpen(false)
+    const nextPath = pathFromTabId(tabId)
+    if (location.pathname !== nextPath) {
+      navigate(nextPath)
+    }
+  }
 
   const tabs = [
     { id: 'orders', label: 'Orders', icon: FileText },
@@ -22,27 +42,6 @@ const MainDashboard = ({ onLogout }) => {
     { id: 'manual-order', label: 'Manual Order', icon: ShoppingCart },
     { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles }
   ]
-
-  const [aiAssistantState, setAIAssistantState] = useState({
-    orders: [],
-    lastFetchedRange: null,
-    dateRange: (() => {
-      const today = new Date()
-      const todayString = today.getFullYear() + '-' +
-                         String(today.getMonth() + 1).padStart(2, '0') + '-' +
-                         String(today.getDate()).padStart(2, '0')
-      return {
-        startDate: todayString,
-        endDate: todayString
-      }
-    })(),
-    messages: [
-      {
-        type: 'assistant',
-        content: 'Hi! I\'m your Bevvi AI assistant. Ask me about orders by date, status, customer, or revenue — I\'ll help you find answers fast.'
-      }
-    ]
-  })
 
   useEffect(() => {
     document.body.style.overflow = isMobileMenuOpen ? 'hidden' : ''
@@ -126,10 +125,7 @@ const MainDashboard = ({ onLogout }) => {
                   return (
                     <button
                       key={tab.id}
-                      onClick={() => {
-                        setActiveTab(tab.id)
-                        setIsMobileMenuOpen(false)
-                      }}
+                      onClick={() => selectTab(tab.id)}
                       className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium ${
                         activeTab === tab.id
                           ? 'bg-bevvi-100 text-bevvi-900'
@@ -171,7 +167,7 @@ const MainDashboard = ({ onLogout }) => {
               return (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => selectTab(tab.id)}
                   className={`bevvi-nav-tab whitespace-nowrap ${
                     activeTab === tab.id ? 'bevvi-nav-tab-active' : 'bevvi-nav-tab-inactive'
                   }`}
@@ -200,7 +196,7 @@ const MainDashboard = ({ onLogout }) => {
 
       <main className="flex-1 max-w-7xl mx-auto w-full">
         <div className={activeTab === 'orders' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'orders'}>
-          <Dashboard onSwitchToAI={() => setActiveTab('ai-assistant')} />
+          <Dashboard onSwitchToAI={() => selectTab('ai-assistant')} />
         </div>
         <div className={activeTab === 'products' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'products'}>
           <ProductManagement />
@@ -217,7 +213,7 @@ const MainDashboard = ({ onLogout }) => {
         <div className={activeTab === 'ai-assistant' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'ai-assistant'}>
           <AIAssistant
             persistedState={aiAssistantState}
-            onStateChange={setAIAssistantState}
+            onStateChange={onAIAssistantStateChange}
           />
         </div>
       </main>

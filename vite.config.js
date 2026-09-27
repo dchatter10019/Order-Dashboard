@@ -25,6 +25,12 @@ function localCjsDefaultExportInterop() {
           map: null
         }
       }
+      if (normalized.endsWith('lib/manualOrderDeliveryInference.cjs')) {
+        return {
+          code: code.replace(/module\.exports\s*=\s*\{/, 'export default {'),
+          map: null
+        }
+      }
       return null
     }
   }
@@ -40,16 +46,26 @@ const apiProxy = {
   }
 }
 
-export default defineConfig({
-  plugins: [react(), localCjsDefaultExportInterop()],
+export default defineConfig(({ mode }) => ({
+  plugins: [
+    react({
+      jsxRuntime: 'automatic',
+      babel: {
+        plugins: mode === 'production' ? [] : undefined
+      }
+    }),
+    localCjsDefaultExportInterop()
+  ],
   resolve: {
     alias: {
       '@lib/invoicing-rules': path.resolve(projectRoot, 'lib/invoicingRulesEngineClient.js'),
-      '@lib/bulk-spreadsheet': path.resolve(projectRoot, 'lib/manualOrderBulkSpreadsheetClient.js')
+      '@lib/bulk-spreadsheet': path.resolve(projectRoot, 'lib/manualOrderBulkSpreadsheetClient.js'),
+      '@lib/manual-order-delivery': path.resolve(projectRoot, 'lib/manualOrderDeliveryInferenceClient.js'),
+      stream: path.resolve(projectRoot, 'lib/streamBrowserShim.js')
     }
   },
   optimizeDeps: {
-    include: ['xlsx-js-style']
+    exclude: ['xlsx-js-style']
   },
   server: {
     port: 3000,
@@ -59,5 +75,13 @@ export default defineConfig({
   preview: {
     port: 4173,
     proxy: { ...apiProxy }
+  },
+  build: {
+    sourcemap: false,
+    minify: 'esbuild',
+    target: 'es2020'
+  },
+  esbuild: {
+    drop: mode === 'production' ? ['console', 'debugger'] : []
   }
-})
+}))

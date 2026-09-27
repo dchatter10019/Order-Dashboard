@@ -1,4 +1,5 @@
 import { formatDollarAmount } from './formatCurrency'
+import { deriveManualOrderDeliveryFee } from '@lib/manual-order-delivery'
 
 export function buildPaymentEmailMailto({ customerEmail, customerName, orderNumber, totalAmount, paymentUrl }) {
   const to = String(customerEmail || '').trim()
@@ -53,40 +54,6 @@ function sumProductSubtotal(products = []) {
   }, 0)
 }
 
-function deriveDeliveryFromOrderBreakdown(orderDetails, order) {
-  const explicit = parsePaymentMoney(
-    orderDetails?.deliveryCharge ??
-      orderDetails?.deliveryFee ??
-      orderDetails?.delivery ??
-      order?.deliveryFee
-  )
-  if (explicit > 0) return explicit
-
-  const total = parsePaymentMoney(orderDetails?.orderTotal ?? order?.total)
-  if (total <= 0) return 0
-
-  const orderTax = parsePaymentMoney(
-    orderDetails?.originalSalesTax ?? orderDetails?.taxes ?? orderDetails?.salesTax ?? order?.tax
-  )
-  const preTaxTotal = orderTax > 0 ? Math.max(0, total - orderTax) : total
-  const productSubtotal =
-    sumProductSubtotal(orderDetails?.products) ||
-    parsePaymentMoney(orderDetails?.subTotal ?? order?.revenue)
-
-  const accounted =
-    productSubtotal +
-    parsePaymentMoney(orderDetails?.shippingCharges ?? order?.shippingFee) +
-    parsePaymentMoney(orderDetails?.serviceCharge ?? order?.serviceCharge) +
-    parsePaymentMoney(orderDetails?.serviceChargeTax ?? order?.serviceChargeTax) +
-    parsePaymentMoney(orderDetails?.additionalFee ?? order?.networkServiceCharge) +
-    parsePaymentMoney(orderDetails?.giftNoteCharge ?? order?.giftNoteCharge) +
-    parsePaymentMoney(orderDetails?.tipAmount ?? orderDetails?.tipAmt ?? order?.tip) -
-    parsePaymentMoney(orderDetails?.promodiscAmt ?? order?.promoDiscAmt)
-
-  const remainder = Math.round((preTaxTotal - accounted) * 100) / 100
-  return remainder > 0.02 ? remainder : 0
-}
-
 export function isManualOrder(order, orderDetails) {
   if (orderDetails?.isManualOrder) return true
   const recipient = Array.isArray(orderDetails?.recipientorders) ? orderDetails.recipientorders[0] : null
@@ -116,7 +83,7 @@ export function buildManualOrderPaymentContext(order, orderDetails) {
     ? orderDetails.products
     : recipient?.products || []
 
-  const delivery = deriveDeliveryFromOrderBreakdown(orderDetails, order)
+  const delivery = deriveManualOrderDeliveryFee(orderDetails, order)
   const orderTax = parsePaymentMoney(
     orderDetails?.originalSalesTax ?? orderDetails?.taxes ?? orderDetails?.salesTax ?? order?.tax
   )

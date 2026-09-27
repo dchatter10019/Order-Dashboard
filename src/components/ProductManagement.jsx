@@ -371,7 +371,12 @@ const ProductManagement = () => {
             <h3 className="text-sm font-semibold text-bevvi-900">AI-powered product search</h3>
             <div className="mt-2 text-sm text-bevvi-dark-700">
               <p>All products and stores are loaded automatically!</p>
-              <p className="mt-1 text-xs">✓ ALL Bevvi products cached in backend (50,000+)</p>
+              <p className="mt-1 text-xs">
+                ✓{' '}
+                {productCacheStatus?.totalProducts > 0
+                  ? `${productCacheStatus.totalProducts.toLocaleString()} Bevvi products cached in backend`
+                  : 'Bevvi product catalog cached in backend when loaded'}
+              </p>
               <p className="mt-1 text-xs">✓ Instant search results from server memory (&lt; 10ms)</p>
               <p className="mt-1 text-xs">✓ Stores loaded from API automatically</p>
               <p className="mt-1 text-xs">✓ Type 3+ characters to search products</p>

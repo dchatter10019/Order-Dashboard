@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Calendar, Filter, Clock, RefreshCw, ChevronUp, ChevronDown, AlertTriangle, Search, X, Bell, BellOff } from 'lucide-react'
 import DateRangePicker from './DateRangePicker'
 import StatusFilter from './StatusFilter'
@@ -9,6 +9,7 @@ import { apiFetch, getApiUrl } from '../utils/api'
 import { isIncludedOrderStatus, useInvoicingRules } from '../utils/invoicingRules'
 import { useOrdersFooter } from '../context/OrdersFooterContext'
 import { useOrderNotifications } from '../context/OrderNotificationsContext'
+import { getOrderGrandTotal } from '../utils/orderTotals'
 import {
   filterOrdersByCalendarRange,
   getDeliveryYmdForDashboard,
@@ -19,6 +20,12 @@ import {
 import { getOrderRowAlertTier } from '../utils/orderRowAlerts'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 import { buildOrderFromDetails } from '../utils/orderDisplay'
+import {
+  DEFAULT_ORDER_STATUS_FILTER,
+  ORDERS_SCROLL_STORAGE_KEY,
+  parseOrdersDashboardSearchParams,
+  serializeOrdersDashboardSearchParams
+} from '../utils/ordersDashboardUrlState'
 
 const formatLocalDateInput = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -89,6 +96,10 @@ const Dashboard = ({ onSwitchToAI }) => {
   const { setOrdersStatus } = useOrdersFooter()
   const { enabled: orderNotificationsEnabled, toggleEnabled: toggleOrderNotifications, markOrdersSeen } = useOrderNotifications()
   const { engine: invoicingEngine } = useInvoicingRules()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const urlHydratedRef = useRef(false)
+  const skipUrlSyncRef = useRef(true)
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -98,10 +109,19 @@ const Dashboard = ({ onSwitchToAI }) => {
   const dateRangeRef = useRef(null)
   const fetchOrdersRef = useRef(null)
   const [apiError, setApiError] = useState(null)
-  const [dateRange, setDateRange] = useState(defaultOrdersDateRange)
+  const [dateRange, setDateRange] = useState(() => {
+    const parsed = parseOrdersDashboardSearchParams(searchParams)
+    return parsed.dateRange || defaultOrdersDateRange()
+  })
   dateRangeRef.current = dateRange
-  const [statusFilter, setStatusFilter] = useState(['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected'])
-  const [deliveryFilter, setDeliveryFilter] = useState([])
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const parsed = parseOrdersDashboardSearchParams(searchParams)
+    return parsed.statusFilter?.length ? parsed.statusFilter : [...DEFAULT_ORDER_STATUS_FILTER]
+  })
+  const [deliveryFilter, setDeliveryFilter] = useState(() => {
+    const parsed = parseOrdersDashboardSearchParams(searchParams)
+    return parsed.deliveryFilter?.length ? parsed.deliveryFilter : []
+  })
   
   const navigate = useNavigate()
   const [autoRefresh, setAutoRefresh] = useState(true)
@@ -112,7 +132,10 @@ const Dashboard = ({ onSwitchToAI }) => {
   })
   const [lastRefreshTime, setLastRefreshTime] = useState(null)
   const [nextRefreshTime, setNextRefreshTime] = useState(null)
-  const [searchTerm, setSearchTerm] = useState('')
+  const [searchTerm, setSearchTerm] = useState(() => {
+    const parsed = parseOrdersDashboardSearchParams(searchParams)
+    return parsed.searchTerm != null ? parsed.searchTerm : ''
+  })
   const [lookedUpOrder, setLookedUpOrder] = useState(null)
   const [orderLookupError, setOrderLookupError] = useState(null)
   const [collapsedTiles, setCollapsedTiles] = useState({
@@ -135,6 +158,39 @@ const Dashboard = ({ onSwitchToAI }) => {
     const id = window.setInterval(() => setAlertNowMs(Date.now()), 30_000)
     return () => window.clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    urlHydratedRef.current = true
+    skipUrlSyncRef.current = false
+  }, [])
+
+  useEffect(() => {
+    const savedScroll = sessionStorage.getItem(ORDERS_SCROLL_STORAGE_KEY)
+    if (savedScroll == null) return
+    sessionStorage.removeItem(ORDERS_SCROLL_STORAGE_KEY)
+    const y = parseInt(savedScroll, 10)
+    if (Number.isNaN(y)) return
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: y, behavior: 'auto' })
+      })
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!urlHydratedRef.current || skipUrlSyncRef.current) return
+    const next = serializeOrdersDashboardSearchParams({
+      dateRange,
+      searchTerm,
+      statusFilter,
+      deliveryFilter
+    })
+    const current = searchParams.toString()
+    const built = next.toString()
+    if (current !== built) {
+      setSearchParams(next, { replace: true })
+    }
+  }, [dateRange, searchTerm, statusFilter, deliveryFilter, searchParams, setSearchParams])
 
   // Parse API date/time into local time
   const parseLocalDateTime = useCallback((dateTimeValue) => {
@@ -178,7 +234,10 @@ const Dashboard = ({ onSwitchToAI }) => {
       let bVal = b[key]
 
       // Handle numeric values
-      if (key === 'total' || key === 'id') {
+      if (key === 'total') {
+        aVal = getOrderGrandTotal(a)
+        bVal = getOrderGrandTotal(b)
+      } else if (key === 'id') {
         aVal = parseFloat(aVal) || 0
         bVal = parseFloat(bVal) || 0
       }
@@ -301,6 +360,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       isLoading,
       lastRefreshTime,
       nextRefreshTime,
+      refreshIntervalMinutes: 20,
       orderCount: ordersForFooterTotal.length,
       orderTotal: ordersDateRangeTotal
     })
@@ -699,8 +759,8 @@ const Dashboard = ({ onSwitchToAI }) => {
       const now = new Date()
       setLastRefreshTime(now)
 
-      // Calculate next refresh time (2 minutes from now)
-      const nextRefresh = new Date(now.getTime() + 2 * 60 * 1000)
+      // Calculate next refresh time (matches server AUTO_REFRESH_INTERVAL)
+      const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
       setNextRefreshTime(nextRefresh)
     } catch (error) {
       if (!isCurrentFetch()) return
@@ -792,6 +852,8 @@ const Dashboard = ({ onSwitchToAI }) => {
   // At midnight (or when the tab wakes on a new day), reset to today's orders.
   useEffect(() => {
     const resetToTodayIfNewDay = () => {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('start') && params.get('end')) return
       const today = formatLocalDateInput(new Date())
       if (lastKnownCalendarDayRef.current === today) return
       lastKnownCalendarDayRef.current = today
@@ -821,7 +883,11 @@ const Dashboard = ({ onSwitchToAI }) => {
   const openOrderDetailsPage = (order) => {
     const orderKey = getOrderKey(order)
     if (!orderKey) return
-    navigate(`/orders/${encodeURIComponent(orderKey)}`, { state: { order } })
+    sessionStorage.setItem(ORDERS_SCROLL_STORAGE_KEY, String(window.scrollY))
+    const returnTo = `${location.pathname}${location.search}`
+    navigate(`/orders/${encodeURIComponent(orderKey)}`, {
+      state: { order, returnTo }
+    })
   }
 
   useEffect(() => {
@@ -899,23 +965,17 @@ const Dashboard = ({ onSwitchToAI }) => {
             } else if (data.type === 'connected') {
               console.log('✅ Real-time connection established')
             } else if (data.type === 'heartbeat') {
-              // Keep connection alive
-              console.log('💓 Heartbeat received')
+              // keep-alive
             }
           } catch (error) {
             console.error('Error parsing real-time update:', error)
           }
         }
         
-        eventSource.onerror = (error) => {
-          console.error('❌ Real-time connection error:', error)
-          eventSource.close()
-          
-          // Attempt to reconnect after 5 seconds
-          setTimeout(() => {
-            console.log('🔄 Attempting to reconnect to real-time updates...')
-            connectToRealTimeUpdates()
-          }, 5000)
+        eventSource.onerror = () => {
+          eventSource?.close()
+          eventSource = null
+          setTimeout(connectToRealTimeUpdates, 5000)
         }
       } catch (error) {
         console.error('Failed to connect to real-time updates:', error)
@@ -1773,7 +1833,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             : 'hover:bg-gray-50'
                           return (
                             <React.Fragment key={order.id}>
-                              <tr className={trAlertClass}>
+                              <tr className={`bevvi-orders-table-row ${trAlertClass}`}>
                                 <td className="pl-2 pr-3 py-4 text-sm font-medium text-gray-900">
                                   <button
                                     type="button"
@@ -1862,8 +1922,8 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={formatDollarAmount(order.revenue)}>
-                              {formatDollarAmount(order.revenue)}
+                            <div className="truncate" title={formatDollarAmount(getOrderGrandTotal(order))}>
+                              {formatDollarAmount(getOrderGrandTotal(order))}
                             </div>
                           </td>
 
@@ -1970,7 +2030,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                             </div>
                             <div>
                               <p className="text-xs text-gray-500 mb-0.5">Total</p>
-                              <p className="text-sm font-semibold text-gray-900">{formatDollarAmount(order.revenue)}</p>
+                              <p className="text-sm font-semibold text-gray-900">{formatDollarAmount(getOrderGrandTotal(order))}</p>
                             </div>
                           </div>
 

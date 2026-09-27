@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import React, { useState, useEffect, useCallback } from 'react'
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import Login from './components/Login'
 import MainDashboard from './components/MainDashboard'
 import OrderDetailsPage from './components/OrderDetailsPage'
@@ -9,13 +9,24 @@ import { OrderNotificationsProvider } from './context/OrderNotificationsContext'
 import OrderNotificationToasts from './components/OrderNotificationToasts'
 import BrowserNotificationPrompt from './components/BrowserNotificationPrompt'
 import './App.css'
+import { createAIAssistantInitialState } from './utils/aiAssistantInitialState'
+
+function DashboardLayout({ onLogout, aiAssistantState, onAIAssistantStateChange }) {
+  return (
+    <MainDashboard
+      onLogout={onLogout}
+      aiAssistantState={aiAssistantState}
+      onAIAssistantStateChange={onAIAssistantStateChange}
+    />
+  )
+}
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
+  const [aiAssistantState, setAIAssistantState] = useState(createAIAssistantInitialState)
 
   useEffect(() => {
-    // Check if user is already authenticated
     const token = localStorage.getItem('bevvi_token')
     if (token) {
       setIsAuthenticated(true)
@@ -28,10 +39,10 @@ function App() {
     setIsAuthenticated(true)
   }
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('bevvi_token')
     setIsAuthenticated(false)
-  }
+  }, [])
 
   if (isLoading) {
     return (
@@ -44,27 +55,29 @@ function App() {
     )
   }
 
+  const authDashboardLayout = isAuthenticated ? (
+    <DashboardLayout
+      onLogout={handleLogout}
+      aiAssistantState={aiAssistantState}
+      onAIAssistantStateChange={setAIAssistantState}
+    />
+  ) : (
+    <Navigate to="/login" replace />
+  )
+
   return (
-    <Router>
+    <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <OrdersFooterProvider>
       <OrderNotificationsProvider isAuthenticated={isAuthenticated}>
       <div className="App min-h-screen bevvi-page-bottom-padding">
         <Routes>
-          <Route 
-            path="/login" 
+          <Route
+            path="/login"
             element={
-              isAuthenticated ? 
-              <Navigate to="/dashboard" replace /> : 
+              isAuthenticated ?
+              <Navigate to="/orders" replace /> :
               <Login onLogin={handleLogin} />
-            } 
-          />
-          <Route 
-            path="/dashboard" 
-            element={
-              isAuthenticated ? 
-              <MainDashboard onLogout={handleLogout} /> : 
-              <Navigate to="/login" replace />
-            } 
+            }
           />
           <Route
             path="/orders/:orderNumber"
@@ -74,9 +87,24 @@ function App() {
               <Navigate to="/login" replace />
             }
           />
-          <Route 
-            path="/" 
-            element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} 
+          <Route element={authDashboardLayout}>
+            <Route path="/" element={<Navigate to="/orders" replace />} />
+            <Route path="/dashboard" element={<Navigate to="/orders" replace />} />
+            <Route path="/settings" element={<Navigate to="/orders" replace />} />
+            <Route path="/orders" element={<Outlet />} />
+            <Route path="/products" element={<Outlet />} />
+            <Route path="/retailers" element={<Outlet />} />
+            <Route path="/gopuff" element={<Outlet />} />
+            <Route path="/manual-order" element={<Outlet />} />
+            <Route path="/ai-assistant" element={<Outlet />} />
+          </Route>
+          <Route
+            path="*"
+            element={
+              isAuthenticated ?
+              <Navigate to="/orders" replace /> :
+              <Navigate to="/login" replace />
+            }
           />
         </Routes>
         <BrowserNotificationPrompt />

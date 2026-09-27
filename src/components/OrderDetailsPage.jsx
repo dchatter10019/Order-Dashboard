@@ -61,7 +61,18 @@ const OrderDetailsPage = () => {
           </div>
           <button
             type="button"
-            onClick={() => navigate('/dashboard')}
+            onClick={() => {
+              const returnTo = location.state?.returnTo
+              if (typeof returnTo === 'string' && returnTo.startsWith('/orders')) {
+                navigate(returnTo)
+                return
+              }
+              if (window.history.length > 1) {
+                navigate(-1)
+                return
+              }
+              navigate('/orders')
+            }}
             className="inline-flex items-center justify-center h-12 w-12 rounded-full border border-gray-300 text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             aria-label="Close order details"
           >

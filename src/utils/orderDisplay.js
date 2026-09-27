@@ -1,4 +1,11 @@
 import { parseUtcMidnightCalendarDate } from './orderDates'
+import { deriveManualOrderDeliveryFee } from '@lib/manual-order-delivery'
+
+function resolveDeliveryFee(order, orderDetails) {
+  const inferred = deriveManualOrderDeliveryFee(orderDetails, order)
+  if (inferred > 0) return inferred
+  return orderDetails?.deliveryCharge ?? order?.deliveryFee ?? 0
+}
 
 export function mapCorpOrderStatus(corpOrderStatus) {
   const status = Number(corpOrderStatus)
@@ -21,7 +28,7 @@ export function mergeOrderWithDetails(order, orderDetails) {
     tax: orderDetails.taxes ?? order.tax,
     tip: orderDetails.tipAmount ?? orderDetails.tipAmt ?? order.tip,
     shippingFee: orderDetails.shippingCharges ?? order.shippingFee,
-    deliveryFee: orderDetails.deliveryCharge ?? order.deliveryFee,
+    deliveryFee: resolveDeliveryFee(order, orderDetails),
     serviceCharge: orderDetails.serviceCharge ?? order.serviceCharge,
     serviceChargeTax: orderDetails.serviceChargeTax ?? order.serviceChargeTax,
     giftNoteCharge: orderDetails.giftNoteCharge ?? order.giftNoteCharge,
@@ -66,7 +73,7 @@ export function buildOrderFromDetails(orderDetails, orderNumber) {
       tax: orderDetails.taxes || 0,
       tip: orderDetails.tipAmount || orderDetails.tipAmt || 0,
       shippingFee: orderDetails.shippingCharges || 0,
-      deliveryFee: orderDetails.deliveryCharge || 0,
+      deliveryFee: resolveDeliveryFee(null, orderDetails),
       serviceCharge: orderDetails.serviceCharge || 0,
       serviceChargeTax: orderDetails.serviceChargeTax || 0,
       giftNoteCharge: orderDetails.giftNoteCharge || 0,

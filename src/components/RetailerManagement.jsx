@@ -5,7 +5,8 @@ import PageHeader from './ui/PageHeader'
 import { TAB_COPY } from '../constants/brand'
 import { formatDollarAmount, formatNumber } from '../utils/formatCurrency'
 import { isIncludedOrderStatus, useInvoicingRules } from '../utils/invoicingRules'
-import * as XLSX from 'xlsx-js-style'
+import { downloadXlsxWorkbook } from '../utils/xlsxDownload'
+import { loadXlsxStyle } from '../utils/loadXlsxStyle'
 
 // xlsx community build drops fills; xlsx-js-style preserves them for .xlsx export
 const EXCEL_HEADER_STYLE = {
@@ -31,9 +32,9 @@ const EXCEL_SECTION_TITLE_STYLE = {
   alignment: { horizontal: 'left', vertical: 'center' }
 }
 
-function applyRowStyle(sheet, row0Based, colCount, style) {
+function applyRowStyle(sheet, row0Based, colCount, style, xlsx) {
   for (let c = 0; c < colCount; c++) {
-    const ref = XLSX.utils.encode_cell({ r: row0Based, c })
+    const ref = xlsx.utils.encode_cell({ r: row0Based, c })
     if (!sheet[ref]) continue
     const cell = sheet[ref]
     cell.s = { ...style }
@@ -256,12 +257,12 @@ const RetailerManagement = () => {
   }
 
   // Calculate optimal column width based on content
-  const calculateColumnWidth = (sheet, columnIndex, minWidth = 10, maxWidth = 50) => {
+  const calculateColumnWidthForSheet = (xlsx, sheet, columnIndex, minWidth = 10, maxWidth = 50) => {
     let maxLength = minWidth
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
+    const range = xlsx.utils.decode_range(sheet['!ref'] || 'A1')
     
     for (let row = 0; row <= range.e.r; row++) {
-      const cellRef = XLSX.utils.encode_cell({ r: row, c: columnIndex })
+      const cellRef = xlsx.utils.encode_cell({ r: row, c: columnIndex })
       const cell = sheet[cellRef]
       if (cell) {
         let cellValue = ''
@@ -297,8 +298,12 @@ const RetailerManagement = () => {
   }
 
   // Generate Excel report for a specific retailer
-  const handleGenerateReport = (retailerName) => {
+  const handleGenerateReport = async (retailerName) => {
     try {
+      const XLSX = await loadXlsxStyle()
+      const calculateColumnWidth = (sheet, columnIndex, minWidth, maxWidth) =>
+        calculateColumnWidthForSheet(xlsx, sheet, columnIndex, minWidth, maxWidth)
+
       // Filter orders for this specific retailer
       const retailerOrders = filteredOrders.filter(order => {
         const orderRetailer = (order.establishment || '').trim()
@@ -398,9 +403,9 @@ const RetailerManagement = () => {
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
 
       const currencyFormat = '$#,##0.00'
-      applyRowStyle(summarySheet, 0, 4, EXCEL_HEADER_STYLE)
+      applyRowStyle(summarySheet, 0, 4, EXCEL_HEADER_STYLE, XLSX)
       const totalRowIndex0 = summaryData.length - 1
-      applyRowStyle(summarySheet, totalRowIndex0, 4, EXCEL_TOTAL_ROW_STYLE)
+      applyRowStyle(summarySheet, totalRowIndex0, 4, EXCEL_TOTAL_ROW_STYLE, XLSX)
 
       for (let row0 = 1; row0 <= totalRowIndex0; row0++) {
         for (let c = 1; c <= 3; c++) {
@@ -577,8 +582,8 @@ const RetailerManagement = () => {
         retailerSheetData.findIndex((row) => row[0] === '--- Detailed Transactions ---') + 1
       const detailHeaderIdx = detailedTitleRow + 1
 
-      applyRowStyle(retailerSheet, customerHeaderIdx - 1, 9, EXCEL_HEADER_STYLE)
-      applyRowStyle(retailerSheet, totalRowIdx - 1, 9, EXCEL_TOTAL_ROW_STYLE)
+      applyRowStyle(retailerSheet, customerHeaderIdx - 1, 9, EXCEL_HEADER_STYLE, XLSX)
+      applyRowStyle(retailerSheet, totalRowIdx - 1, 9, EXCEL_TOTAL_ROW_STYLE, XLSX)
 
       mergeCellStyle(
         retailerSheet,
@@ -586,7 +591,7 @@ const RetailerManagement = () => {
         EXCEL_SECTION_TITLE_STYLE
       )
 
-      applyRowStyle(retailerSheet, detailHeaderIdx - 1, 14, EXCEL_HEADER_STYLE)
+      applyRowStyle(retailerSheet, detailHeaderIdx - 1, 14, EXCEL_HEADER_STYLE, XLSX)
 
       for (let row = customerHeaderIdx + 1; row <= totalRowIdx; row++) {
         ;[2, 3, 5, 6, 7].forEach((c) => {
@@ -624,8 +629,7 @@ const RetailerManagement = () => {
       // Generate filename
       const filename = `bevvi_report_${dateRange.startDate}_to_${dateRange.endDate}_${sanitizeSheetName(retailerName)}.xlsx`
 
-      // Write file
-      XLSX.writeFile(wb, filename)
+      await downloadXlsxWorkbook(wb, filename)
 
       console.log(`✅ Report generated: ${filename}`)
     } catch (error) {

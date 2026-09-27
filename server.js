@@ -1,10 +1,39 @@
 const express = require('express')
 const cors = require('cors')
 const axios = require('axios')
+const crypto = require('crypto')
 const fs = require('fs').promises
 const path = require('path')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
+
+function sha256Buffer(value) {
+  return crypto.createHash('sha256').update(String(value)).digest()
+}
+
+function timingSafeEqualString(a, b) {
+  return crypto.timingSafeEqual(sha256Buffer(a), sha256Buffer(b))
+}
+
+function getDashboardLoginCredentials() {
+  return {
+    username: String(process.env.DASHBOARD_LOGIN_USERNAME || '').trim(),
+    password: String(process.env.DASHBOARD_LOGIN_PASSWORD || '').trim()
+  }
+}
+
+function verifyDashboardLogin(inputUsername, inputPassword) {
+  const { username, password } = getDashboardLoginCredentials()
+  if (!username || !password) return false
+  try {
+    return (
+      timingSafeEqualString(inputUsername, username) &&
+      timingSafeEqualString(inputPassword, password)
+    )
+  } catch {
+    return false
+  }
+}
 
 function resolveInvoicingRulesPath() {
   const configured = String(process.env.INVOICING_RULES_PATH || '').trim()
@@ -40,6 +69,8 @@ const {
   parseUsAddressFallback,
   normalizeZip
 } = require('./lib/manualOrderBulkSpreadsheet.cjs')
+
+const { deriveManualOrderDeliveryFee } = require('./lib/manualOrderDeliveryInference.cjs')
 
 const INVOICING_RULES_PATH = resolveInvoicingRulesPath()
 
@@ -2182,6 +2213,31 @@ function createOrderFromCSV(headers, values, orderDate, displayTimeZone = DEFAUL
         price: order.total
       }]
     }
+
+    if (/^BEV-MAN-/i.test(String(order.id || order.ordernum || ''))) {
+      const inferred = deriveManualOrderDeliveryFee(
+        {
+          corpOrderNum: order.id || order.ordernum,
+          isManualOrder: true,
+          orderTotal: order.totalAmount ?? order.total,
+          subTotal: order.revenue,
+          taxes: order.tax,
+          shippingCharges: order.shippingFee,
+          serviceCharge: order.serviceCharge,
+          serviceChargeTax: order.serviceChargeTax,
+          tipAmount: order.tip,
+          promodiscAmt: order.promoDiscAmt,
+          giftNoteCharge: order.giftNoteCharge,
+          additionalFee: order.networkServiceCharge,
+          deliveryCharge: order.deliveryFee
+        },
+        order
+      )
+      if (inferred > 0 && !(parseFloat(order.deliveryFee) > 0)) {
+        order.deliveryFee = inferred
+        order.deliveryFeeInferred = true
+      }
+    }
     
     return order
   } catch (error) {
@@ -2512,6 +2568,26 @@ async function fetchOrdersForDateRange(startDate, endDate, timeZone = DEFAULT_OR
 
 
 // API Routes
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {}
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password are required' })
+  }
+
+  const { username: configuredUser, password: configuredPass } = getDashboardLoginCredentials()
+  if (!configuredUser || !configuredPass) {
+    console.error('❌ DASHBOARD_LOGIN_USERNAME / DASHBOARD_LOGIN_PASSWORD are not set')
+    return res.status(503).json({ error: 'Login is not configured on the server' })
+  }
+
+  if (!verifyDashboardLogin(username, password)) {
+    return res.status(401).json({ error: 'Invalid username or password' })
+  }
+
+  const token = `bevvi_auth_${crypto.randomBytes(32).toString('hex')}`
+  return res.json({ token })
+})
+
 app.get('/api/orders', async (req, res) => {
   try {
     const { startDate, endDate, timeZone: timeZoneQuery } = req.query
@@ -8551,6 +8627,16 @@ app.get('/api/order-details/:orderNumber', async (req, res) => {
       if (bulkRecipients) {
         data.bulkRecipients = bulkRecipients
       }
+
+      const inferredDelivery = deriveManualOrderDeliveryFee(data, null)
+      if (inferredDelivery > 0 && !(parseMoneyValue(data.deliveryCharge) > 0)) {
+        data.deliveryCharge = inferredDelivery
+        data.deliveryFeeInferred = true
+        const recipientOrder = Array.isArray(data.recipientorders) ? data.recipientorders[0] : null
+        if (recipientOrder && !(parseMoneyValue(recipientOrder.deliveryCharge) > 0)) {
+          recipientOrder.deliveryCharge = inferredDelivery
+        }
+      }
     }
 
     res.json(data)
@@ -9572,8 +9658,9 @@ app.get('/api/events', (req, res) => {
   // Set headers for SSE
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Cache-Control'
   })
