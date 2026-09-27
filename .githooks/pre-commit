@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs automated smoke tests before each commit. One-time setup: npm run setup:hooks
+set -e
+cd "$(git rev-parse --show-toplevel)"
+echo "Running pre-commit smoke tests..."
+npm run smoke

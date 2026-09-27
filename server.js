@@ -7,33 +7,11 @@ const path = require('path')
 const OpenAI = require('openai')
 require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
 
-function sha256Buffer(value) {
-  return crypto.createHash('sha256').update(String(value)).digest()
-}
-
-function timingSafeEqualString(a, b) {
-  return crypto.timingSafeEqual(sha256Buffer(a), sha256Buffer(b))
-}
-
-function getDashboardLoginCredentials() {
-  return {
-    username: String(process.env.DASHBOARD_LOGIN_USERNAME || '').trim(),
-    password: String(process.env.DASHBOARD_LOGIN_PASSWORD || '').trim()
-  }
-}
-
-function verifyDashboardLogin(inputUsername, inputPassword) {
-  const { username, password } = getDashboardLoginCredentials()
-  if (!username || !password) return false
-  try {
-    return (
-      timingSafeEqualString(inputUsername, username) &&
-      timingSafeEqualString(inputPassword, password)
-    )
-  } catch {
-    return false
-  }
-}
+const {
+  createAuthLoginHandler,
+  getDashboardLoginCredentials
+} = require('./lib/dashboardAuth.cjs')
+const { validateOrderDateRange, MAX_ORDER_DATE_RANGE_DAYS } = require('./lib/orderDateRange.cjs')
 
 function resolveInvoicingRulesPath() {
   const configured = String(process.env.INVOICING_RULES_PATH || '').trim()
@@ -113,8 +91,6 @@ async function loadInvoicingRulesFromFile(force = false) {
 
 /** Calendar YYYY-MM-DD in a specific IANA zone (not server local / not raw UTC date). */
 const DEFAULT_ORDER_TIMEZONE = process.env.BEVVI_ORDER_TIMEZONE || 'America/New_York'
-const MAX_ORDER_DATE_RANGE_DAYS = 31
-const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 /** Bevvi often stores calendar dates as midnight UTC — use the UTC date, not local TZ shift. */
 function parseUtcMidnightCalendarDate(dateTimeValue) {
@@ -212,41 +188,6 @@ function bevviCsvUtcDateRange(startDate, endDate, timeZone) {
   return utcStartString <= utcEndString
     ? { utcStartString, utcEndString }
     : { utcStartString: utcEndString, utcEndString: utcStartString }
-}
-
-function parseYyyyMmDdUtc(dateString) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString || '')
-  if (!match) return null
-  const [, year, month, day] = match.map(Number)
-  const utcMs = Date.UTC(year, month - 1, day)
-  const parsed = new Date(utcMs)
-  if (
-    parsed.getUTCFullYear() !== year ||
-    parsed.getUTCMonth() !== month - 1 ||
-    parsed.getUTCDate() !== day
-  ) {
-    return null
-  }
-  return parsed
-}
-
-function validateOrderDateRange(startDate, endDate) {
-  const start = parseYyyyMmDdUtc(startDate)
-  const end = parseYyyyMmDdUtc(endDate)
-  if (!start || !end) {
-    return 'Dates must be in YYYY-MM-DD format.'
-  }
-
-  if (start > end) {
-    return 'Start date must be less than or equal to end date.'
-  }
-
-  const inclusiveDays = Math.floor((end.getTime() - start.getTime()) / MS_PER_DAY) + 1
-  if (inclusiveDays > MAX_ORDER_DATE_RANGE_DAYS) {
-    return `Date range cannot exceed ${MAX_ORDER_DATE_RANGE_DAYS} days. Please select a shorter range.`
-  }
-
-  return null
 }
 
 const app = express()
@@ -2569,23 +2510,11 @@ async function fetchOrdersForDateRange(startDate, endDate, timeZone = DEFAULT_OR
 
 // API Routes
 app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body || {}
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Username and password are required' })
-  }
-
   const { username: configuredUser, password: configuredPass } = getDashboardLoginCredentials()
   if (!configuredUser || !configuredPass) {
     console.error('❌ DASHBOARD_LOGIN_USERNAME / DASHBOARD_LOGIN_PASSWORD are not set')
-    return res.status(503).json({ error: 'Login is not configured on the server' })
   }
-
-  if (!verifyDashboardLogin(username, password)) {
-    return res.status(401).json({ error: 'Invalid username or password' })
-  }
-
-  const token = `bevvi_auth_${crypto.randomBytes(32).toString('hex')}`
-  return res.json({ token })
+  return createAuthLoginHandler()(req, res)
 })
 
 app.get('/api/orders', async (req, res) => {
