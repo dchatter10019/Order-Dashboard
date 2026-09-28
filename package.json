@@ -1,6 +1,6 @@
 {
   "name": "bevvi-order-tracking-system",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "Bevvi Order Tracking System with authentication and filtering capabilities",
   "main": "index.js",
   "scripts": {
@@ -15,6 +15,11 @@
     "smoke:server": "node scripts/smoke/server.mjs",
     "smoke:client": "node scripts/smoke/client.mjs",
     "qa": "npm run smoke",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "smoke:browser": "npm run test:e2e",
+    "qa:full": "npm run smoke && npm run test:e2e",
     "setup:hooks": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit"
   },
   "dependencies": {
@@ -29,6 +34,7 @@
     "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.51.0",
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.16",
     "lucide-react": "^0.294.0",

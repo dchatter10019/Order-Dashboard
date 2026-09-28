@@ -14,9 +14,16 @@ This points Git at `.githooks/pre-commit`, which runs `npm run smoke`. To skip o
 
 | Command | Scope |
 |---------|--------|
-| `npm run smoke` | Full suite (server + client) |
+| `npm run smoke` | Full suite (server + client, no browser) |
 | `npm run smoke:server` | Backend libs, in-process auth HTTP, optional live API |
 | `npm run smoke:client` | Vite build, routing, URL state, totals, AI helpers |
+| `npm run test:e2e` | **Playwright** — real browser (desktop + mobile viewports) |
+| `npm run smoke:browser` | Alias for `test:e2e` |
+| `npm run qa:full` | `smoke` then Playwright |
+
+First-time Playwright: `npm ci` then `npx playwright install chromium`.
+
+E2E starts its own API (`playwright_e2e` credentials in `e2e/constants.mjs`) and production preview on port **4173**. Stop local servers on **3001** / **4173** if ports conflict, or set `CI=1` to force fresh servers.
 
 Optional live backend (must be running):
 
@@ -66,9 +73,17 @@ Use after automated smoke passes, or before tagging a release.
 | M9 | Retailers XLSX | Export spreadsheet | File downloads; no console module errors |
 | M10 | SSE / footer | Wait on dashboard | Footer refresh copy; no error spam in console |
 
+## Automated — browser (`npm run test:e2e`)
+
+Runs each test on **desktop-chrome** and **mobile-chrome** (Pixel 5 viewport).
+
+Full ID mapping (A1, R1, O1, …): **`docs/QA_PLAYWRIGHT_CASES.md`**
+
+Specs live in `e2e/regression/*.spec.mjs` (auth, routing, orders, order detail, AI, GoPuff, products, notifications, misc).
+
 ## CI
 
-Push and pull requests run `npm run smoke` via `.github/workflows/smoke.yml` (no live API).
+Push and pull requests run `npm run smoke` and `npm run test:e2e` via `.github/workflows/smoke.yml`.
 
 ## Adding tests
 

@@ -36,9 +36,10 @@ function localCjsDefaultExportInterop() {
   }
 }
 
+const apiPort = process.env.E2E_API_PORT || process.env.VITE_DEV_API_PORT || '3001'
 const apiProxy = {
   '/api': {
-    target: 'http://localhost:3001',
+    target: `http://localhost:${apiPort}`,
     changeOrigin: true,
     // Bulk manual orders / tax can run many minutes — match server timeouts.
     timeout: 600000,

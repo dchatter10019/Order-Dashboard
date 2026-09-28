@@ -5,7 +5,11 @@ const crypto = require('crypto')
 const fs = require('fs').promises
 const path = require('path')
 const OpenAI = require('openai')
-require('dotenv').config({ path: path.join(__dirname, '.env'), override: true })
+require('dotenv').config({
+  path: path.join(__dirname, '.env'),
+  // Let explicit process env (CI, Playwright webServer) win over .env
+  override: process.env.DOTENV_CONFIG_OVERRIDE !== 'false'
+})
 
 const {
   createAuthLoginHandler,
@@ -9728,6 +9732,14 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, async () => {
   console.log(`🚀 Bevvi Order Tracking System server running on port ${PORT}`)
+  const loginCreds = getDashboardLoginCredentials()
+  if (loginCreds.username && loginCreds.password) {
+    console.log(`🔐 Dashboard login configured (user: ${loginCreds.username})`)
+  } else {
+    console.error(
+      '❌ Dashboard login NOT configured — set DASHBOARD_LOGIN_USERNAME and DASHBOARD_LOGIN_PASSWORD in .env (local) or host environment (production).'
+    )
+  }
   console.log(`📊 API available at http://localhost:${PORT}/api`)
   console.log(`🌐 Frontend available at http://localhost:${PORT}`)
   console.log(`🔄 Auto-refresh system ready (20-minute intervals)`)
