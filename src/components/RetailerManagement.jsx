@@ -1,5 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Store, Calendar, RefreshCw, Download, ChevronUp, ChevronDown, FileSpreadsheet } from 'lucide-react'
+import {
+  Store,
+  Calendar,
+  RefreshCw,
+  Download,
+  ChevronUp,
+  ChevronDown,
+  FileSpreadsheet,
+  Mail,
+  Eye
+} from 'lucide-react'
+import RetailerInvoicePreviewModal from './RetailerInvoicePreviewModal'
 import DateRangePicker from './DateRangePicker'
 import PageHeader from './ui/PageHeader'
 import { TAB_COPY } from '../constants/brand'
@@ -46,6 +57,18 @@ function mergeCellStyle(sheet, ref, patch) {
   sheet[ref].s = { ...(sheet[ref].s || {}), ...patch }
 }
 
+function retailerBillingContact(contacts, retailerName) {
+  if (!retailerName || !contacts) return null
+  const direct = contacts[retailerName]
+  if (direct?.email) return direct
+  const normalized = String(retailerName)
+    .trim()
+    .toLowerCase()
+    .replace(/\s*&\s*/g, ' and ')
+    .replace(/\s+/g, ' ')
+  return contacts[normalized] || null
+}
+
 const RetailerManagement = () => {
   const { engine: invoicingEngine } = useInvoicingRules()
   const [orders, setOrders] = useState([])
@@ -68,6 +91,44 @@ const RetailerManagement = () => {
   const [collapsedFilters, setCollapsedFilters] = useState({
     dateRange: false
   })
+  const [zohoBooksReady, setZohoBooksReady] = useState(null)
+  const [zohoMissingEnvVars, setZohoMissingEnvVars] = useState([])
+  const [zohoContactByRetailer, setZohoContactByRetailer] = useState({})
+  const [zohoInvoicing, setZohoInvoicing] = useState(false)
+  const [zohoMessage, setZohoMessage] = useState(null)
+  const [invoicePreviewOpen, setInvoicePreviewOpen] = useState(false)
+  const [invoicePreview, setInvoicePreview] = useState(null)
+  const [invoicePreviewLoading, setInvoicePreviewLoading] = useState(false)
+  const [invoicePreviewError, setInvoicePreviewError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [statusRes, contactsRes] = await Promise.all([
+          fetch('/api/zoho/books/status'),
+          fetch('/api/retailers/zoho-contacts')
+        ])
+        if (cancelled) return
+        const statusJson = statusRes.ok ? await statusRes.json() : { configured: false }
+        const contactsJson = contactsRes.ok ? await contactsRes.json() : { retailers: {} }
+        setZohoBooksReady(Boolean(statusJson.configured))
+        setZohoMissingEnvVars(Array.isArray(statusJson.missingEnvVars) ? statusJson.missingEnvVars : [])
+        setZohoContactByRetailer(contactsJson.retailers || {})
+      } catch {
+        if (!cancelled) {
+          setZohoBooksReady(false)
+          setZohoContactByRetailer({})
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const zohoInvoiceEnabled = zohoBooksReady === true
+  const zohoStatusPending = zohoBooksReady === null
 
   // Filter orders by date range and billable statuses (see docs/Bevvi-Invoicing-Rules.md)
   const filteredOrders = useMemo(() => {
@@ -250,10 +311,224 @@ const RetailerManagement = () => {
     }), { gmv: 0, serviceFee: 0, retailerFee: 0, totalCharges: 0, orderCount: 0 })
   }, [retailerData])
 
-  // Placeholder handler for Charge Fees button
-  const handleChargeFees = (retailerName) => {
-    // TODO: Implement charge fees functionality
-    console.log('Charge Fees clicked for:', retailerName)
+  const mergeSavedContact = (retailerName, email) => {
+    const payload = { email, retailerName, hasZohoContactId: false }
+    const normalized = String(retailerName)
+      .trim()
+      .toLowerCase()
+      .replace(/\s*&\s*/g, ' and ')
+      .replace(/\s+/g, ' ')
+    setZohoContactByRetailer((prev) => ({
+      ...prev,
+      [retailerName]: payload,
+      [normalized]: payload
+    }))
+  }
+
+  const saveRetailerBillingEmail = async (retailerName, email) => {
+    const response = await fetch('/api/retailers/zoho-contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ retailerName, email })
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.message || 'Failed to save billing email')
+    }
+    mergeSavedContact(retailerName, data.contact.email)
+    return data.contact.email
+  }
+
+  const resolveBillingEmail = async (retailerName) => {
+    const existing = retailerBillingContact(zohoContactByRetailer, retailerName)
+    if (existing?.email) return existing.email
+
+    const input = window.prompt(
+      `Enter the billing email for "${retailerName}".\n\nThis address will be saved and used automatically next time.`
+    )
+    if (input === null) return null
+    const email = input.trim()
+    if (!email) return null
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      alert('Please enter a valid email address.')
+      return null
+    }
+    try {
+      return await saveRetailerBillingEmail(retailerName, email)
+    } catch (error) {
+      alert(error.message)
+      return null
+    }
+  }
+
+  const postZohoInvoices = async (retailerNames, { dryRun = false, billingEmails = null } = {}) => {
+    if (!dateRange.startDate || !dateRange.endDate) {
+      alert('Select a date range and fetch orders first.')
+      return null
+    }
+    if (zohoBooksReady === false) {
+      alert(
+        'Zoho Books is not configured on the server. Add ZOHO_* env vars (see docs/ZOHO_BOOKS_INVOICING.md).'
+      )
+      return null
+    }
+
+    setZohoInvoicing(true)
+    setZohoMessage(null)
+    try {
+      const clientTz = Intl.DateTimeFormat().resolvedOptions().timeZone
+      const response = await fetch('/api/retailers/zoho-invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate: dateRange.startDate,
+          endDate: dateRange.endDate,
+          timeZone: clientTz,
+          retailerNames,
+          sendEmail: !dryRun,
+          dryRun,
+          orders: filteredOrders,
+          billingEmails: billingEmails || undefined
+        })
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.message || data.error || `HTTP ${response.status}`)
+      }
+      return data
+    } catch (error) {
+      setZohoMessage({ type: 'error', text: error.message })
+      alert(`Zoho invoicing failed: ${error.message}`)
+      return null
+    } finally {
+      setZohoInvoicing(false)
+    }
+  }
+
+  const summarizeZohoResults = (data) => {
+    const results = data?.results || []
+    const created = results.filter((r) => r.ok && !r.dryRun && !r.skipped)
+    const skipped = results.filter((r) => r.skipped)
+    const failed = results.filter((r) => r.ok === false && !r.skipped)
+    const lines = []
+    for (const r of created) {
+      lines.push(
+        `✓ ${r.retailerName}: invoice ${r.invoiceNumber || r.invoiceId}${r.emailed ? ` emailed to ${r.email}` : ''} ($${r.summary?.totalCharges?.toFixed(2) ?? '0.00'})`
+      )
+    }
+    for (const r of skipped) {
+      lines.push(`— ${r.retailerName}: skipped (${r.reason || r.message || 'no action'})`)
+    }
+    for (const r of failed) {
+      lines.push(`✗ ${r.retailerName}: ${r.error || 'failed'}`)
+    }
+    return { created, skipped, failed, lines }
+  }
+
+  const handlePreviewInvoice = async (retailerName) => {
+    const row = retailerData.find((r) => r.retailerName === retailerName)
+    if (!row || row.orderCount === 0) {
+      alert(`No billable orders for ${retailerName} in this date range.`)
+      return
+    }
+    if (!dateRange.startDate || !dateRange.endDate) {
+      alert('Select a date range first.')
+      return
+    }
+    const contact = retailerBillingContact(zohoContactByRetailer, retailerName)
+    setInvoicePreviewOpen(true)
+    setInvoicePreview(null)
+    setInvoicePreviewError(null)
+    setInvoicePreviewLoading(true)
+    try {
+      const response = await fetch('/api/retailers/zoho-invoice-preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startDate: dateRange.startDate,
+          endDate: dateRange.endDate,
+          retailerName,
+          orders: filteredOrders,
+          billingEmail: contact?.email || null
+        })
+      })
+      const raw = await response.text()
+      let data
+      try {
+        data = JSON.parse(raw)
+      } catch {
+        throw new Error(
+          response.status === 404
+            ? 'Invoice preview API not found — restart the backend (npm run server) so it loads the latest code.'
+            : 'Server returned an unexpected response. Restart npm run server and try again.'
+        )
+      }
+      if (!response.ok) throw new Error(data.message || 'Preview failed')
+      setInvoicePreview(data.preview)
+    } catch (err) {
+      setInvoicePreviewError(err.message)
+    } finally {
+      setInvoicePreviewLoading(false)
+    }
+  }
+
+  const handleChargeFees = async (retailerName) => {
+    const row = retailerData.find((r) => r.retailerName === retailerName)
+    if (!row || row.orderCount === 0) {
+      alert(`No billable orders for ${retailerName} in this date range.`)
+      return
+    }
+    const email = await resolveBillingEmail(retailerName)
+    if (!email) return
+
+    const ok = window.confirm(
+      `Create a Zoho invoice for ${retailerName}?\n\nPeriod: ${dateRange.startDate} → ${dateRange.endDate}\nTotal charges: ${formatDollarAmount(row.totalCharges)}\nEmail to: ${email}`
+    )
+    if (!ok) return
+
+    const data = await postZohoInvoices([retailerName], {
+      billingEmails: { [retailerName]: email }
+    })
+    if (!data) return
+    const { lines } = summarizeZohoResults(data)
+    setZohoMessage({ type: data.success ? 'success' : 'warning', text: lines.join('\n') })
+    if (lines.length) alert(lines.join('\n'))
+  }
+
+  const handleInvoiceAllRetailers = async () => {
+    if (!sortedRetailerData.length) {
+      alert('Load retailers for the selected date range first.')
+      return
+    }
+    const withOrders = sortedRetailerData.filter((r) => r.orderCount > 0 && r.totalCharges > 0)
+    if (!withOrders.length) {
+      alert('No retailers with charges in this date range.')
+      return
+    }
+
+    const billingEmails = {}
+    for (const r of withOrders) {
+      const email = await resolveBillingEmail(r.retailerName)
+      if (!email) {
+        alert(`Bulk invoicing cancelled — no email for ${r.retailerName}.`)
+        return
+      }
+      billingEmails[r.retailerName] = email
+    }
+
+    const ok = window.confirm(
+      `Create Zoho invoices for ${withOrders.length} retailer(s) and email each contact?\n\nPeriod: ${dateRange.startDate} → ${dateRange.endDate}\n\n${withOrders.map((r) => `• ${r.retailerName} → ${billingEmails[r.retailerName]}`).join('\n')}`
+    )
+    if (!ok) return
+
+    const data = await postZohoInvoices(
+      withOrders.map((r) => r.retailerName),
+      { billingEmails }
+    )
+    if (!data) return
+    const { lines } = summarizeZohoResults(data)
+    setZohoMessage({ type: data.success ? 'success' : 'warning', text: lines.join('\n') })
+    alert(lines.join('\n') || 'Done.')
   }
 
   // Calculate optimal column width based on content
@@ -750,6 +1025,42 @@ const RetailerManagement = () => {
           </div>
         )}
 
+        {zohoBooksReady === false && (
+          <div className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+            <p className="font-medium mb-1">Zoho invoicing is not configured on the server.</p>
+            <p className="mb-2">
+              Add OAuth credentials to <code className="text-xs bg-amber-100 px-1 rounded">.env</code> and restart{' '}
+              <code className="text-xs bg-amber-100 px-1 rounded">npm run server</code>. Zoho MCP in Cursor does not
+              configure the dashboard — the Node server needs its own API client. See{' '}
+              <code className="text-xs bg-amber-100 px-1 rounded">docs/ZOHO_BOOKS_INVOICING.md</code>.
+            </p>
+            {zohoMissingEnvVars.length > 0 && (
+              <p className="text-xs">
+                Missing:{' '}
+                {zohoMissingEnvVars.map((key) => (
+                  <code key={key} className="bg-amber-100 px-1 rounded mr-1">
+                    {key}
+                  </code>
+                ))}
+              </p>
+            )}
+          </div>
+        )}
+
+        {zohoMessage && (
+          <div
+            className={`mb-4 p-4 border rounded-lg text-sm whitespace-pre-wrap ${
+              zohoMessage.type === 'error'
+                ? 'bg-red-50 border-red-200 text-red-800'
+                : zohoMessage.type === 'success'
+                  ? 'bg-green-50 border-green-200 text-green-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-900'
+            }`}
+          >
+            {zohoMessage.text}
+          </div>
+        )}
+
         {/* Error Display */}
         {apiError && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -760,6 +1071,27 @@ const RetailerManagement = () => {
         )}
 
         {/* Summary Cards */}
+        {!isLoading && retailerData.length > 0 && (
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              disabled={zohoInvoicing || !zohoInvoiceEnabled}
+              title={
+                zohoStatusPending
+                  ? 'Checking Zoho configuration…'
+                  : !zohoInvoiceEnabled
+                    ? 'Configure ZOHO_* in server .env first'
+                    : undefined
+              }
+              onClick={handleInvoiceAllRetailers}
+              className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              <Mail className="h-4 w-4 mr-2" />
+              {zohoInvoicing ? 'Invoicing…' : 'Invoice all retailers (Zoho + email)'}
+            </button>
+          </div>
+        )}
+
         {!isLoading && retailerData.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6">
             <div className="bg-white rounded-lg shadow p-4 sm:p-6">
@@ -872,6 +1204,9 @@ const RetailerManagement = () => {
                         </div>
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Invoice email
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Actions
                       </th>
                     </tr>
@@ -902,13 +1237,36 @@ const RetailerManagement = () => {
                         <td className="px-4 py-4 text-sm text-gray-900">
                           {formatNumber(retailer.orderCount)}
                         </td>
-                        <td className="px-4 py-4 text-sm">
-                          <div className="flex gap-2">
+                        <td className="px-4 py-4 text-sm text-gray-600">
+                          {retailerBillingContact(zohoContactByRetailer, retailer.retailerName)?.email || (
+                            <span className="text-gray-400">Prompt on invoice</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-4 text-sm min-w-[11rem]">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                             <button
-                              onClick={() => handleChargeFees(retailer.retailerName)}
-                              className="px-3 py-1.5 bg-bevvi-primary-600 text-white text-xs font-medium rounded-md hover:bg-bevvi-primary-700 transition-colors"
+                              type="button"
+                              onClick={() => handlePreviewInvoice(retailer.retailerName)}
+                              disabled={retailer.orderCount === 0}
+                              className="px-3 py-1.5 bg-white border border-gray-300 text-gray-800 text-xs font-medium rounded-md hover:bg-gray-50 disabled:opacity-50 transition-colors inline-flex items-center justify-center"
                             >
-                              Charge Fees
+                              <Eye className="h-3 w-3 mr-1 shrink-0" />
+                              Preview
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleChargeFees(retailer.retailerName)}
+                              disabled={zohoInvoicing || !zohoInvoiceEnabled}
+                              title={
+                                zohoStatusPending
+                                  ? 'Checking Zoho…'
+                                  : !zohoInvoiceEnabled
+                                    ? 'Configure Zoho on the server'
+                                    : 'Create Zoho invoice and email retailer'
+                              }
+                              className="px-3 py-1.5 bg-bevvi-primary-600 text-white text-xs font-medium rounded-md hover:bg-bevvi-primary-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+                            >
+                              Create invoice
                             </button>
                             <button
                               onClick={() => handleGenerateReport(retailer.retailerName)}
@@ -930,6 +1288,7 @@ const RetailerManagement = () => {
                       <td className="px-4 py-4 text-sm text-gray-900">{formatDollarAmount(totals.retailerFee)}</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{formatDollarAmount(totals.totalCharges)}</td>
                       <td className="px-4 py-4 text-sm text-gray-900">{formatNumber(totals.orderCount)}</td>
+                      <td className="px-4 py-4 text-sm text-gray-500">—</td>
                       <td className="px-4 py-4 text-sm text-gray-900"></td>
                     </tr>
                   </tbody>
@@ -961,6 +1320,14 @@ const RetailerManagement = () => {
           </div>
         )}
       </div>
+
+      <RetailerInvoicePreviewModal
+        isOpen={invoicePreviewOpen}
+        preview={invoicePreview}
+        isLoading={invoicePreviewLoading}
+        error={invoicePreviewError}
+        onClose={() => setInvoicePreviewOpen(false)}
+      />
     </div>
   )
 }

@@ -11,21 +11,34 @@ import { useOrdersFooter } from '../context/OrdersFooterContext'
 import { useOrderNotifications } from '../context/OrderNotificationsContext'
 import { getOrderGrandTotal } from '../utils/orderTotals'
 import {
-  filterOrdersByCalendarRange,
+  filterOrdersByStrictCalendarRange,
+  getDeliveryLocalDate,
   getDeliveryYmdForDashboard,
+  getOrderLocalDate,
   getOrderYmdForDashboard,
   isDeliveryDateAfterOrderDate,
   resolveOrderTimeZone
 } from '../utils/orderDates'
+import { orderMatchesStrictCalendarRange } from '../utils/orderListPinning'
 import { getOrderRowAlertTier } from '../utils/orderRowAlerts'
+import { isPinnedOpenOrder, orderMatchesDisplayDateRange } from '../utils/orderListPinning'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
-import { buildOrderFromDetails } from '../utils/orderDisplay'
+import { buildOrderFromDetails, getOrderRetailerName, mergeOrderLists } from '../utils/orderDisplay'
 import {
   DEFAULT_ORDER_STATUS_FILTER,
   ORDERS_SCROLL_STORAGE_KEY,
   parseOrdersDashboardSearchParams,
   serializeOrdersDashboardSearchParams
 } from '../utils/ordersDashboardUrlState'
+import OrdersTableColgroup from './OrdersTableColgroup'
+import {
+  ORDERS_TABLE_MIN_COLUMN_WIDTH,
+  getDefaultOrdersTableColumnWidths,
+  loadOrdersTableColumnWidths,
+  saveOrdersTableColumnWidths,
+  sumOrdersTableColumnWidths,
+  ORDERS_TABLE_COLUMNS
+} from '../utils/ordersTableColumns'
 
 const formatLocalDateInput = (date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
@@ -37,6 +50,8 @@ const defaultOrdersDateRange = () => {
     endDate: today
   }
 }
+
+const AUTO_REFRESH_INTERVAL_MS = 20 * 60 * 1000
 
 const msUntilNextLocalMidnight = () => {
   const now = new Date()
@@ -103,11 +118,70 @@ const Dashboard = ({ onSwitchToAI }) => {
   const [orders, setOrders] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isLoadingPinnedOpen, setIsLoadingPinnedOpen] = useState(false)
+  const [ordersTableColumnWidths, setOrdersTableColumnWidths] = useState(() =>
+    loadOrdersTableColumnWidths()
+  )
+  const ordersTableColumnWidthsRef = useRef(ordersTableColumnWidths)
+  ordersTableColumnWidthsRef.current = ordersTableColumnWidths
+  const ordersTableLayoutWidth = useMemo(
+    () => sumOrdersTableColumnWidths(ordersTableColumnWidths),
+    [ordersTableColumnWidths]
+  )
+  const ordersTableWidthStyle = useMemo(
+    () => ({ width: ordersTableLayoutWidth, minWidth: '100%' }),
+    [ordersTableLayoutWidth]
+  )
+
+  const beginOrdersColumnResize = useCallback((columnId, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startWidth = ordersTableColumnWidthsRef.current[columnId] ?? 96
+
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    const onMove = (moveEvent) => {
+      const nextWidth = Math.max(
+        ORDERS_TABLE_MIN_COLUMN_WIDTH,
+        Math.round(startWidth + (moveEvent.clientX - startX))
+      )
+      setOrdersTableColumnWidths((prev) => ({ ...prev, [columnId]: nextWidth }))
+    }
+
+    const onUp = () => {
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      setOrdersTableColumnWidths((prev) => {
+        saveOrdersTableColumnWidths(prev)
+        return prev
+      })
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [])
+
+  const resetOrdersTableColumnWidth = useCallback((columnId, event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const defaultWidth = getDefaultOrdersTableColumnWidths()[columnId]
+    if (!defaultWidth) return
+    setOrdersTableColumnWidths((prev) => {
+      const next = { ...prev, [columnId]: defaultWidth }
+      saveOrdersTableColumnWidths(next)
+      return next
+    })
+  }, [])
   const ordersFetchAbortRef = useRef(null)
   const ordersFetchKindRef = useRef(null)
   const ordersFetchGenerationRef = useRef(0)
   const dateRangeRef = useRef(null)
   const fetchOrdersRef = useRef(null)
+  const clientAutoRefreshIntervalRef = useRef(null)
   const [apiError, setApiError] = useState(null)
   const [dateRange, setDateRange] = useState(() => {
     const parsed = parseOrdersDashboardSearchParams(searchParams)
@@ -237,6 +311,9 @@ const Dashboard = ({ onSwitchToAI }) => {
       if (key === 'total') {
         aVal = getOrderGrandTotal(a)
         bVal = getOrderGrandTotal(b)
+      } else if (key === 'establishment') {
+        aVal = getOrderRetailerName(a)
+        bVal = getOrderRetailerName(b)
       } else if (key === 'id') {
         aVal = parseFloat(aVal) || 0
         bVal = parseFloat(bVal) || 0
@@ -283,13 +360,37 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   const ordersInDateRange = useMemo(() => {
-    return filterOrdersByCalendarRange(
+    if (!dateRange.startDate || !dateRange.endDate) return orders
+    const ctx = {
+      getOrderLocalDate,
+      getDeliveryLocalDate,
+      timeZone: orderFilterTimeZone
+    }
+    return orders.filter((order) =>
+      orderMatchesDisplayDateRange(order, dateRange.startDate, dateRange.endDate, ctx)
+    )
+  }, [orders, dateRange, orderFilterTimeZone])
+
+  const ordersInStrictDateRange = useMemo(() => {
+    return filterOrdersByStrictCalendarRange(
       orders,
       dateRange.startDate,
       dateRange.endDate,
       orderFilterTimeZone
     )
   }, [orders, dateRange, orderFilterTimeZone])
+
+  const isOrderInFinanceDateRange = useCallback(
+    (order) => {
+      if (!order || order._fromLookup) return false
+      return orderMatchesStrictCalendarRange(order, dateRange.startDate, dateRange.endDate, {
+        getOrderLocalDate,
+        getDeliveryLocalDate,
+        timeZone: orderFilterTimeZone
+      })
+    },
+    [dateRange.endDate, dateRange.startDate, orderFilterTimeZone]
+  )
 
   useEffect(() => {
     const term = searchTerm.trim()
@@ -342,11 +443,11 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   const ordersForFooterTotal = useMemo(
     () =>
-      ordersInDateRange.filter(
+      ordersInStrictDateRange.filter(
         (order) =>
           !['cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
       ),
-    [ordersInDateRange]
+    [ordersInStrictDateRange]
   )
 
   const ordersDateRangeTotal = useMemo(
@@ -397,11 +498,14 @@ const Dashboard = ({ onSwitchToAI }) => {
 
   // Calculate summary statistics
   const totalOrders = ordersInDateRange.length
-  const revenueOrders = ordersInDateRange.filter(order => 
-    !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
+  const revenueOrders = ordersInStrictDateRange.filter(
+    (order) =>
+      !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
   )
-  const totalRevenue = revenueOrders
-    .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
+  const totalRevenue = revenueOrders.reduce(
+    (sum, order) => sum + (parseFloat(order.revenue) || 0),
+    0
+  )
   const averageOrderValue = revenueOrders.length > 0 ? totalRevenue / revenueOrders.length : 0
 
   // Filter orders based on search term
@@ -413,6 +517,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       results = ordersInDateRange.filter(order =>
         order.id?.toLowerCase().includes(searchLower) ||
         order.customerName?.toLowerCase().includes(searchLower) ||
+        getOrderRetailerName(order).toLowerCase().includes(searchLower) ||
         order.ordernum?.toLowerCase().includes(searchLower) ||
         (searchLower === 'delayed' && order.deliveryStatus?.toLowerCase() === 'delayed')
       )
@@ -443,8 +548,9 @@ const Dashboard = ({ onSwitchToAI }) => {
       
       filtered = filtered.filter(order => {
         if (order._fromLookup) return true
+        if (isPinnedOpenOrder(order)) return true
 
-        // Handle "All Dates" filter first - show all orders regardless of delivery date
+        // Handle "All Dates" filter first — show all orders regardless of delivery date
         if (deliveryFilter.includes('all_dates')) {
           return true
         }
@@ -604,13 +710,24 @@ const Dashboard = ({ onSwitchToAI }) => {
     return sortableItems
   }, [filteredOrdersByStatusAndDelivery, sortConfig])
 
-  // Calculate filtered summary statistics
+  // Calculate filtered summary statistics (finance uses strict date range only)
   const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
-  const filteredAcceptedOrders = filteredOrdersByStatusAndDelivery.filter((order) =>
-    invoicingEngine
-      ? invoicingEngine.isIncludedOrderStatus(order.status)
-      : isIncludedOrderStatus(order.status)
+  const filteredOrdersForFinance = useMemo(
+    () => filteredOrdersByStatusAndDelivery.filter(isOrderInFinanceDateRange),
+    [filteredOrdersByStatusAndDelivery, isOrderInFinanceDateRange]
   )
+  const isBillableOrderStatus = useCallback(
+    (order) =>
+      invoicingEngine
+        ? invoicingEngine.isIncludedOrderStatus(order.status)
+        : isIncludedOrderStatus(order.status),
+    [invoicingEngine]
+  )
+  const filteredAcceptedOrdersVisible = useMemo(
+    () => filteredOrdersByStatusAndDelivery.filter(isBillableOrderStatus),
+    [filteredOrdersByStatusAndDelivery, isBillableOrderStatus]
+  )
+  const filteredAcceptedOrders = filteredOrdersForFinance.filter(isBillableOrderStatus)
   const filteredTotalRevenue = filteredAcceptedOrders
     .reduce((sum, order) => sum + (parseFloat(order.revenue) || 0), 0)
   const filteredTotalRevenueBasedOnTotal = filteredAcceptedOrders
@@ -747,21 +864,56 @@ const Dashboard = ({ onSwitchToAI }) => {
 
       if (!isCurrentFetch()) return
 
-      // Only update orders after ALL data is retrieved (not during chunking)
-      if (data.data && Array.isArray(data.data)) {
-        setOrders(data.data)
-        markOrdersSeen(data.data)
+      const primaryOrders = data.data && Array.isArray(data.data) ? data.data : []
+      if (primaryOrders.length > 0 || !background) {
+        setOrders(primaryOrders)
+        if (primaryOrders.length > 0) markOrdersSeen(primaryOrders)
       } else if (!background) {
         setOrders([])
       }
 
-      // Update last refresh time
+      if (!background) {
+        setIsLoading(false)
+      }
+
       const now = new Date()
       setLastRefreshTime(now)
+      setNextRefreshTime(new Date(now.getTime() + 20 * 60 * 1000))
 
-      // Calculate next refresh time (matches server AUTO_REFRESH_INTERVAL)
-      const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
-      setNextRefreshTime(nextRefresh)
+      setIsLoadingPinnedOpen(true)
+      try {
+        const pinnedUrl =
+          `/api/orders/pinned-open?timeZone=${clientTz}` +
+          `&startDate=${encodeURIComponent(activeDateRange.startDate)}` +
+          `&endDate=${encodeURIComponent(activeDateRange.endDate)}` +
+          `&t=${Date.now()}`
+        const pinnedResponse = await apiFetch(pinnedUrl, {
+          cache: 'no-store',
+          signal: controller.signal,
+          timeoutMs: 180000
+        })
+        if (!isCurrentFetch()) return
+        if (pinnedResponse.ok) {
+          const pinnedData = await pinnedResponse.json()
+          const pinnedOrders = (Array.isArray(pinnedData.data) ? pinnedData.data : []).filter(
+            isPinnedOpenOrder
+          )
+          if (pinnedOrders.length > 0) {
+            const merged = mergeOrderLists(primaryOrders, pinnedOrders)
+            setOrders(merged)
+            markOrdersSeen(merged)
+            console.log(
+              `📌 Merged ${pinnedOrders.length} pinned open order(s)${pinnedData.cached ? ' (cached)' : ''}`
+            )
+          }
+        }
+      } catch (pinnedError) {
+        if (pinnedError?.name !== 'AbortError' && isCurrentFetch()) {
+          console.warn('⚠️ Pinned open orders supplement failed:', pinnedError.message)
+        }
+      } finally {
+        if (isCurrentFetch()) setIsLoadingPinnedOpen(false)
+      }
     } catch (error) {
       if (!isCurrentFetch()) return
       if (error?.name === 'AbortError') return
@@ -820,7 +972,8 @@ const Dashboard = ({ onSwitchToAI }) => {
           },
           body: JSON.stringify({
             startDate: dateRange.startDate,
-            endDate: dateRange.endDate
+            endDate: dateRange.endDate,
+            timeZone: orderFilterTimeZone
           })
         })
         
@@ -830,7 +983,7 @@ const Dashboard = ({ onSwitchToAI }) => {
           
           // Set initial next refresh time (20 minutes from now)
           const now = new Date()
-          const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
+          const nextRefresh = new Date(now.getTime() + AUTO_REFRESH_INTERVAL_MS)
           setNextRefreshTime(nextRefresh)
           
           // Fetch orders immediately
@@ -891,7 +1044,15 @@ const Dashboard = ({ onSwitchToAI }) => {
   }
 
   useEffect(() => {
-    fetchOrdersRef.current?.()
+    if (location.state?.dashboardSoftRefresh !== true) return
+    navigate(`${location.pathname}${location.search}`, { replace: true, state: {} })
+    fetchOrdersRef.current?.({ background: true })
+  }, [location.key, location.pathname, location.search, location.state, navigate])
+
+  useEffect(() => {
+    if (location.state?.dashboardSoftRefresh !== true) {
+      fetchOrdersRef.current?.()
+    }
 
     // Update backend auto-refresh with new date range if auto-refresh is active
     if (autoRefresh) {
@@ -912,7 +1073,8 @@ const Dashboard = ({ onSwitchToAI }) => {
             },
             body: JSON.stringify({
               startDate: dateRange.startDate,
-              endDate: dateRange.endDate
+              endDate: dateRange.endDate,
+              timeZone: orderFilterTimeZone
             })
           })
         } catch (error) {
@@ -922,7 +1084,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       
       updateBackendAutoRefresh()
     }
-  }, [dateRange.startDate, dateRange.endDate, autoRefresh])
+  }, [dateRange.startDate, dateRange.endDate, autoRefresh, orderFilterTimeZone])
 
   useEffect(() => {
     return () => {
@@ -951,8 +1113,9 @@ const Dashboard = ({ onSwitchToAI }) => {
             if (data.type === 'data_refresh') {
               console.log('🔄 Received real-time update:', data.message)
               
-              // Update the last refresh time
-              setLastRefreshTime(new Date(data.refreshTime))
+              const refreshedAt = new Date(data.refreshTime)
+              setLastRefreshTime(refreshedAt)
+              setNextRefreshTime(new Date(refreshedAt.getTime() + AUTO_REFRESH_INTERVAL_MS))
               
               // Refresh in background so the order table stays visible.
               fetchOrdersRef.current?.({ background: true })
@@ -1014,14 +1177,15 @@ const Dashboard = ({ onSwitchToAI }) => {
             },
             body: JSON.stringify({
               startDate: dateRange.startDate,
-              endDate: dateRange.endDate
+              endDate: dateRange.endDate,
+              timeZone: orderFilterTimeZone
             })
           })
           
           if (response.ok) {
             // Set initial next refresh time (20 minutes from now)
             const now = new Date()
-            const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
+            const nextRefresh = new Date(now.getTime() + AUTO_REFRESH_INTERVAL_MS)
             setNextRefreshTime(nextRefresh)
             
             // Don't fetch orders here - the useEffect at line 633 already handles fetching
@@ -1034,7 +1198,35 @@ const Dashboard = ({ onSwitchToAI }) => {
       
       startBackendAutoRefresh()
     }
-  }, [autoRefresh, dateRange]) // Include dateRange in dependencies
+  }, [autoRefresh, dateRange, orderFilterTimeZone])
+
+  // Client-side 20m refresh (works even if SSE /api/events is unavailable)
+  useEffect(() => {
+    if (!autoRefresh) {
+      if (clientAutoRefreshIntervalRef.current) {
+        window.clearInterval(clientAutoRefreshIntervalRef.current)
+        clientAutoRefreshIntervalRef.current = null
+      }
+      return undefined
+    }
+
+    setNextRefreshTime(new Date(Date.now() + AUTO_REFRESH_INTERVAL_MS))
+
+    clientAutoRefreshIntervalRef.current = window.setInterval(() => {
+      console.log('🔄 Client auto-refresh interval (20 minutes)')
+      fetchOrdersRef.current?.({ background: true })
+      const now = new Date()
+      setLastRefreshTime(now)
+      setNextRefreshTime(new Date(now.getTime() + AUTO_REFRESH_INTERVAL_MS))
+    }, AUTO_REFRESH_INTERVAL_MS)
+
+    return () => {
+      if (clientAutoRefreshIntervalRef.current) {
+        window.clearInterval(clientAutoRefreshIntervalRef.current)
+        clientAutoRefreshIntervalRef.current = null
+      }
+    }
+  }, [autoRefresh, dateRange.startDate, dateRange.endDate])
 
   // Check auto-refresh status and update frontend state
   useEffect(() => {
@@ -1053,7 +1245,7 @@ const Dashboard = ({ onSwitchToAI }) => {
               setNextRefreshTime(new Date(status.nextRefresh))
             } else {
               const now = new Date()
-              const nextRefresh = new Date(now.getTime() + 20 * 60 * 1000)
+              const nextRefresh = new Date(now.getTime() + AUTO_REFRESH_INTERVAL_MS)
               setNextRefreshTime(nextRefresh)
             }
           }
@@ -1324,7 +1516,7 @@ const Dashboard = ({ onSwitchToAI }) => {
         </div>
 
         {/* Loading Overlay - Covers entire screen */}
-        {isLoading && (
+        {isLoading && orders.length === 0 && (
           <div className="fixed inset-0 bg-gradient-to-br from-bevvi-primary-900 to-bevvi-primary-800 bg-opacity-95 flex items-center justify-center z-50 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl p-12 max-w-lg mx-4 border-4 border-bevvi-primary-500">
               <div className="flex flex-col items-center">
@@ -1419,11 +1611,11 @@ const Dashboard = ({ onSwitchToAI }) => {
                   </div>
                   <div className="flex justify-between">
                     <span>Accepted Orders:</span>
-                    <span className="font-medium">{formatNumber(filteredAcceptedOrders.length)}</span>
+                    <span className="font-medium">{formatNumber(filteredAcceptedOrdersVisible.length)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Pending/Cancelled/Rejected:</span>
-                    <span className="font-medium">{formatNumber(filteredTotalOrders - filteredAcceptedOrders.length)}</span>
+                    <span className="font-medium">{formatNumber(filteredTotalOrders - filteredAcceptedOrdersVisible.length)}</span>
           </div>
               </div>
               </div>
@@ -1597,12 +1789,15 @@ const Dashboard = ({ onSwitchToAI }) => {
 
         {/* Order Types Tile */}
 
-        {!isLoading && (
+        {(!isLoading || orders.length > 0) && (
         <div className="bg-white rounded-lg shadow p-3 sm:p-4 lg:p-6">
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 sm:mb-4 gap-2">
             <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Orders Dashboard</h2>
             <div className="text-xs sm:text-sm text-gray-600">
               Showing {formatNumber(filteredOrdersByStatusAndDelivery.length)} of {formatNumber(totalOrders)} orders
+              {isLoadingPinnedOpen ? (
+                <span className="ml-2 text-bevvi-primary-700">· loading open pending/accepted…</span>
+              ) : null}
             </div>
           </div>
 
@@ -1616,7 +1811,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 id="dashboard-order-search"
                 type="search"
                 autoComplete="off"
-                placeholder="Order #, customer name, or type delayed…"
+                placeholder="Order #, customer, retailer, or type delayed…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="block w-full rounded-lg border border-bevvi-primary-200 bg-white py-3 pl-11 pr-11 text-base text-gray-900 shadow-inner placeholder:text-gray-500 focus:border-bevvi-primary-500 focus:outline-none focus:ring-2 focus:ring-bevvi-primary-500 sm:pl-12 sm:pr-12 sm:text-base"
@@ -1666,163 +1861,46 @@ const Dashboard = ({ onSwitchToAI }) => {
                     <div className="shadow ring-1 ring-black ring-opacity-5 rounded-lg">
                       <div className="max-h-96 overflow-auto">
                         <div className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200">
-                          <table className="w-full table-fixed min-w-0">
-                            <colgroup>
-                              <col className="w-48" />
-                              <col className="w-40" />
-                              <col className="w-28" />
-                              <col className="w-24" />
-                              <col className="w-28" />
-                              <col className="w-24" />
-                              <col className="w-24" />
-                              <col className="w-24" />
-                              <col className="w-28" />
-                              <col className="w-24" />
-                              <col className="w-24" />
-                              <col className="w-20" />
-                            </colgroup>
+                          <table className="table-fixed min-w-0" style={ordersTableWidthStyle}>
+                            <OrdersTableColgroup columnWidths={ordersTableColumnWidths} />
                             <thead className="bg-gray-50">
                               <tr>
-                    <th 
-                          className="pl-2 pr-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('ordernum')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Order Number</span>
-                            {sortConfig.key === 'ordernum' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('customerName')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Customer</span>
-                            {sortConfig.key === 'customerName' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('orderDate')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Order Date</span>
-                            {sortConfig.key === 'orderDate' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('orderTime')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Order Time</span>
-                            {sortConfig.key === 'orderTime' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                                        <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('deliveryDate')}
-                        >
-                          <div className="flex items-center space-x-1">
-                            <span>Delivery Date</span>
-                            {sortConfig.key === 'deliveryDate' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                          </div>
-                        </th>
-                        <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('deliveryTime')}
-                        >
-                          <div className="flex items-center space-x-1">
-                            <span>Delivery Time</span>
-                            {sortConfig.key === 'deliveryTime' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                          </div>
-                        </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('status')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Status</span>
-                            {sortConfig.key === 'status' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('orderType')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Order Type</span>
-                            {sortConfig.key === 'orderType' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                      onClick={() => handleSort('deliveryStatus')}
-                    >
-                          <div className="flex items-center space-x-1">
-                            <span>Delivery Status</span>
-                            {sortConfig.key === 'deliveryStatus' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                          <span>Service Fee</span>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                          <span>Retailer Fee</span>
-                    </th>
-                    <th 
-                          className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                          onClick={() => handleSort('total')}
-                        >
-                          <div className="flex items-center space-x-1">
-                            <span>Total</span>
-                            {sortConfig.key === 'total' && (
-                              sortConfig.direction === 'asc' ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />
-                            )}
-                      </div>
-                    </th>
-
-                  </tr>
-                </thead>
-              </table>
+                                {ORDERS_TABLE_COLUMNS.map((col) => (
+                                  <th
+                                    key={col.id}
+                                    className={`${
+                                      col.padding === 'first' ? 'pl-2 pr-3' : 'px-3'
+                                    } py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none ${
+                                      col.sortKey ? 'cursor-pointer hover:bg-gray-100' : ''
+                                    }`}
+                                    onClick={col.sortKey ? () => handleSort(col.sortKey) : undefined}
+                                  >
+                                    <div className="flex items-center space-x-1 pr-2">
+                                      <span>{col.label}</span>
+                                      {col.sortKey && sortConfig.key === col.sortKey
+                                        ? sortConfig.direction === 'asc'
+                                          ? <ChevronUp className="h-4 w-4" />
+                                          : <ChevronDown className="h-4 w-4" />
+                                        : null}
+                                    </div>
+                                    <div
+                                      role="separator"
+                                      aria-orientation="vertical"
+                                      aria-label={`Resize ${col.label} column`}
+                                      title="Drag to resize · double-click to reset"
+                                      className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-bevvi-primary-200/80"
+                                      onMouseDown={(event) => beginOrdersColumnResize(col.id, event)}
+                                      onDoubleClick={(event) => resetOrdersTableColumnWidth(col.id, event)}
+                                      onClick={(event) => event.stopPropagation()}
+                                    />
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                          </table>
                         </div>
-                        <table className="w-full table-fixed min-w-0">
-                          <colgroup>
-                            <col className="w-48" />
-                            <col className="w-40" />
-                            <col className="w-28" />
-                            <col className="w-24" />
-                            <col className="w-28" />
-                            <col className="w-24" />
-                            <col className="w-24" />
-                            <col className="w-24" />
-                            <col className="w-28" />
-                            <col className="w-24" />
-                            <col className="w-24" />
-                            <col className="w-20" />
-                          </colgroup>
+                        <table className="table-fixed min-w-0" style={ordersTableWidthStyle}>
+                          <OrdersTableColgroup columnWidths={ordersTableColumnWidths} />
                           <tbody className="bg-white divide-y divide-gray-200">
                         {sortedOrders.map((order) => {
                           const deliveryFuture = isDeliveryDateAfterOrderDate(order)
@@ -1848,6 +1926,11 @@ const Dashboard = ({ onSwitchToAI }) => {
                           <td className="px-3 py-4 text-sm text-gray-900">
                             <div className="truncate" title={order.customerName}>
                               {order.customerName}
+                            </div>
+                          </td>
+                          <td className="px-3 py-4 text-sm text-gray-900">
+                            <div className="truncate" title={getOrderRetailerName(order)}>
+                              {getOrderRetailerName(order)}
                             </div>
                           </td>
                           <td className="px-3 py-4 text-sm text-gray-900">
@@ -1984,6 +2067,9 @@ const Dashboard = ({ onSwitchToAI }) => {
                                 {order.ordernum || order.id}
                               </button>
                               <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
+                              <p className="text-sm text-gray-500 truncate mt-0.5" title={getOrderRetailerName(order)}>
+                                {getOrderRetailerName(order)}
+                              </p>
                             </div>
                             <div className="ml-2 flex-shrink-0 flex items-center gap-2">
                               <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${

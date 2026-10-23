@@ -1,0 +1,17 @@
+[Unit]
+Description=Bevvi Analytics Gateway (Computer MCP proxy)
+After=network.target
+
+[Service]
+Type=simple
+User=bevvi-analytics
+Group=bevvi-analytics
+WorkingDirectory=/opt/bevvi-analytics-gateway
+EnvironmentFile=/etc/bevvi-analytics-gateway.env
+ExecStart=/usr/bin/node scripts/analytics-gateway-server.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

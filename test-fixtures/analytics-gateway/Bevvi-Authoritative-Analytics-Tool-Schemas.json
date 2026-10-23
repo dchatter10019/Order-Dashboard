@@ -1,0 +1,5 @@
+{
+  "deprecated": true,
+  "replacement": "Bevvi-Python-Tools-List-Export.json",
+  "note": "Do not use this file for validation. Request schemas are loaded mechanically from the immutable tools/list export; output shapes from Bevvi-Python-Output-Contracts.json."
+}

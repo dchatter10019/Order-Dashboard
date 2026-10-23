@@ -1,0 +1,35 @@
+{
+  "provenance": {
+    "source": "Python handler return shapes (review checkout a4e707f7…, separate from tools/list export)",
+    "note": "Output validation is not derived from tools/list."
+  },
+  "output_shapes": {
+    "bevvi_analysis_data_quality": {
+      "required": ["eligible_orders"],
+      "types": { "eligible_orders": "number" }
+    },
+    "bevvi_planning_forecast": {
+      "required": ["horizons", "nonoverlapping_30_day_blocks", "weekly", "monthly"],
+      "horizon_keys": ["30", "60", "90"]
+    },
+    "bevvi_period_comparison": {
+      "required": [
+        "current_period",
+        "baseline_period",
+        "metrics",
+        "breakdown",
+        "revenue_change_bridge"
+      ]
+    },
+    "bevvi_customer_trends": {
+      "required": ["customers", "unattributed"]
+    },
+    "bevvi_historical_seasonality": {
+      "required": ["months", "bulk_threshold_usd", "limitations"],
+      "nullable": ["bulk_threshold_usd"]
+    }
+  },
+  "approved_analysis_source_sha256": [
+    "8a8539119267a0ebbea7d44d62d09a32c5abda2a82b0f69bf22e9098ffcce9a4"
+  ]
+}

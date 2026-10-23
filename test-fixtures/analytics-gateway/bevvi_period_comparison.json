@@ -1,0 +1,7 @@
+{
+  "current_period": { "start_date": "2026-09-01", "end_date": "2026-09-30" },
+  "baseline_period": { "start_date": "2025-09-01", "end_date": "2025-09-30" },
+  "metrics": { "revenue_delta_pct": 0.1, "orders_delta_pct": 0.05 },
+  "breakdown": [{ "segment": "air_culinaire", "revenue_usd": 1000 }],
+  "revenue_change_bridge": { "items": [{ "label": "volume", "amount_usd": 500 }] }
+}

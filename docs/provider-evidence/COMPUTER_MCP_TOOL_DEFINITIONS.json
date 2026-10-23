@@ -1,0 +1,60 @@
+[
+  {
+    "name": "list_thread_assets",
+    "description": "List durable assets from an owned Computer thread, including generated files. Returns asset_id, entry_id, filename, mime_type, asset_type, created_at, and is_primary_asset. A null primary flag means the source entry is unavailable. Supply entry_id to filter a turn. Follow next_cursor even when a filtered page is empty. Use create_asset_download for a fresh URL.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "entry_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "create_asset_download",
+    "description": "Create a fresh HTTPS download URL for an accessible asset in an owned Computer thread. Use asset_id from list_thread_assets. expires_in_seconds is the remaining URL lifetime, or null for a URL without a known expiration. Request another URL after expiration.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "type": "string"
+        },
+        "asset_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "asset_id"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

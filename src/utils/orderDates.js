@@ -1,3 +1,8 @@
+import {
+  orderMatchesDisplayDateRange,
+  orderMatchesStrictCalendarRange
+} from './orderListPinning.js'
+
 /** Default when query TZ is missing or invalid — keep in sync with server BEVVI_ORDER_TIMEZONE. */
 const DEFAULT_ORDER_TIMEZONE =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_BEVVI_ORDER_TIMEZONE) ||
@@ -140,15 +145,22 @@ export function getDeliveryLocalDate(order, timeZone) {
   return order.deliveryDate
 }
 
-/** Same date-range membership as server-side order filtering for /api/orders. */
+const displayRangeCtx = (timeZone) => ({
+  getOrderLocalDate,
+  getDeliveryLocalDate,
+  timeZone
+})
+
+/** Strict calendar range only (excludes pinned pending/accepted outside the range). */
+export function filterOrdersByStrictCalendarRange(orders, startDate, endDate, timeZone) {
+  if (!startDate || !endDate) return orders
+  const ctx = displayRangeCtx(timeZone)
+  return orders.filter((order) => orderMatchesStrictCalendarRange(order, startDate, endDate, ctx))
+}
+
+/** Same date-range membership as server-side order filtering for /api/orders (includes pinned open orders). */
 export function filterOrdersByCalendarRange(orders, startDate, endDate, timeZone) {
   if (!startDate || !endDate) return orders
-  return orders.filter((order) => {
-    const orderLocalDate = getOrderLocalDate(order, timeZone)
-    if (orderLocalDate) {
-      return orderLocalDate >= startDate && orderLocalDate <= endDate
-    }
-    const deliveryLocalDate = getDeliveryLocalDate(order, timeZone)
-    return deliveryLocalDate && deliveryLocalDate >= startDate && deliveryLocalDate <= endDate
-  })
+  const ctx = displayRangeCtx(timeZone)
+  return orders.filter((order) => orderMatchesDisplayDateRange(order, startDate, endDate, ctx))
 }

@@ -16,6 +16,54 @@ const {
   getDashboardLoginCredentials
 } = require('./lib/dashboardAuth.cjs')
 const { validateOrderDateRange, MAX_ORDER_DATE_RANGE_DAYS } = require('./lib/orderDateRange.cjs')
+const {
+  computeOpenOrdersWindowYmd,
+  isPinnedOpenOrder,
+  mergeOrdersById,
+  rangeCoversWindow
+} = require('./lib/orderListPinning.cjs')
+
+const PINNED_OPEN_ORDERS_CACHE_MS = 10 * 60 * 1000
+let pinnedOpenOrdersCache = { key: null, fetchedAt: 0, orders: [] }
+let pinnedOpenOrdersInFlight = null
+
+async function loadPinnedOpenOrders(orderTimeZone) {
+  const todayYmd = getYyyyMmDdInTimeZone(new Date(), orderTimeZone)
+  const openWindow = computeOpenOrdersWindowYmd(todayYmd)
+  const cacheKey = `${orderTimeZone}|${openWindow.start}|${openWindow.end}`
+  const now = Date.now()
+
+  if (
+    pinnedOpenOrdersCache.key === cacheKey &&
+    now - pinnedOpenOrdersCache.fetchedAt < PINNED_OPEN_ORDERS_CACHE_MS
+  ) {
+    return { orders: pinnedOpenOrdersCache.orders, cached: true, openWindow }
+  }
+
+  if (pinnedOpenOrdersInFlight?.key === cacheKey) {
+    return pinnedOpenOrdersInFlight.promise
+  }
+
+  const promise = (async () => {
+    const inWindow = await fetchOrdersForDateRange(
+      openWindow.start,
+      openWindow.end,
+      orderTimeZone
+    )
+    const orders = inWindow.filter(isPinnedOpenOrder)
+    pinnedOpenOrdersCache = { key: cacheKey, fetchedAt: Date.now(), orders }
+    pinnedOpenOrdersInFlight = null
+    return { orders, cached: false, openWindow }
+  })()
+
+  pinnedOpenOrdersInFlight = { key: cacheKey, promise }
+  try {
+    return await promise
+  } catch (error) {
+    pinnedOpenOrdersInFlight = null
+    throw error
+  }
+}
 
 function resolveInvoicingRulesPath() {
   const configured = String(process.env.INVOICING_RULES_PATH || '').trim()
@@ -53,6 +101,15 @@ const {
 } = require('./lib/manualOrderBulkSpreadsheet.cjs')
 
 const { deriveManualOrderDeliveryFee } = require('./lib/manualOrderDeliveryInference.cjs')
+
+const { isZohoConfigured, getZohoConfigStatus } = require('./lib/zohoBooksClient.cjs')
+const {
+  createAndEmailRetailerInvoice,
+  buildRetailerInvoicePreview,
+  getPublicContactMap
+} = require('./lib/retailerZohoInvoiceService.cjs')
+const { listRetailersInRange } = require('./lib/retailerInvoiceFees.cjs')
+const { saveRetailerZohoContact } = require('./lib/retailerZohoContacts.cjs')
 
 const INVOICING_RULES_PATH = resolveInvoicingRulesPath()
 
@@ -1326,7 +1383,8 @@ const CORS_ORIGINS = new Set([
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
   'http://localhost:4173',
-  'http://127.0.0.1:4173'
+  'http://127.0.0.1:4173',
+  'https://dashboard.getbevvi.com'
 ])
 app.use(cors({
   origin: (origin, callback) => {
@@ -2521,6 +2579,46 @@ app.post('/api/auth/login', (req, res) => {
   return createAuthLoginHandler()(req, res)
 })
 
+app.get('/api/orders/pinned-open', async (req, res) => {
+  try {
+    const { timeZone: timeZoneQuery, startDate, endDate } = req.query
+    const orderTimeZone = resolveOrderTimeZone(timeZoneQuery)
+    const todayYmd = getYyyyMmDdInTimeZone(new Date(), orderTimeZone)
+    const openWindow = computeOpenOrdersWindowYmd(todayYmd)
+
+    if (
+      startDate &&
+      endDate &&
+      rangeCoversWindow(String(startDate), String(endDate), openWindow.start, openWindow.end)
+    ) {
+      return res.json({
+        success: true,
+        data: [],
+        cached: true,
+        skipped: true,
+        message: 'Selected date range already covers the open-order lookback window'
+      })
+    }
+
+    const { orders, cached } = await loadPinnedOpenOrders(orderTimeZone)
+    return res.json({
+      success: true,
+      data: orders,
+      cached,
+      dateWindow: openWindow,
+      totalOrders: orders.length
+    })
+  } catch (error) {
+    console.error('❌ /api/orders/pinned-open:', error.message)
+    return res.status(502).json({
+      success: false,
+      error: 'Failed to load pinned open orders',
+      message: error.message,
+      data: []
+    })
+  }
+})
+
 app.get('/api/orders', async (req, res) => {
   try {
     const { startDate, endDate, timeZone: timeZoneQuery } = req.query
@@ -2587,7 +2685,7 @@ app.get('/api/orders', async (req, res) => {
 
     // Update auto-refresh range when new dates are requested (preserve client TZ for UTC API conversion)
     updateAutoRefreshRange(startDate, endDate, orderTimeZone)
-    
+
     // Automatically start auto-refresh if not already running
     if (!autoRefreshTimer) {
       startAutoRefresh()
@@ -2708,8 +2806,6 @@ app.get('/api/orders', async (req, res) => {
           // Parse the CSV data from the results field
           const allOrders = parseCSVToOrders(csvData, startDate, orderTimeZone)
           
-          // Filter orders to show only those delivered within the requested local date range
-          // Convert order dates to local time before comparing
           const filteredOrders = allOrders.filter(order => {
             const orderLocalDate = getOrderLocalDate(order, orderTimeZone)
             if (orderLocalDate) {
@@ -3041,6 +3137,7 @@ const SLACK_CHECK_INTERVAL = 5 * 60 * 1000 // 5 minutes for Slack status checks
 let autoRefreshTimer = null
 let lastAutoRefreshDate = null
 let lastAutoRefreshRange = null
+let nextAutoRefreshAt = null
 let slackCheckTimer = null
 
 // Store connected clients for real-time updates
@@ -3084,57 +3181,23 @@ function startAutoRefresh() {
     clearInterval(autoRefreshTimer)
   }
   
+  nextAutoRefreshAt = Date.now() + AUTO_REFRESH_INTERVAL
+
   autoRefreshTimer = setInterval(async () => {
-    if (lastAutoRefreshRange) {
-      const tz = lastAutoRefreshRange.timeZone || DEFAULT_ORDER_TIMEZONE
-      console.log(`🔄 Auto-refreshing orders for ${lastAutoRefreshRange.startDate} to ${lastAutoRefreshRange.endDate} (${tz})`)
-      try {
-        const { utcStartString, utcEndString } = bevviCsvUtcDateRange(
-          lastAutoRefreshRange.startDate,
-          lastAutoRefreshRange.endDate,
-          tz
-        )
-        const apiUrl = `https://api.getbevvi.com/api/bevviutils/getAllStoreTransactionsReportCsv?startDate=${utcStartString}&endDate=${utcEndString}`
-        
-        let response
-        let retryCount = 0
-        const maxRetries = 2 // Fewer retries for auto-refresh
-        
-        while (retryCount < maxRetries) {
-          try {
-            response = await axios.get(apiUrl, {
-              timeout: 30000, // Shorter timeout for auto-refresh
-              headers: {
-                'Accept': 'application/json',
-                'User-Agent': 'Bevvi-Order-Tracking-System/1.0'
-              }
-            })
-            break
-          } catch (retryError) {
-            retryCount++
-            if (retryCount >= maxRetries) {
-              console.log(`❌ Auto-refresh failed after ${maxRetries} attempts: ${retryError.message}`)
-              return
-            }
-            await new Promise(resolve => setTimeout(resolve, 2000))
-          }
-        }
-        
-        if (response && response.status === 200 && response.data && response.data.results) {
-          const csvData = response.data.results
-          const orders = parseCSVToOrders(csvData, lastAutoRefreshRange.startDate, tz)
-          
-          console.log(`✅ Auto-refresh successful: ${orders.length} orders updated`)
-          lastAutoRefreshDate = new Date()
-          
-          await refreshOrdersForAlerts(orders, lastAutoRefreshRange, { notifyNewOrders: true })
-          
-          // Notify all connected clients about the data refresh
-          notifyClientsOfRefresh(orders.length, lastAutoRefreshDate)
-        }
-      } catch (error) {
-        console.log(`❌ Auto-refresh error: ${error.message}`)
-      }
+    nextAutoRefreshAt = Date.now() + AUTO_REFRESH_INTERVAL
+    if (!lastAutoRefreshRange) return
+
+    const tz = lastAutoRefreshRange.timeZone || DEFAULT_ORDER_TIMEZONE
+    const { startDate, endDate } = lastAutoRefreshRange
+    console.log(`🔄 Auto-refreshing orders for ${startDate} to ${endDate} (${tz})`)
+    try {
+      const orders = await fetchOrdersForDateRange(startDate, endDate, tz)
+      console.log(`✅ Auto-refresh successful: ${orders.length} orders updated`)
+      lastAutoRefreshDate = new Date()
+      await refreshOrdersForAlerts(orders, lastAutoRefreshRange, { notifyNewOrders: true })
+      notifyClientsOfRefresh(orders.length, lastAutoRefreshDate)
+    } catch (error) {
+      console.log(`❌ Auto-refresh error: ${error.message}`)
     }
   }, AUTO_REFRESH_INTERVAL)
   
@@ -3146,6 +3209,7 @@ function stopAutoRefresh() {
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer)
     autoRefreshTimer = null
+    nextAutoRefreshAt = null
     console.log('🛑 Auto-refresh stopped')
   }
 }
@@ -8455,10 +8519,203 @@ app.post('/api/products/enrich-from-upc', async (req, res) => {
   }
 })
 
+async function fetchOrdersForInvoicing(startDate, endDate, timeZone) {
+  const orderTimeZone = resolveOrderTimeZone(timeZone)
+  const diffTime = Math.abs(new Date(endDate) - new Date(startDate))
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  if (diffDays > 90) {
+    const chunks = splitDateRange(startDate, endDate, 30)
+    let allOrders = []
+    for (const chunk of chunks) {
+      const chunkOrders = await fetchOrdersForDateRange(chunk.startDate, chunk.endDate, orderTimeZone)
+      allOrders = allOrders.concat(chunkOrders)
+    }
+    return allOrders
+  }
+  return fetchOrdersForDateRange(startDate, endDate, orderTimeZone)
+}
+
+app.get('/api/zoho/books/status', (req, res) => {
+  const contacts = getPublicContactMap()
+  const { configured, missing } = getZohoConfigStatus()
+  res.json({
+    configured,
+    missingEnvVars: missing,
+    retailerContactMappings: contacts.count,
+    contactsFileMissing: contacts.missingFile,
+    apiBase: String(process.env.ZOHO_BOOKS_API_BASE || 'https://www.zohoapis.com/books/v3').replace(/\/$/, '')
+  })
+})
+
+app.get('/api/retailers/zoho-contacts', (req, res) => {
+  const contacts = getPublicContactMap()
+  res.json({ success: true, ...contacts })
+})
+
+app.post('/api/retailers/zoho-contacts', (req, res) => {
+  try {
+    const { retailerName, email, zohoContactId } = req.body || {}
+    const saved = saveRetailerZohoContact(retailerName, { email, zohoContactId })
+    res.json({
+      success: true,
+      contact: {
+        retailerName: saved.retailerName,
+        email: saved.email,
+        hasZohoContactId: Boolean(saved.zohoContactId)
+      }
+    })
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      error: 'invalid_contact',
+      message: error.message
+    })
+  }
+})
+
+app.post('/api/retailers/zoho-invoice-preview', async (req, res) => {
+  try {
+    const { startDate, endDate, retailerName, orders: clientOrders, billingEmail } = req.body || {}
+    if (!startDate || !endDate || !retailerName) {
+      return res.status(400).json({
+        success: false,
+        message: 'startDate, endDate, and retailerName are required.'
+      })
+    }
+    const dateRangeError = validateOrderDateRange(startDate, endDate)
+    if (dateRangeError) {
+      return res.status(400).json({ success: false, message: dateRangeError })
+    }
+    const orders = Array.isArray(clientOrders) ? clientOrders : []
+    const rulesCache = await loadInvoicingRulesFromFile()
+    const invoicingEngine = createInvoicingRulesEngine(rulesCache.config)
+    const preview = buildRetailerInvoicePreview({
+      retailerName: String(retailerName).trim(),
+      startDate,
+      endDate,
+      orders,
+      invoicingEngine,
+      billingEmail: billingEmail ? String(billingEmail).trim() : null
+    })
+    res.json({ success: true, preview })
+  } catch (error) {
+    console.error('Zoho invoice preview error:', error)
+    res.status(500).json({ success: false, message: error.message })
+  }
+})
+
+app.post('/api/retailers/zoho-invoices', async (req, res) => {
+  try {
+    if (!isZohoConfigured()) {
+      return res.status(503).json({
+        success: false,
+        error: 'zoho_not_configured',
+        message:
+          'Zoho Books is not configured. Set ZOHO_BOOKS_ORG_ID, ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, and ZOHO_REFRESH_TOKEN in the server environment.'
+      })
+    }
+
+    const {
+      startDate,
+      endDate,
+      timeZone,
+      retailerNames,
+      sendEmail = true,
+      dryRun = false,
+      orders: clientOrders,
+      billingEmails = null
+    } = req.body || {}
+
+    const billingEmailByRetailer =
+      billingEmails && typeof billingEmails === 'object' && !Array.isArray(billingEmails)
+        ? billingEmails
+        : {}
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'missing_dates',
+        message: 'startDate and endDate are required (YYYY-MM-DD).'
+      })
+    }
+
+    const dateRangeError = validateOrderDateRange(startDate, endDate)
+    if (dateRangeError) {
+      return res.status(400).json({
+        success: false,
+        error: 'invalid_date_range',
+        message: dateRangeError
+      })
+    }
+
+    let orders = Array.isArray(clientOrders) ? clientOrders : null
+    if (!orders) {
+      orders = await fetchOrdersForInvoicing(startDate, endDate, timeZone)
+    }
+
+    const rulesCache = await loadInvoicingRulesFromFile()
+    const invoicingEngine = createInvoicingRulesEngine(rulesCache.config)
+
+    const names =
+      Array.isArray(retailerNames) && retailerNames.length > 0
+        ? retailerNames.map((n) => String(n).trim()).filter(Boolean)
+        : listRetailersInRange(orders, startDate, endDate, invoicingEngine)
+
+    if (!names.length) {
+      return res.status(400).json({
+        success: false,
+        error: 'no_retailers',
+        message: 'No retailers to invoice for this date range.'
+      })
+    }
+
+    const results = []
+    for (const retailerName of names) {
+      try {
+        const overrideEmail = billingEmailByRetailer[retailerName]
+        if (overrideEmail) {
+          saveRetailerZohoContact(retailerName, { email: overrideEmail })
+        }
+        const result = await createAndEmailRetailerInvoice({
+          orders,
+          invoicingEngine,
+          retailerName,
+          startDate,
+          endDate,
+          sendEmail: Boolean(sendEmail),
+          dryRun: Boolean(dryRun),
+          billingEmail: overrideEmail || undefined
+        })
+        results.push(result)
+      } catch (err) {
+        console.error(`Zoho invoice failed for ${retailerName}:`, err.message)
+        results.push({ ok: false, retailerName, error: err.message })
+      }
+    }
+
+    const created = results.filter((r) => r.ok && !r.dryRun && !r.skipped).length
+    const skipped = results.filter((r) => r.skipped).length
+    const failed = results.filter((r) => r.ok === false && !r.skipped).length
+
+    res.json({
+      success: failed === 0,
+      summary: { requested: names.length, created, skipped, failed, dryRun: Boolean(dryRun) },
+      results
+    })
+  } catch (error) {
+    console.error('Error creating Zoho retailer invoices:', error)
+    res.status(500).json({
+      success: false,
+      error: 'zoho_invoice_failed',
+      message: error.message
+    })
+  }
+})
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   const now = new Date()
-  const nextRefresh = autoRefreshTimer ? new Date(Date.now() + AUTO_REFRESH_INTERVAL) : null
+  const nextRefresh = nextAutoRefreshAt ? new Date(nextAutoRefreshAt) : null
   const timeUntilNext = nextRefresh ? Math.max(0, nextRefresh.getTime() - now.getTime()) : null
   
   // Format time until next refresh
@@ -9517,7 +9774,7 @@ app.post('/api/auto-refresh/stop', (req, res) => {
 
 app.get('/api/auto-refresh/status', (req, res) => {
   const now = new Date()
-  const nextRefresh = autoRefreshTimer ? new Date(Date.now() + AUTO_REFRESH_INTERVAL) : null
+  const nextRefresh = nextAutoRefreshAt ? new Date(nextAutoRefreshAt) : null
   const timeUntilNext = nextRefresh ? Math.max(0, nextRefresh.getTime() - now.getTime()) : null
   
   // Format time until next refresh
@@ -9651,6 +9908,92 @@ app.get('/api/invoicing-rules', async (req, res) => {
       sourcePath: INVOICING_RULES_PATH,
       configuredFromEnv: INVOICING_RULES_FROM_ENV
     })
+  }
+})
+
+const { isAnalyticsDashboardEnabled } = require('./lib/analyticsDashboardEnabled.cjs')
+const {
+  buildPlanningForecastDashboardView,
+  defaultSettledAsOf,
+  validateAsOf
+} = require('./lib/planningForecastView.cjs')
+const { getCachedForecast, setCachedForecast } = require('./lib/analyticsDashboardJobs.cjs')
+
+const dashboardPlanningInflight = new Map()
+
+app.get('/api/analytics/dashboard-config', (req, res) => {
+  res.json({ enabled: isAnalyticsDashboardEnabled() })
+})
+
+app.get('/api/analytics/planning-forecast', async (req, res) => {
+  try {
+    if (!isAnalyticsDashboardEnabled()) {
+      return res.status(503).json({
+        error: 'analytics_disabled',
+        message:
+          'Analytics dashboard is disabled. Set BEVVI_ANALYTICS_DASHBOARD_ENABLED=true on the server to enable.'
+      })
+    }
+
+    const { isGatewayConfigured, submitGatewayAnalyticsJob, pollGatewayAnalyticsJob } =
+      await import('./lib/analyticsGatewayMcpClient.mjs')
+
+    if (!isGatewayConfigured()) {
+      return res.status(503).json({
+        error: 'analytics_unconfigured',
+        message:
+          'Configure BEVVI_ANALYTICS_GATEWAY_CLIENT_TOKEN and BEVVI_ANALYTICS_GATEWAY_URL on the order dashboard server.'
+      })
+    }
+
+    const asOf = String(req.query.as_of || defaultSettledAsOf()).trim()
+    const asCheck = validateAsOf(asOf)
+    if (!asCheck.ok) {
+      return res.status(400).json({ error: asCheck.code, message: asCheck.message })
+    }
+
+    const args = { as_of: asOf }
+    const inflightKey = `bevvi_planning_forecast:${JSON.stringify(args)}`
+    const jobIdParam = req.query.jobId ? String(req.query.jobId) : null
+
+    if (jobIdParam) {
+      const polled = await pollGatewayAnalyticsJob(jobIdParam)
+      if (!polled.ok && polled.code === 'pending') {
+        return res.json({ status: 'pending', jobId: jobIdParam, state: polled.state })
+      }
+      if (!polled.ok) {
+        dashboardPlanningInflight.delete(inflightKey)
+        return res.status(502).json({ error: polled.code, message: polled.message, jobId: jobIdParam })
+      }
+      const view = buildPlanningForecastDashboardView(polled.envelope.result, { asOf })
+      const payload = { status: 'ready', gateway_job_id: polled.jobId, ...view }
+      setCachedForecast('bevvi_planning_forecast', args, payload)
+      dashboardPlanningInflight.delete(inflightKey)
+      return res.json(payload)
+    }
+
+    const cached = getCachedForecast('bevvi_planning_forecast', args)
+    if (cached) {
+      return res.json(cached.status === 'ready' ? cached : { status: 'ready', ...cached })
+    }
+
+    if (dashboardPlanningInflight.has(inflightKey)) {
+      return res.json({ status: 'pending', jobId: dashboardPlanningInflight.get(inflightKey), as_of: asOf })
+    }
+
+    const submitted = await submitGatewayAnalyticsJob({
+      operation: 'bevvi_planning_forecast',
+      arguments: args,
+      idempotencyKey: `dashboard-planning-${asOf}`
+    })
+    if (!submitted.ok) {
+      return res.status(502).json({ error: submitted.code, message: submitted.message })
+    }
+    dashboardPlanningInflight.set(inflightKey, submitted.jobId)
+    return res.json({ status: 'pending', jobId: submitted.jobId, as_of: asOf })
+  } catch (error) {
+    console.error('❌ /api/analytics/planning-forecast:', error.message)
+    return res.status(500).json({ error: 'analytics_error', message: error.message })
   }
 })
 

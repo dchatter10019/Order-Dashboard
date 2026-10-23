@@ -88,6 +88,8 @@
   .bevvi-app-footer {
     @apply fixed bottom-0 left-0 right-0 z-50 border-t border-bevvi-950 bg-gradient-to-r from-bevvi-900 via-bevvi-800 to-bevvi-900 text-white shadow-[0_-4px_20px_rgba(66,10,24,0.25)];
     min-height: var(--bevvi-footer-height);
+    /* Status bar is read-only; let taps reach scrollable content underneath on small screens. */
+    pointer-events: none;
   }
 
   .bevvi-app-footer-inner {
@@ -95,6 +97,7 @@
     min-height: var(--bevvi-footer-height);
     display: flex;
     align-items: center;
+    pointer-events: auto;
   }
 
   .bevvi-app-footer-status {

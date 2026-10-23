@@ -3,6 +3,7 @@
  */
 import { test, expect } from '@playwright/test'
 import { clearSession, loginAsTestUser } from '../helpers/auth.mjs'
+import { dismissBrowserNotificationPromptIfPresent } from '../helpers/orders.mjs'
 
 test.describe('5. AI Assistant', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,6 +13,7 @@ test.describe('5. AI Assistant', () => {
     await expect(page.getByPlaceholder(/Ask me anything about your orders/i)).toBeVisible({
       timeout: 30_000
     })
+    await dismissBrowserNotificationPromptIfPresent(page)
   })
 
   test('AI1 | Revenue query returns a reply (no crash)', async ({ page }) => {

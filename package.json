@@ -1,6 +1,6 @@
 {
   "name": "bevvi-order-tracking-system",
-  "version": "3.3.2",
+  "version": "3.4.0",
   "description": "Bevvi Order Tracking System with authentication and filtering capabilities",
   "main": "index.js",
   "scripts": {
@@ -20,14 +20,26 @@
     "test:e2e:headed": "playwright test --headed",
     "smoke:browser": "npm run test:e2e",
     "qa:full": "npm run smoke && npm run test:e2e",
-    "setup:hooks": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit"
+    "setup:hooks": "git config core.hooksPath .githooks && chmod +x .githooks/pre-commit",
+    "analytics-gateway": "node scripts/analytics-gateway-server.mjs",
+    "test:analytics-gateway": "node scripts/analytics-gateway-test.mjs && node scripts/analytics-gateway-mode-test.mjs && node scripts/analytics-gateway-artifact-delivery-test.mjs && node scripts/analytics-gateway-repair-regression-test.mjs && node scripts/analytics-gateway-contract-parity-test.mjs && node scripts/analytics-gateway-safety-regression-test.mjs && node scripts/analytics-gateway-fourth-followup-test.mjs && node scripts/analytics-gateway-process-boundary-test.mjs && node scripts/analytics-gateway-recovery-coherence-test.mjs && node scripts/analytics-gateway-os-advisory-lock-test.mjs && node scripts/analytics-gateway-os-advisory-lock-wrapper-test.mjs && node scripts/analytics-gateway-gateway-store-singleton-test.mjs && node scripts/analytics-gateway-concurrency-probes-test.mjs && node scripts/analytics-gateway-legacy-unlink-negative-control.mjs && node scripts/analytics-gateway-delayed-delivery-test.mjs && node scripts/analytics-gateway-sdk-handshake-test.mjs && node scripts/analytics-gateway-provider-contract-test.mjs && node scripts/analytics-gateway-exact-host-allowlist-test.mjs && node scripts/analytics-gateway-live-smoke-report-test.mjs && node scripts/analytics-gateway-local-test-mode-test.mjs && node scripts/analytics-gateway-q3-recovery-regression-test.mjs && node scripts/analytics-gateway-cutover-evidence-test.mjs && node scripts/analytics-gateway-q3-offline-repair-test.mjs",
+    "verify:analytics-gateway-mcp": "node scripts/analytics-gateway-mcp-verify.mjs",
+    "analytics-gateway:ensure-secrets": "node scripts/analytics-gateway-ensure-local-secrets.mjs",
+    "analytics-gateway:oauth-start": "node scripts/analytics-gateway-computer-oauth.mjs",
+    "verify:analytics-gateway-oauth": "node scripts/analytics-gateway-oauth-verify.mjs",
+    "verify:analytics-gateway-auth": "node scripts/analytics-gateway-authenticated-verify.mjs",
+    "preflight:analytics-gateway-smoke": "node scripts/analytics-gateway-preflight-checks.mjs",
+    "smoke:analytics-gateway-live": "node scripts/analytics-gateway-live-smoke.mjs",
+    "reconcile:analytics-gateway-job": "node scripts/analytics-gateway-reconcile-job.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "axios": "^1.6.0",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "fs-ext": "2.0.0",
     "moment": "^2.29.4",
     "openai": "^6.8.1",
     "stripe": "^22.2.0",

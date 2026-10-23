@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { pathFromTabId, tabIdFromPathname } from '../constants/dashboardRoutes'
-import { LogOut, Package, FileText, Sparkles, Store, Menu, X, ClipboardCheck, ShoppingCart } from 'lucide-react'
+import { LogOut, Package, FileText, Sparkles, Store, Menu, X, ClipboardCheck, ShoppingCart, TrendingUp } from 'lucide-react'
+import AnalyticsDashboard from './AnalyticsDashboard'
 import Dashboard from './Dashboard'
 import ProductManagement from './ProductManagement'
 import RetailerManagement from './RetailerManagement'
@@ -11,12 +12,24 @@ import ManualOrderAdd from './ManualOrderAdd'
 import Logo from './Logo'
 import { InvoicingRulesProvider } from '../context/InvoicingRulesContext'
 import { BRAND, TAB_COPY } from '../constants/brand'
+import { apiFetch } from '../utils/api'
+
+const ALL_TABS = [
+  { id: 'orders', label: 'Orders', icon: FileText },
+  { id: 'products', label: 'Products', icon: Package },
+  { id: 'retailers', label: 'Retailers', icon: Store },
+  { id: 'gopuff-checker', label: 'GoPuff', icon: ClipboardCheck },
+  { id: 'manual-order', label: 'Manual Order', icon: ShoppingCart },
+  { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+  { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles }
+]
 
 const MainDashboard = ({ onLogout, aiAssistantState, onAIAssistantStateChange }) => {
   const location = useLocation()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState(() => tabIdFromPathname(location.pathname) || 'orders')
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [analyticsDashboardEnabled, setAnalyticsDashboardEnabled] = useState(false)
 
   useEffect(() => {
     const tabFromUrl = tabIdFromPathname(location.pathname)
@@ -24,6 +37,33 @@ const MainDashboard = ({ onLogout, aiAssistantState, onAIAssistantStateChange })
       setActiveTab(tabFromUrl)
     }
   }, [location.pathname])
+
+  useEffect(() => {
+    let cancelled = false
+    apiFetch('/api/analytics/dashboard-config')
+      .then((res) => (res.ok ? res.json() : { enabled: false }))
+      .then((body) => {
+        if (!cancelled) setAnalyticsDashboardEnabled(Boolean(body.enabled))
+      })
+      .catch(() => {
+        if (!cancelled) setAnalyticsDashboardEnabled(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!analyticsDashboardEnabled && activeTab === 'analytics') {
+      navigate('/orders', { replace: true })
+    }
+  }, [analyticsDashboardEnabled, activeTab, navigate])
+
+  const tabs = useMemo(
+    () =>
+      analyticsDashboardEnabled ? ALL_TABS : ALL_TABS.filter((tab) => tab.id !== 'analytics'),
+    [analyticsDashboardEnabled]
+  )
 
   const selectTab = (tabId) => {
     setActiveTab(tabId)
@@ -33,15 +73,6 @@ const MainDashboard = ({ onLogout, aiAssistantState, onAIAssistantStateChange })
       navigate(nextPath)
     }
   }
-
-  const tabs = [
-    { id: 'orders', label: 'Orders', icon: FileText },
-    { id: 'products', label: 'Products', icon: Package },
-    { id: 'retailers', label: 'Retailers', icon: Store },
-    { id: 'gopuff-checker', label: 'GoPuff', icon: ClipboardCheck },
-    { id: 'manual-order', label: 'Manual Order', icon: ShoppingCart },
-    { id: 'ai-assistant', label: 'AI Assistant', icon: Sparkles }
-  ]
 
   useEffect(() => {
     document.body.style.overflow = isMobileMenuOpen ? 'hidden' : ''
@@ -210,6 +241,11 @@ const MainDashboard = ({ onLogout, aiAssistantState, onAIAssistantStateChange })
         <div className={activeTab === 'manual-order' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'manual-order'}>
           <ManualOrderAdd />
         </div>
+        {analyticsDashboardEnabled ? (
+          <div className={activeTab === 'analytics' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'analytics'}>
+            <AnalyticsDashboard />
+          </div>
+        ) : null}
         <div className={activeTab === 'ai-assistant' ? 'block' : 'hidden'} aria-hidden={activeTab !== 'ai-assistant'}>
           <AIAssistant
             persistedState={aiAssistantState}

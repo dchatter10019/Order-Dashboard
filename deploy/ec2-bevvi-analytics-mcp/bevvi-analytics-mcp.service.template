@@ -1,0 +1,25 @@
+[Unit]
+Description=Bevvi Analytics MCP (Python Streamable HTTP)
+After=network.target
+
+[Service]
+Type=simple
+User=bevvi-analytics-mcp
+Group=bevvi-analytics-mcp
+WorkingDirectory=/opt/bevvi-analytics-mcp
+EnvironmentFile=/etc/bevvi-analytics-mcp.env
+ExecStart=/opt/bevvi-analytics-mcp/.venv/bin/python -m bevvi_analytics_mcp
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/bevvi-analytics-mcp /var/lib/bevvi-analytics-mcp/snapshot
+ReadWritePaths=/var/tmp/bevvi-analytics-mcp
+LimitNOFILE=4096
+MemoryMax=2G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

@@ -3712,7 +3712,11 @@ const CommandInterface = ({
       </div>
 
       {/* Input Area */}
-      <form id="chat-form" onSubmit={handleSubmit} className="p-2 bg-white border-t border-gray-200">
+      <form
+        id="chat-form"
+        onSubmit={handleSubmit}
+        className="p-2 pb-[calc(var(--bevvi-footer-height)+0.25rem)] bg-white border-t border-gray-200 shrink-0"
+      >
         <div className="max-w-4xl mx-auto">
           {/* Clear Chat Button - Show when there are messages */}
           {messages.length > 1 && (
@@ -3724,6 +3728,39 @@ const CommandInterface = ({
               >
                 <Trash2 className="h-3 w-3 mr-1" />
                 Clear Chat
+              </button>
+            </div>
+          )}
+
+          {messages.length <= 1 && (
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => runSuggestedQuery('What is the revenue for this month so far?')}
+                className="text-left px-3 py-2 bg-bevvi-primary-50 hover:bg-bevvi-primary-100 rounded-lg text-xs text-bevvi-primary-700 hover:text-bevvi-primary-800 transition-all duration-200 border border-bevvi-primary-200 hover:border-bevvi-primary-300"
+              >
+                Month To Date Revenue
+              </button>
+              <button
+                type="button"
+                onClick={() => runSuggestedQuery('What is the sales tax for this month so far?')}
+                className="text-left px-3 py-2 bg-green-50 hover:bg-green-100 rounded-lg text-xs text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300"
+              >
+                Month To Date Sales Tax
+              </button>
+              <button
+                type="button"
+                onClick={() => runSuggestedQuery('What was the revenue for last month?')}
+                className="text-left px-3 py-2 bg-purple-50 hover:bg-purple-100 rounded-lg text-xs text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300"
+              >
+                Revenue for Last Month
+              </button>
+              <button
+                type="button"
+                onClick={() => runSuggestedQuery('What is the year to date revenue?')}
+                className="text-left px-3 py-2 bg-orange-50 hover:bg-orange-100 rounded-lg text-xs text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300"
+              >
+                YTD Revenue
               </button>
             </div>
           )}
@@ -3750,40 +3787,6 @@ const CommandInterface = ({
             </button>
           </div>
         </div>
-        
-        {/* Shortcut Buttons - Only show when no messages */}
-        {messages.length <= 1 && (
-          <div className="mt-2 max-w-4xl mx-auto grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => runSuggestedQuery('What is the revenue for this month so far?')}
-              className="text-left px-3 py-2 bg-bevvi-primary-50 hover:bg-bevvi-primary-100 rounded-lg text-xs text-bevvi-primary-700 hover:text-bevvi-primary-800 transition-all duration-200 border border-bevvi-primary-200 hover:border-bevvi-primary-300"
-            >
-              Month To Date Revenue
-            </button>
-            <button
-              type="button"
-              onClick={() => runSuggestedQuery('What is the sales tax for this month so far?')}
-              className="text-left px-3 py-2 bg-green-50 hover:bg-green-100 rounded-lg text-xs text-green-700 hover:text-green-800 transition-all duration-200 border border-green-200 hover:border-green-300"
-            >
-              Month To Date Sales Tax
-            </button>
-            <button
-              type="button"
-              onClick={() => runSuggestedQuery('What was the revenue for last month?')}
-              className="text-left px-3 py-2 bg-purple-50 hover:bg-purple-100 rounded-lg text-xs text-purple-700 hover:text-purple-800 transition-all duration-200 border border-purple-200 hover:border-purple-300"
-            >
-              Revenue for Last Month
-            </button>
-            <button
-              type="button"
-              onClick={() => runSuggestedQuery('What is the year to date revenue?')}
-              className="text-left px-3 py-2 bg-orange-50 hover:bg-orange-100 rounded-lg text-xs text-orange-700 hover:text-orange-800 transition-all duration-200 border border-orange-200 hover:border-orange-300"
-            >
-              YTD Revenue
-            </button>
-          </div>
-        )}
       </form>
     </div>
   )

@@ -1,0 +1,12 @@
+[project]
+name = "bevvi-analytics-mcp"
+version = "0.1.0"
+description = "Authenticated Streamable HTTP MCP for read-only Bevvi analytics"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".", "../../vendor/XGBoostForecast"]
+filterwarnings = ["ignore::mcp.shared.exceptions.MCPDeprecationWarning"]

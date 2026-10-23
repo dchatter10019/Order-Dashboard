@@ -1,0 +1,6 @@
+{
+  "as_of": "2026-10-02",
+  "freshness_ok": true,
+  "coverage_summary": { "orders_rows": 1200, "states_active": 47 },
+  "limitations": ["review_only fixture"]
+}

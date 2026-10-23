@@ -1,0 +1,10 @@
+{
+  "horizons": {
+    "30": { "orders": 100, "revenue_usd": 50000 },
+    "60": { "orders": 200, "revenue_usd": 95000 },
+    "90": { "orders": 300, "revenue_usd": 140000 }
+  },
+  "nonoverlapping_30_day_blocks": [{ "block": 1 }],
+  "weekly": [{ "week": "2026-W40" }],
+  "monthly": [{ "month": "2026-09" }]
+}

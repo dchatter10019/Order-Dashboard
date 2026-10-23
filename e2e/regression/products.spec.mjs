@@ -34,6 +34,6 @@ test.describe('7. Products', () => {
   })
 
   test('P3 | Cached product count copy is visible', async ({ page }) => {
-    await expect(page.getByText(/cached|products/i).first()).toBeVisible()
+    await expect(page.getByTestId('product-cache-hint')).toBeVisible()
   })
 })

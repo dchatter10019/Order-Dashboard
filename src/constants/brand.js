@@ -30,5 +30,9 @@ export const TAB_COPY = {
   'ai-assistant': {
     title: 'AI Assistant',
     description: 'AI-powered insights — ask about revenue, status, customers, and more.'
+  },
+  analytics: {
+    title: 'Analytics',
+    description: 'Review-only planning forecasts from the Bevvi analytics gateway (today and current month).'
   }
 }

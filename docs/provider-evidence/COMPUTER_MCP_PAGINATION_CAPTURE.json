@@ -1,0 +1,144 @@
+{
+  "pages": [
+    {
+      "page_index": 0,
+      "request_keys": [
+        "thread_id"
+      ],
+      "request_cursor": null,
+      "asset_count": 50,
+      "asset_ids_sha256": "b77cf48f4477fa252db512ca1b4fcae77ebf0558b9c77c83fbd52376c71a788b",
+      "asset_array_location": "assets",
+      "next_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "117d0164f9e622f5c97c1cc309211fd7b0c5201a8ff42a26673aa293694e70e9"
+      }
+    },
+    {
+      "page_index": 1,
+      "request_keys": [
+        "thread_id",
+        "cursor"
+      ],
+      "request_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "117d0164f9e622f5c97c1cc309211fd7b0c5201a8ff42a26673aa293694e70e9"
+      },
+      "asset_count": 50,
+      "asset_ids_sha256": "79cc1f45389d9f0c9045735149068d51b20a1951d6f8264c598f081a8207f3fe",
+      "asset_array_location": "assets",
+      "next_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "85dc0da8cc22c7f12b475d2c9efacfb428291c00f54db246b8f213bd402a0855"
+      }
+    },
+    {
+      "page_index": 2,
+      "request_keys": [
+        "thread_id",
+        "cursor"
+      ],
+      "request_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "85dc0da8cc22c7f12b475d2c9efacfb428291c00f54db246b8f213bd402a0855"
+      },
+      "asset_count": 50,
+      "asset_ids_sha256": "41565854a3c8ea7ce6d16308377addf05adfa3cca6db81da2e3d190f987b08c9",
+      "asset_array_location": "assets",
+      "next_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "34bdb720d0ad3640c07b5a6ef327201d3117f1c78739657e312360f9c6764b94"
+      }
+    },
+    {
+      "page_index": 3,
+      "request_keys": [
+        "thread_id",
+        "cursor"
+      ],
+      "request_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "34bdb720d0ad3640c07b5a6ef327201d3117f1c78739657e312360f9c6764b94"
+      },
+      "asset_count": 50,
+      "asset_ids_sha256": "3c35de05d84bc796edcf29d972811ffbfd56c774b826a3c5647ad4fe250485bc",
+      "asset_array_location": "assets",
+      "next_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "290aa480861f80d22ed29d22990a8dc5e32b0f3494a0b964398b117de81695a3"
+      }
+    },
+    {
+      "page_index": 4,
+      "request_keys": [
+        "thread_id",
+        "cursor"
+      ],
+      "request_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "290aa480861f80d22ed29d22990a8dc5e32b0f3494a0b964398b117de81695a3"
+      },
+      "asset_count": 50,
+      "asset_ids_sha256": "8d2103120efff53ec9701a39912cae193a702e635c711a27df719e31d3539ac8",
+      "asset_array_location": "assets",
+      "next_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "9229c9b3bde847f9b14439bb5f354e15c73627375e78cad96b239a4a76695109"
+      }
+    },
+    {
+      "page_index": 5,
+      "request_keys": [
+        "thread_id",
+        "cursor"
+      ],
+      "request_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "9229c9b3bde847f9b14439bb5f354e15c73627375e78cad96b239a4a76695109"
+      },
+      "asset_count": 49,
+      "asset_ids_sha256": "38752fe1e2f4b39e52c51c4a7c8cadb0f1872a4dbe27e5378773a2a1ebb513bb",
+      "asset_array_location": "assets",
+      "next_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "91e91fa548e1905da9a143482aad149a162556f9183435840070a28101cd92a0"
+      }
+    },
+    {
+      "page_index": 6,
+      "request_keys": [
+        "thread_id",
+        "cursor"
+      ],
+      "request_cursor": {
+        "type": "string",
+        "redacted": true,
+        "sha256": "91e91fa548e1905da9a143482aad149a162556f9183435840070a28101cd92a0"
+      },
+      "asset_count": 0,
+      "asset_ids_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "asset_array_location": "assets",
+      "next_cursor": null
+    }
+  ],
+  "matched_target": {
+    "asset_id": "d7419c4c-3027-4e8d-9d6c-dd45cc90c5e0",
+    "entry_id": "9210ab21-b916-4700-b1ba-ea1852070018",
+    "filename": "88622d06-3505-462a-838d-b945d052b7f2.json",
+    "mime_type": "application/json",
+    "is_primary_asset": null,
+    "created_at": 1791133145
+  },
+  "terminal_observed": true
+}

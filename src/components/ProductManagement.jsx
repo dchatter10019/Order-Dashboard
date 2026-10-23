@@ -371,7 +371,7 @@ const ProductManagement = () => {
             <h3 className="text-sm font-semibold text-bevvi-900">AI-powered product search</h3>
             <div className="mt-2 text-sm text-bevvi-dark-700">
               <p>All products and stores are loaded automatically!</p>
-              <p className="mt-1 text-xs">
+              <p className="mt-1 text-xs" data-testid="product-cache-hint">
                 ✓{' '}
                 {productCacheStatus?.totalProducts > 0
                   ? `${productCacheStatus.totalProducts.toLocaleString()} Bevvi products cached in backend`

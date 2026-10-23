@@ -4,6 +4,7 @@ export const TAB_TO_PATH = {
   retailers: '/retailers',
   'gopuff-checker': '/gopuff',
   'manual-order': '/manual-order',
+  analytics: '/analytics',
   'ai-assistant': '/ai-assistant'
 }
 

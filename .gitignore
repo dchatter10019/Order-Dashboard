@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+services/bevvi-analytics-mcp/.venv/
+vendor/XGBoostForecast/
+services/bevvi-analytics-mcp/tests/fixtures/acceptance_snapshot/ml/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -39,6 +42,8 @@ data/manual-order-payment-links.json
 data/manual-order-bill-to.json
 data/notified-order-keys.json
 data/stripe-retailer-name-aliases.json
+data/retailer-zoho-contacts.json
+data/analytics-gateway/
 
 # Runtime data
 pids

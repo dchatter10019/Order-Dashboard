@@ -1,0 +1,23 @@
+{
+  "status": "review_only",
+  "eligible_orders": 100,
+  "financial_certification": "not_certified",
+  "review_only": true,
+  "production_ready": false,
+  "writes_performed": false,
+  "live_gate_status": "OFF",
+  "provenance": {
+    "live_gate_status": "OFF",
+    "phase1_active": true,
+    "analysis_source_sha256": "8a8539119267a0ebbea7d44d62d09a32c5abda2a82b0f69bf22e9098ffcce9a4",
+    "input_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "business_timezone": "America/New_York",
+    "as_of": "2026-10-02",
+    "settled_through": "2026-10-03",
+    "newest_cache_refresh_at_utc": "2026-10-04T11:00:00+00:00",
+    "cache_age_hours": 1.0,
+    "analysis_contract": "decision_support_v3_identity_and_input_guards",
+    "known_limitations": ["Upstream source completeness is not certified."]
+  },
+  "generated_at_utc": "2026-10-04T12:00:00+00:00"
+}

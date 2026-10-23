@@ -1,0 +1,9 @@
+{
+  "Total Wine & More": {
+    "email": "billing@example-retailer.com",
+    "zohoContactId": "optional_zoho_contact_id_if_name_search_fails"
+  },
+  "Gopuff": {
+    "email": "ap@gopuff.example.com"
+  }
+}

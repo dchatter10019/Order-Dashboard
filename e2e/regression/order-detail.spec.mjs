@@ -3,7 +3,7 @@
  */
 import { test, expect } from '@playwright/test'
 import { clearSession, loginAsTestUser } from '../helpers/auth.mjs'
-import { openFirstOrderDetail } from '../helpers/orders.mjs'
+import { dismissBrowserNotificationPromptIfPresent, openFirstOrderDetail } from '../helpers/orders.mjs'
 
 test.describe('4. Order detail & filter persistence', () => {
   test.beforeEach(async ({ page }) => {
@@ -14,6 +14,7 @@ test.describe('4. Order detail & filter persistence', () => {
   test('D1 | Open detail shows order details heading', async ({ page }) => {
     await page.goto('/orders')
     await expect(page.locator('#dashboard-order-search')).toBeVisible({ timeout: 60_000 })
+    await dismissBrowserNotificationPromptIfPresent(page)
     await openFirstOrderDetail(page)
     await expect(page.getByRole('heading', { name: 'Order Details' })).toBeVisible()
   })
@@ -21,10 +22,12 @@ test.describe('4. Order detail & filter persistence', () => {
   test('D3 | Search survives detail round-trip', async ({ page }) => {
     await page.goto('/orders?q=SDL')
     await expect(page.locator('#dashboard-order-search')).toBeVisible({ timeout: 60_000 })
+    await dismissBrowserNotificationPromptIfPresent(page)
     await openFirstOrderDetail(page)
     await expect(page.getByRole('heading', { name: 'Order Details' })).toBeVisible()
     await page.getByRole('button', { name: 'Close order details' }).click()
     await expect(page).toHaveURL(/[?&]q=SDL/)
+    await expect(page.locator('#dashboard-order-search')).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('#dashboard-order-search')).toHaveValue('SDL')
   })
 
@@ -33,6 +36,7 @@ test.describe('4. Order detail & filter persistence', () => {
     await expect(page.locator('#dashboard-order-search')).toBeVisible({ timeout: 60_000 })
     await expect(page.getByLabel('Start Date').first()).toHaveValue('2026-09-01')
     await expect(page.getByLabel('End Date').first()).toHaveValue('2026-09-26')
+    await dismissBrowserNotificationPromptIfPresent(page)
 
     await openFirstOrderDetail(page)
     await page.getByRole('button', { name: 'Close order details' }).click()
@@ -42,6 +46,8 @@ test.describe('4. Order detail & filter persistence', () => {
 
   test('D2 | Detail page shows customer section when data loads', async ({ page }) => {
     await page.goto('/orders')
+    await expect(page.locator('#dashboard-order-search')).toBeVisible({ timeout: 60_000 })
+    await dismissBrowserNotificationPromptIfPresent(page)
     await openFirstOrderDetail(page)
     await expect(page.getByRole('heading', { name: 'Order Details' })).toBeVisible()
     await expect(page.getByText(/Total Amount|Customer|Phone|Address/i).first()).toBeVisible({

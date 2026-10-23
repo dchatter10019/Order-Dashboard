@@ -7,6 +7,25 @@ function resolveDeliveryFee(order, orderDetails) {
   return orderDetails?.deliveryCharge ?? order?.deliveryFee ?? 0
 }
 
+export function mergeOrderLists(primary, extra) {
+  const map = new Map()
+  const keyOf = (order) => String(order?.id || order?.ordernum || '').trim()
+  for (const order of primary || []) {
+    const key = keyOf(order)
+    if (key) map.set(key, order)
+  }
+  for (const order of extra || []) {
+    const key = keyOf(order)
+    if (key && !map.has(key)) map.set(key, order)
+  }
+  return [...map.values()]
+}
+
+export function getOrderRetailerName(order) {
+  const name = String(order?.establishment || order?.retailerName || order?.storeName || '').trim()
+  return name || '—'
+}
+
 export function mapCorpOrderStatus(corpOrderStatus) {
   const status = Number(corpOrderStatus)
   if (status === 2) return 'delivered'

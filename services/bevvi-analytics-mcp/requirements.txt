@@ -1,0 +1,11 @@
+# Pinned for Bevvi Analytics MCP (Streamable HTTP + JWT resource server).
+# Install: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+mcp==2.3.0
+uvicorn==0.54.0
+starlette==1.7.0
+httpx==0.28.1
+PyJWT[crypto]==2.15.1
+cryptography==50.0.2
+jsonschema==4.26.0
+pytest==9.1.1
+pytest-asyncio==1.4.0

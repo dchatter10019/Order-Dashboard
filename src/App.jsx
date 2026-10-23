@@ -96,6 +96,7 @@ function App() {
             <Route path="/retailers" element={<Outlet />} />
             <Route path="/gopuff" element={<Outlet />} />
             <Route path="/manual-order" element={<Outlet />} />
+            <Route path="/analytics" element={<Outlet />} />
             <Route path="/ai-assistant" element={<Outlet />} />
           </Route>
           <Route

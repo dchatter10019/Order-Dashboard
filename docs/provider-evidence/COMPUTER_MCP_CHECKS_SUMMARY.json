@@ -1,0 +1,13 @@
+{
+  "captured_at_utc": "2026-10-04T19:18:35.314Z",
+  "endpoint": "https://www.perplexity.ai/rest/computer/mcp",
+  "thread_id": "40f3ef7a-ab04-486c-9e52-9c2485d1cec8",
+  "analytical_submissions": 0,
+  "artifact_body_fetches": 0,
+  "tool_list_calls": 1,
+  "asset_list_calls": 7,
+  "download_metadata_calls": 1,
+  "status": "READ_ONLY_CAPTURE_COMPLETE",
+  "checkpoint": null,
+  "terminal_observed": true
+}

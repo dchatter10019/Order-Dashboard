@@ -64,7 +64,7 @@ const OrderDetailsPage = () => {
             onClick={() => {
               const returnTo = location.state?.returnTo
               if (typeof returnTo === 'string' && returnTo.startsWith('/orders')) {
-                navigate(returnTo)
+                navigate(returnTo, { state: { dashboardSoftRefresh: true } })
                 return
               }
               if (window.history.length > 1) {

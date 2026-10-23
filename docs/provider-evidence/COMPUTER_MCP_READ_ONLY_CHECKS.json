@@ -1,0 +1,23 @@
+{
+  "captured_at_utc": "2026-10-04T19:18:35.314Z",
+  "endpoint": "https://www.perplexity.ai/rest/computer/mcp",
+  "thread_id": "40f3ef7a-ab04-486c-9e52-9c2485d1cec8",
+  "analytical_submissions": 0,
+  "artifact_body_fetches": 0,
+  "tool_list_calls": 1,
+  "asset_list_calls": 7,
+  "download_metadata_calls": 1,
+  "status": "READ_ONLY_CAPTURE_COMPLETE",
+  "checkpoint": null,
+  "terminal_observed": true,
+  "file_sha256": {
+    "COMPUTER_MCP_TOOL_DEFINITIONS.json": "0f287b9cba8209a8a9670444e29652d2f062b438a097ef78bbe616f6d35f42a1",
+    "COMPUTER_MCP_PAGINATION_CAPTURE.json": "9773d6f1bc919c60fe09968c740c53e5ec3c7f0fd2689116179a022e49558d15",
+    "COMPUTER_MCP_ARTIFACT_HOST_CANDIDATES.json": "73de5d0397c2d69ac4e9aaaf792f074dbe64ef878d3ada3b7c44063be5226402",
+    "COMPUTER_MCP_CHECKS_SUMMARY.json": "3410057659e204557c6cc693536990692ceab7a2c57d841ed313d7b172785b70"
+  },
+  "hash_basis": "exact UTF-8 file bytes",
+  "allowlist_changed": false,
+  "oauth_changed": false,
+  "artifact_body_fetched": false
+}

@@ -1,0 +1,5 @@
+{
+  "months": [{ "month": "2026-01", "index": 1.02 }],
+  "bulk_threshold_usd": 1000,
+  "limitations": ["Mock seasonality fixture"]
+}
