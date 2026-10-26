@@ -13,15 +13,15 @@ import { getOrderGrandTotal } from '../utils/orderTotals'
 import {
   filterOrdersByStrictCalendarRange,
   getDeliveryLocalDate,
-  getDeliveryYmdForDashboard,
   getOrderLocalDate,
-  getOrderYmdForDashboard,
-  isDeliveryDateAfterOrderDate,
   resolveOrderTimeZone
 } from '../utils/orderDates'
 import { orderMatchesStrictCalendarRange } from '../utils/orderListPinning'
-import { getOrderRowAlertTier } from '../utils/orderRowAlerts'
-import { isPinnedOpenOrder, orderMatchesDisplayDateRange } from '../utils/orderListPinning'
+import {
+  isOpenAwaitingFulfillmentOrder,
+  isPinnedOpenOrder,
+  orderMatchesDisplayDateRange
+} from '../utils/orderListPinning'
 import { getInclusiveDateRangeDays, MAX_ORDER_DATE_RANGE_DAYS } from '../utils/dateRangeValidation'
 import { buildOrderFromDetails, getOrderRetailerName, mergeOrderLists } from '../utils/orderDisplay'
 import {
@@ -30,14 +30,13 @@ import {
   parseOrdersDashboardSearchParams,
   serializeOrdersDashboardSearchParams
 } from '../utils/ordersDashboardUrlState'
-import OrdersTableColgroup from './OrdersTableColgroup'
+import OrdersDashboardOrderList from './OrdersDashboardOrderList'
 import {
   ORDERS_TABLE_MIN_COLUMN_WIDTH,
   getDefaultOrdersTableColumnWidths,
   loadOrdersTableColumnWidths,
   saveOrdersTableColumnWidths,
-  sumOrdersTableColumnWidths,
-  ORDERS_TABLE_COLUMNS
+  sumOrdersTableColumnWidths
 } from '../utils/ordersTableColumns'
 
 const formatLocalDateInput = (date) =>
@@ -62,23 +61,9 @@ const msUntilNextLocalMidnight = () => {
 
 const looksLikeOrderNumber = (value) => /^BEV-/i.test(String(value || '').trim())
 
-/** Full-row emphasis for time-sensitive statuses (desktop <tr> / mobile card). */
-const ORDER_ROW_ALERT_TR_CLASS = {
-  pending_stale:
-    'bg-rose-50 border-l-4 border-l-rose-500 shadow-sm hover:bg-rose-100/90',
-  accepted_deadline:
-    'bg-amber-50 border-l-4 border-l-amber-500 shadow-sm hover:bg-amber-100/90',
-  transit_deadline:
-    'bg-indigo-50 border-l-4 border-l-indigo-500 shadow-sm hover:bg-indigo-100/90'
-}
-
-const ORDER_ROW_ALERT_CARD_CLASS = {
-  pending_stale:
-    'border-rose-300 bg-rose-50 shadow-md ring-2 ring-rose-200/90',
-  accepted_deadline:
-    'border-amber-300 bg-amber-50 shadow-md ring-2 ring-amber-200/90',
-  transit_deadline:
-    'border-indigo-300 bg-indigo-50 shadow-md ring-2 ring-indigo-200/90'
+function isCanceledOrRejectedOrder(order) {
+  const status = String(order?.status || '').toLowerCase().trim()
+  return status === 'canceled' || status === 'cancelled' || status === 'rejected'
 }
 
 const getOrderDateRangeError = (dateRange) => {
@@ -105,6 +90,46 @@ const getOrderDateRangeError = (dateRange) => {
   }
 
   return null
+}
+
+function sortDashboardOrders(items, sortConfig) {
+  const sortableItems = [...items]
+  if (!sortConfig.key) return sortableItems
+  sortableItems.sort((a, b) => {
+    if (sortConfig.key === 'orderDate' || sortConfig.key === 'deliveryDate') {
+      const dateA = new Date(a[sortConfig.key])
+      const dateB = new Date(b[sortConfig.key])
+      return sortConfig.direction === 'asc' ? dateA - dateB : dateB - dateA
+    }
+    if (sortConfig.key === 'orderTime') {
+      const timeA = a.orderDateTime ? new Date(a.orderDateTime).getTime() : 0
+      const timeB = b.orderDateTime ? new Date(b.orderDateTime).getTime() : 0
+      return sortConfig.direction === 'asc' ? timeA - timeB : timeB - timeA
+    }
+    if (sortConfig.key === 'deliveryTime') {
+      const timeA = a.deliveryDateTime ? new Date(a.deliveryDateTime).getTime() : 0
+      const timeB = b.deliveryDateTime ? new Date(b.deliveryDateTime).getTime() : 0
+      return sortConfig.direction === 'asc' ? timeA - timeB : timeB - timeA
+    }
+    if (sortConfig.key === 'total') {
+      const totalA = parseFloat(a[sortConfig.key]) || 0
+      const totalB = parseFloat(b[sortConfig.key]) || 0
+      return sortConfig.direction === 'asc' ? totalA - totalB : totalB - totalA
+    }
+    if (sortConfig.key === 'orderType') {
+      const aValue = (parseFloat(a.shippingFee) || 0) > 0 ? 'Shipping' : 'Delivery'
+      const bValue = (parseFloat(b.shippingFee) || 0) > 0 ? 'Shipping' : 'Delivery'
+      return sortConfig.direction === 'asc'
+        ? aValue.localeCompare(bValue)
+        : bValue.localeCompare(aValue)
+    }
+    const aValue = a[sortConfig.key] || ''
+    const bValue = b[sortConfig.key] || ''
+    return sortConfig.direction === 'asc'
+      ? aValue.localeCompare(bValue)
+      : bValue.localeCompare(aValue)
+  })
+  return sortableItems
 }
 
 const Dashboard = ({ onSwitchToAI }) => {
@@ -225,6 +250,8 @@ const Dashboard = ({ onSwitchToAI }) => {
   })
   /** Below md: user can collapse the pending/accepted banner to a single row; desktop always shows full banner. */
   const [mobilePendingAlertMinimized, setMobilePendingAlertMinimized] = useState(false)
+  /** Pending / accepted-not-delivered orders (excluded from in-range totals). */
+  const [openOrdersSectionCollapsed, setOpenOrdersSectionCollapsed] = useState(false)
 
   /** Recompute row alert highlights periodically so 15m / 30m windows update without a full refresh. */
   const [alertNowMs, setAlertNowMs] = useState(() => Date.now())
@@ -380,16 +407,39 @@ const Dashboard = ({ onSwitchToAI }) => {
     )
   }, [orders, dateRange, orderFilterTimeZone])
 
+  const strictRangeOrderContext = useMemo(
+    () => ({
+      getOrderLocalDate,
+      getDeliveryLocalDate,
+      timeZone: orderFilterTimeZone
+    }),
+    [orderFilterTimeZone]
+  )
+
   const isOrderInFinanceDateRange = useCallback(
     (order) => {
       if (!order || order._fromLookup) return false
-      return orderMatchesStrictCalendarRange(order, dateRange.startDate, dateRange.endDate, {
-        getOrderLocalDate,
-        getDeliveryLocalDate,
-        timeZone: orderFilterTimeZone
-      })
+      return orderMatchesStrictCalendarRange(
+        order,
+        dateRange.startDate,
+        dateRange.endDate,
+        strictRangeOrderContext
+      )
     },
-    [dateRange.endDate, dateRange.startDate, orderFilterTimeZone]
+    [dateRange.endDate, dateRange.startDate, strictRangeOrderContext]
+  )
+
+  const isOrderOutsideSelectedDateRange = useCallback(
+    (order) => {
+      if (!order || order._fromLookup) return false
+      return !orderMatchesStrictCalendarRange(
+        order,
+        dateRange.startDate,
+        dateRange.endDate,
+        strictRangeOrderContext
+      )
+    },
+    [dateRange.endDate, dateRange.startDate, strictRangeOrderContext]
   )
 
   useEffect(() => {
@@ -441,63 +491,19 @@ const Dashboard = ({ onSwitchToAI }) => {
     return () => window.clearTimeout(timeoutId)
   }, [searchTerm, orders])
 
-  const ordersForFooterTotal = useMemo(
-    () =>
-      ordersInStrictDateRange.filter(
-        (order) =>
-          !['cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
-      ),
-    [ordersInStrictDateRange]
-  )
-
-  const ordersDateRangeTotal = useMemo(
-    () => ordersForFooterTotal.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0),
-    [ordersForFooterTotal]
-  )
-
-  useEffect(() => {
-    setOrdersStatus({
-      autoRefresh,
-      isLoading,
-      lastRefreshTime,
-      nextRefreshTime,
-      refreshIntervalMinutes: 20,
-      orderCount: ordersForFooterTotal.length,
-      orderTotal: ordersDateRangeTotal
-    })
-    return () => setOrdersStatus(null)
-  }, [
-    autoRefresh,
-    isLoading,
-    lastRefreshTime,
-    nextRefreshTime,
-    ordersForFooterTotal.length,
-    ordersDateRangeTotal,
-    setOrdersStatus
-  ])
-
-  const pendingAcceptedCounts = useMemo(() => {
-    let pending = 0
-    let accepted = 0
-    for (const o of ordersInDateRange) {
-      const s = (o.status || '').toLowerCase().trim()
-      if (!s) continue
-      if (s === 'pending' || s.includes('pending')) pending++
-      else if (s === 'accepted' || s.includes('accepted')) accepted++
-    }
-    return { pending, accepted }
-  }, [ordersInDateRange])
-
-  useEffect(() => {
-    if (pendingAcceptedCounts.pending === 0 && pendingAcceptedCounts.accepted === 0) {
-      setMobilePendingAlertMinimized(false)
-    }
-  }, [pendingAcceptedCounts.pending, pendingAcceptedCounts.accepted])
-
   const allStatusFilterValues = ['delivered', 'in_transit', 'accepted', 'pending', 'canceled', 'rejected']
 
-  // Calculate summary statistics
-  const totalOrders = ordersInDateRange.length
+  const isOutsideRangeOpenPipelineOrder = useCallback(
+    (order) =>
+      Boolean(order) &&
+      !order._fromLookup &&
+      isOpenAwaitingFulfillmentOrder(order) &&
+      isOrderOutsideSelectedDateRange(order),
+    [isOrderOutsideSelectedDateRange]
+  )
+
+  // Summary statistics: strict calendar range (outside-range open orders excluded from totals)
+  const totalOrders = ordersInStrictDateRange.length
   const revenueOrders = ordersInStrictDateRange.filter(
     (order) =>
       !['pending', 'cancelled', 'canceled', 'rejected'].includes(order.status?.toLowerCase())
@@ -548,7 +554,7 @@ const Dashboard = ({ onSwitchToAI }) => {
       
       filtered = filtered.filter(order => {
         if (order._fromLookup) return true
-        if (isPinnedOpenOrder(order)) return true
+        if (isOutsideRangeOpenPipelineOrder(order)) return true
 
         // Handle "All Dates" filter first — show all orders regardless of delivery date
         if (deliveryFilter.includes('all_dates')) {
@@ -648,74 +654,121 @@ const Dashboard = ({ onSwitchToAI }) => {
     // If no delivery filters selected, show all orders (default behavior)
     
     return filtered
-  }, [filteredOrders, statusFilter, deliveryFilter])
+  }, [filteredOrders, statusFilter, deliveryFilter, isOutsideRangeOpenPipelineOrder])
 
-  // Get sorted orders
-  const sortedOrders = useMemo(() => {
-    let sortableItems = [...filteredOrdersByStatusAndDelivery]
-    if (sortConfig.key) {
-      sortableItems.sort((a, b) => {
-        if (sortConfig.key === 'orderDate' || sortConfig.key === 'deliveryDate') {
-          const dateA = new Date(a[sortConfig.key])
-          const dateB = new Date(b[sortConfig.key])
-          if (sortConfig.direction === 'asc') {
-            return dateA - dateB
-          } else {
-            return dateB - dateA
-          }
-        } else if (sortConfig.key === 'orderTime') {
-          const timeA = a.orderDateTime ? new Date(a.orderDateTime).getTime() : 0
-          const timeB = b.orderDateTime ? new Date(b.orderDateTime).getTime() : 0
-          if (sortConfig.direction === 'asc') {
-            return timeA - timeB
-          } else {
-            return timeB - timeA
-          }
-        } else if (sortConfig.key === 'deliveryTime') {
-          const timeA = a.deliveryDateTime ? new Date(a.deliveryDateTime).getTime() : 0
-          const timeB = b.deliveryDateTime ? new Date(b.deliveryDateTime).getTime() : 0
-          if (sortConfig.direction === 'asc') {
-            return timeA - timeB
-          } else {
-            return timeB - timeA
-          }
-        } else if (sortConfig.key === 'total') {
-          const totalA = parseFloat(a[sortConfig.key]) || 0
-          const totalB = parseFloat(b[sortConfig.key]) || 0
-          if (sortConfig.direction === 'asc') {
-            return totalA - totalB
-          } else {
-            return totalB - totalA
-          }
-        } else if (sortConfig.key === 'orderType') {
-          // Order Type is derived from shippingFee - 0 = Delivery, >0 = Shipping
-          const aValue = (parseFloat(a.shippingFee) || 0) > 0 ? 'Shipping' : 'Delivery'
-          const bValue = (parseFloat(b.shippingFee) || 0) > 0 ? 'Shipping' : 'Delivery'
-          if (sortConfig.direction === 'asc') {
-            return aValue.localeCompare(bValue)
-          } else {
-            return bValue.localeCompare(aValue)
-          }
-        } else {
-          const aValue = a[sortConfig.key] || ''
-          const bValue = b[sortConfig.key] || ''
-          if (sortConfig.direction === 'asc') {
-            return aValue.localeCompare(bValue)
-          } else {
-            return bValue.localeCompare(aValue)
-          }
-        }
-      })
+  const { mainFilteredOrders, openPipelineFilteredOrders } = useMemo(() => {
+    const openPipeline = []
+    const main = []
+    for (const order of filteredOrdersByStatusAndDelivery) {
+      if (order._fromLookup) {
+        main.push(order)
+        continue
+      }
+      if (isOutsideRangeOpenPipelineOrder(order)) {
+        openPipeline.push(order)
+      } else if (isOrderInFinanceDateRange(order)) {
+        main.push(order)
+      } else if (isOpenAwaitingFulfillmentOrder(order)) {
+        main.push(order)
+      }
     }
-    return sortableItems
-  }, [filteredOrdersByStatusAndDelivery, sortConfig])
+    return { mainFilteredOrders: main, openPipelineFilteredOrders: openPipeline }
+  }, [
+    filteredOrdersByStatusAndDelivery,
+    isOrderInFinanceDateRange,
+    isOutsideRangeOpenPipelineOrder
+  ])
 
-  // Calculate filtered summary statistics (finance uses strict date range only)
-  const filteredTotalOrders = filteredOrdersByStatusAndDelivery.length
-  const filteredOrdersForFinance = useMemo(
-    () => filteredOrdersByStatusAndDelivery.filter(isOrderInFinanceDateRange),
-    [filteredOrdersByStatusAndDelivery, isOrderInFinanceDateRange]
+  const pendingAcceptedCounts = useMemo(() => {
+    let pending = 0
+    let accepted = 0
+    for (const o of [...mainFilteredOrders, ...openPipelineFilteredOrders]) {
+      const s = (o.status || '').toLowerCase().trim()
+      if (!s) continue
+      if (s === 'pending' || s.includes('pending')) pending++
+      else if (s === 'accepted' || s.includes('accepted')) accepted++
+    }
+    return { pending, accepted }
+  }, [mainFilteredOrders, openPipelineFilteredOrders])
+
+  useEffect(() => {
+    if (pendingAcceptedCounts.pending === 0 && pendingAcceptedCounts.accepted === 0) {
+      setMobilePendingAlertMinimized(false)
+    }
+  }, [pendingAcceptedCounts.pending, pendingAcceptedCounts.accepted])
+
+  const sortedMainOrders = useMemo(
+    () => sortDashboardOrders(mainFilteredOrders, sortConfig),
+    [mainFilteredOrders, sortConfig]
   )
+
+  const sortedOpenPipelineOrders = useMemo(
+    () => sortDashboardOrders(openPipelineFilteredOrders, sortConfig),
+    [openPipelineFilteredOrders, sortConfig]
+  )
+
+  // Filtered tiles: in-range orders only (outside-range open pipeline excluded)
+  const filteredOrdersForFinance = useMemo(
+    () => mainFilteredOrders.filter((order) => isOrderInFinanceDateRange(order)),
+    [mainFilteredOrders, isOrderInFinanceDateRange]
+  )
+  const filteredOrdersForOrderTotals = useMemo(
+    () => filteredOrdersForFinance.filter((order) => !isCanceledOrRejectedOrder(order)),
+    [filteredOrdersForFinance]
+  )
+  const filteredTotalOrders = filteredOrdersForOrderTotals.length
+
+  const inRangeOrderStatusBreakdown = useMemo(() => {
+    const counts = { pending: 0, accepted: 0, in_transit: 0, delivered: 0, other: 0 }
+    for (const order of filteredOrdersForOrderTotals) {
+      const status = String(order?.status || '').toLowerCase().trim()
+      if (status.includes('pending')) {
+        counts.pending += 1
+      } else if (status.includes('transit')) {
+        counts.in_transit += 1
+      } else if (status.includes('deliver')) {
+        counts.delivered += 1
+      } else if (status.includes('accept')) {
+        counts.accepted += 1
+      } else if (status) {
+        counts.other += 1
+      } else {
+        counts.other += 1
+      }
+    }
+    return counts
+  }, [filteredOrdersForOrderTotals])
+
+  const ordersDateRangeTotal = useMemo(
+    () =>
+      filteredOrdersForOrderTotals.reduce(
+        (sum, order) => sum + (parseFloat(order.total) || 0),
+        0
+      ),
+    [filteredOrdersForOrderTotals]
+  )
+
+  useEffect(() => {
+    setOrdersStatus({
+      autoRefresh,
+      isLoading,
+      lastRefreshTime,
+      nextRefreshTime,
+      refreshIntervalMinutes: 20,
+      orderCount: filteredTotalOrders,
+      orderTotal: ordersDateRangeTotal
+    })
+    return () => setOrdersStatus(null)
+  }, [
+    autoRefresh,
+    isLoading,
+    lastRefreshTime,
+    nextRefreshTime,
+    filteredTotalOrders,
+    ordersDateRangeTotal,
+    setOrdersStatus
+  ])
+
   const isBillableOrderStatus = useCallback(
     (order) =>
       invoicingEngine
@@ -724,8 +777,8 @@ const Dashboard = ({ onSwitchToAI }) => {
     [invoicingEngine]
   )
   const filteredAcceptedOrdersVisible = useMemo(
-    () => filteredOrdersByStatusAndDelivery.filter(isBillableOrderStatus),
-    [filteredOrdersByStatusAndDelivery, isBillableOrderStatus]
+    () => filteredOrdersForFinance.filter(isBillableOrderStatus),
+    [filteredOrdersForFinance, isBillableOrderStatus]
   )
   const filteredAcceptedOrders = filteredOrdersForFinance.filter(isBillableOrderStatus)
   const filteredTotalRevenue = filteredAcceptedOrders
@@ -1283,6 +1336,19 @@ const Dashboard = ({ onSwitchToAI }) => {
     }))
   }
 
+  const ordersListTableProps = {
+    ordersTableWidthStyle,
+    ordersTableColumnWidths,
+    sortConfig,
+    onSort: handleSort,
+    onColumnResizeStart: beginOrdersColumnResize,
+    onColumnResizeReset: resetOrdersTableColumnWidth,
+    alertNowMs,
+    onOpenOrder: openOrderDetailsPage,
+    parseLocalDateTime,
+    orderRetailerFee
+  }
+
   return (
     <div>
       {/* Main Content */}
@@ -1585,7 +1651,9 @@ const Dashboard = ({ onSwitchToAI }) => {
                   <Calendar className="h-4 w-4 sm:h-6 sm:w-6 text-bevvi-primary-600" />
               </div>
               <div className="ml-2 sm:ml-4 min-w-0 flex-1">
-                  <p className="text-xs sm:text-sm font-medium text-gray-600">Total Orders</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600">
+                    Total Orders (in date range, excl. canceled/rejected)
+                  </p>
                   <p className="text-xl sm:text-2xl font-bold text-gray-900">{formatNumber(filteredTotalOrders)}</p>
                 </div>
               </div>
@@ -1606,18 +1674,32 @@ const Dashboard = ({ onSwitchToAI }) => {
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <div className="space-y-2 text-sm text-gray-600">
                   <div className="flex justify-between">
-                    <span>All Orders:</span>
+                    <span>Total (excl. canceled/rejected):</span>
                     <span className="font-medium">{formatNumber(filteredTotalOrders)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Accepted Orders:</span>
-                    <span className="font-medium">{formatNumber(filteredAcceptedOrdersVisible.length)}</span>
+                    <span>Pending:</span>
+                    <span className="font-medium">{formatNumber(inRangeOrderStatusBreakdown.pending)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>Pending/Cancelled/Rejected:</span>
-                    <span className="font-medium">{formatNumber(filteredTotalOrders - filteredAcceptedOrdersVisible.length)}</span>
-          </div>
-              </div>
+                    <span>Accepted (not delivered):</span>
+                    <span className="font-medium">{formatNumber(inRangeOrderStatusBreakdown.accepted)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>In transit:</span>
+                    <span className="font-medium">{formatNumber(inRangeOrderStatusBreakdown.in_transit)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Delivered:</span>
+                    <span className="font-medium">{formatNumber(inRangeOrderStatusBreakdown.delivered)}</span>
+                  </div>
+                  {inRangeOrderStatusBreakdown.other > 0 ? (
+                    <div className="flex justify-between">
+                      <span>Other status:</span>
+                      <span className="font-medium">{formatNumber(inRangeOrderStatusBreakdown.other)}</span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             )}
         </div>
@@ -1634,7 +1716,7 @@ const Dashboard = ({ onSwitchToAI }) => {
                 </div>
               </div>
               <div className="ml-2 sm:ml-4 min-w-0 flex-1">
-                  <p className="text-xs sm:text-sm font-medium text-gray-500">GMV (Excluding Pending/Cancelled/Rejected)</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-500">GMV (in range; excl. pending, cancelled, rejected)</p>
                   <dd className="text-lg sm:text-xl font-medium text-gray-900">{formatDollarAmount(filteredTotalRevenue)}</dd>
                 </div>
               </div>
@@ -1794,7 +1876,13 @@ const Dashboard = ({ onSwitchToAI }) => {
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-3 sm:mb-4 gap-2">
             <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Orders Dashboard</h2>
             <div className="text-xs sm:text-sm text-gray-600">
-              Showing {formatNumber(filteredOrdersByStatusAndDelivery.length)} of {formatNumber(totalOrders)} orders
+              {formatNumber(filteredTotalOrders)} in {dateRange.startDate}–{dateRange.endDate}
+              {openPipelineFilteredOrders.length > 0 ? (
+                <span>
+                  {' '}
+                  · {formatNumber(openPipelineFilteredOrders.length)} outside range (pending / accepted, not delivered)
+                </span>
+              ) : null}
               {isLoadingPinnedOpen ? (
                 <span className="ml-2 text-bevvi-primary-700">· loading open pending/accepted…</span>
               ) : null}
@@ -1854,294 +1942,61 @@ const Dashboard = ({ onSwitchToAI }) => {
           {/* Orders Display */}
           {!isLoading && !apiError && (
             <div>
-              {filteredOrdersByStatusAndDelivery.length > 0 ? (
+              {mainFilteredOrders.length > 0 || openPipelineFilteredOrders.length > 0 ? (
                 <>
-                  {/* Desktop Table View - Hidden on mobile */}
-                  <div className="hidden md:block max-w-full">
-                    <div className="shadow ring-1 ring-black ring-opacity-5 rounded-lg">
-                      <div className="max-h-96 overflow-auto">
-                        <div className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200">
-                          <table className="table-fixed min-w-0" style={ordersTableWidthStyle}>
-                            <OrdersTableColgroup columnWidths={ordersTableColumnWidths} />
-                            <thead className="bg-gray-50">
-                              <tr>
-                                {ORDERS_TABLE_COLUMNS.map((col) => (
-                                  <th
-                                    key={col.id}
-                                    className={`${
-                                      col.padding === 'first' ? 'pl-2 pr-3' : 'px-3'
-                                    } py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider relative select-none ${
-                                      col.sortKey ? 'cursor-pointer hover:bg-gray-100' : ''
-                                    }`}
-                                    onClick={col.sortKey ? () => handleSort(col.sortKey) : undefined}
-                                  >
-                                    <div className="flex items-center space-x-1 pr-2">
-                                      <span>{col.label}</span>
-                                      {col.sortKey && sortConfig.key === col.sortKey
-                                        ? sortConfig.direction === 'asc'
-                                          ? <ChevronUp className="h-4 w-4" />
-                                          : <ChevronDown className="h-4 w-4" />
-                                        : null}
-                                    </div>
-                                    <div
-                                      role="separator"
-                                      aria-orientation="vertical"
-                                      aria-label={`Resize ${col.label} column`}
-                                      title="Drag to resize · double-click to reset"
-                                      className="absolute right-0 top-0 z-10 h-full w-2 cursor-col-resize touch-none hover:bg-bevvi-primary-200/80"
-                                      onMouseDown={(event) => beginOrdersColumnResize(col.id, event)}
-                                      onDoubleClick={(event) => resetOrdersTableColumnWidth(col.id, event)}
-                                      onClick={(event) => event.stopPropagation()}
-                                    />
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                          </table>
-                        </div>
-                        <table className="table-fixed min-w-0" style={ordersTableWidthStyle}>
-                          <OrdersTableColgroup columnWidths={ordersTableColumnWidths} />
-                          <tbody className="bg-white divide-y divide-gray-200">
-                        {sortedOrders.map((order) => {
-                          const deliveryFuture = isDeliveryDateAfterOrderDate(order)
-                          const deliveryCellClass = deliveryFuture ? 'text-bevvi-primary-700 font-medium' : 'text-gray-900'
-                          const rowAlertTier = getOrderRowAlertTier(order, new Date(alertNowMs))
-                          const trAlertClass = rowAlertTier
-                            ? ORDER_ROW_ALERT_TR_CLASS[rowAlertTier]
-                            : 'hover:bg-gray-50'
-                          return (
-                            <React.Fragment key={order.id}>
-                              <tr className={`bevvi-orders-table-row ${trAlertClass}`}>
-                                <td className="pl-2 pr-3 py-4 text-sm font-medium text-gray-900">
-                                  <button
-                                    type="button"
-                                    onClick={() => openOrderDetailsPage(order)}
-                                    className="truncate block w-full text-left text-bevvi-primary-600 hover:text-bevvi-primary-700 hover:underline"
-                                    title={order.ordernum || order.id}
-                                    aria-label="Open order details"
-                                  >
-                                    {order.ordernum || order.id}
-                                  </button>
-                                </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={order.customerName}>
-                              {order.customerName}
-                            </div>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={getOrderRetailerName(order)}>
-                              {getOrderRetailerName(order)}
-                            </div>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={`Raw: orderDate="${order.orderDate}", orderDateTime="${order.orderDateTime || 'null'}"`}>
-                              {order.orderDate ? getOrderYmdForDashboard(order) : 'N/A'}
-                            </div>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={`Raw orderDateTime: "${order.orderDateTime || 'null'}"`}>
-                              {order.orderDateTime ? 
-                                parseLocalDateTime(order.orderDateTime).toLocaleTimeString('en-US', { 
-                                  hour: 'numeric', 
-                                  minute: '2-digit',
-                                  hour12: true 
-                                }) : 
-                                'N/A'}
-                            </div>
-                          </td>
-                          <td className={`px-3 py-4 text-sm ${deliveryCellClass}`}>
-                            <div className="truncate" title={`Raw: deliveryDate="${order.deliveryDate}", deliveryDateTime="${order.deliveryDateTime || 'null'}"`}>
-                              {order.deliveryDate === 'N/A' ? 'N/A' : getDeliveryYmdForDashboard(order)}
-                            </div>
-                          </td>
-                          <td className={`px-3 py-4 text-sm ${deliveryCellClass}`}>
-                            <div className="truncate" title={`Raw deliveryDateTime: "${order.deliveryDateTime || 'null'}"`}>
-                              {order.deliveryDateTime ? 
-                                parseLocalDateTime(order.deliveryDateTime).toLocaleTimeString('en-US', { 
-                                  hour: 'numeric', 
-                                  minute: '2-digit',
-                                  hour12: true 
-                                }) : 
-                                'N/A'}
-                            </div>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              order.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                              order.status === 'in_transit' ? 'bg-bevvi-primary-100 text-bevvi-primary-800' :
-                              order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
-                              order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
-                              order.status === 'canceled' ? 'bg-red-100 text-red-800' :
-                              order.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
-                        </span>
-                      </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-bevvi-primary-100 text-bevvi-primary-800' : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
-                            </span>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
-                              order.deliveryStatus === 'On Time' ? 'bg-green-100 text-green-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {order.deliveryStatus || 'N/A'}
-                            </span>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={formatDollarAmount(parseFloat(order.serviceCharge) || 0)}>
-                              {formatDollarAmount(parseFloat(order.serviceCharge) || 0)}
-                            </div>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={formatDollarAmount(orderRetailerFee(order))}>
-                              {formatDollarAmount(orderRetailerFee(order))}
-                            </div>
-                          </td>
-                          <td className="px-3 py-4 text-sm text-gray-900">
-                            <div className="truncate" title={formatDollarAmount(getOrderGrandTotal(order))}>
-                              {formatDollarAmount(getOrderGrandTotal(order))}
-                            </div>
-                          </td>
+                  {mainFilteredOrders.length > 0 ? (
+                    <>
+                      <p className="text-xs font-medium text-gray-600 mb-2">
+                        Orders in selected range ({dateRange.startDate}–{dateRange.endDate}) — all statuses
+                      </p>
+                      <OrdersDashboardOrderList
+                        orders={sortedMainOrders}
+                        {...ordersListTableProps}
+                      />
+                    </>
+                  ) : (
+                    <p className="text-gray-500 text-center py-4 text-sm">
+                      No orders in the selected date range match the current filters.
+                    </p>
+                  )}
 
-                              </tr>
-                            </React.Fragment>
-                          )
-                        })}
-                    </tbody>
-                  </table>
-                </div>
+                  {openPipelineFilteredOrders.length > 0 ? (
+                    <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50/50">
+                      <button
+                        type="button"
+                        onClick={() => setOpenOrdersSectionCollapsed((prev) => !prev)}
+                        className="flex w-full items-center justify-between gap-3 px-3 py-3 sm:px-4 text-left"
+                        aria-expanded={!openOrdersSectionCollapsed}
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-amber-950">
+                            Outside date range — pending &amp; accepted (not delivered)
+                          </p>
+                          <p className="text-xs text-amber-900/80 mt-0.5">
+                            {formatNumber(openPipelineFilteredOrders.length)} order
+                            {openPipelineFilteredOrders.length === 1 ? '' : 's'} · not counted in totals or GMV for{' '}
+                            {dateRange.startDate}–{dateRange.endDate}
+                          </p>
+                        </div>
+                        {openOrdersSectionCollapsed ? (
+                          <ChevronDown className="h-5 w-5 flex-shrink-0 text-amber-800" />
+                        ) : (
+                          <ChevronUp className="h-5 w-5 flex-shrink-0 text-amber-800" />
+                        )}
+                      </button>
+                      {!openOrdersSectionCollapsed ? (
+                        <div className="border-t border-amber-200/80 px-3 pb-3 sm:px-4 sm:pb-4">
+                          <OrdersDashboardOrderList
+                            orders={sortedOpenPipelineOrders}
+                            showOutsideRangeBadge
+                            isOrderOutsideDateRange={isOrderOutsideSelectedDateRange}
+                            tableMaxHeightClass="max-h-72"
+                            {...ordersListTableProps}
+                          />
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-
-                  {/* Mobile Card View - Hidden on desktop */}
-                  <div className="md:hidden space-y-3">
-                    {sortedOrders.map((order) => {
-                      const deliveryDateDisplay =
-                        order.deliveryDate === 'N/A' ? 'N/A' : getDeliveryYmdForDashboard(order)
-                      
-                      const deliveryTimeDisplay = order.deliveryDateTime ? 
-                        parseLocalDateTime(order.deliveryDateTime).toLocaleTimeString('en-US', { 
-                          hour: 'numeric', 
-                          minute: '2-digit',
-                          hour12: true 
-                        }) : 'N/A'
-
-                      const deliveryFuture = isDeliveryDateAfterOrderDate(order)
-                      const deliveryValueClass = deliveryFuture ? 'text-bevvi-primary-700 font-medium' : 'text-gray-900'
-
-                      const orderTimeDisplay = order.orderDateTime ? 
-                        parseLocalDateTime(order.orderDateTime).toLocaleTimeString('en-US', { 
-                          hour: 'numeric', 
-                          minute: '2-digit',
-                          hour12: true 
-                        }) : 'N/A'
-
-                      const cardAlertTier = getOrderRowAlertTier(order, new Date(alertNowMs))
-                      const cardSurfaceClass = cardAlertTier
-                        ? ORDER_ROW_ALERT_CARD_CLASS[cardAlertTier]
-                        : 'bg-white border-gray-200'
-
-                      return (
-                        <div 
-                          key={order.id} 
-                          className={`border rounded-lg p-4 transition-shadow ${cardSurfaceClass} ${
-                            cardAlertTier ? 'hover:shadow-lg' : 'shadow-sm hover:shadow-md'
-                          }`}
-                        >
-                          {/* Header Row */}
-                          <div className="flex items-start justify-between mb-3 pb-3 border-b border-gray-100">
-                            <div className="flex-1 min-w-0">
-                              <button
-                                type="button"
-                                onClick={() => openOrderDetailsPage(order)}
-                                className="text-bevvi-primary-600 hover:text-bevvi-primary-700 hover:underline font-semibold text-base mb-1 block truncate w-full text-left"
-                                aria-label="Open order details"
-                              >
-                                {order.ordernum || order.id}
-                              </button>
-                              <p className="text-sm text-gray-600 truncate">{order.customerName}</p>
-                              <p className="text-sm text-gray-500 truncate mt-0.5" title={getOrderRetailerName(order)}>
-                                {getOrderRetailerName(order)}
-                              </p>
-                            </div>
-                            <div className="ml-2 flex-shrink-0 flex items-center gap-2">
-                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                                order.status === 'delivered' ? 'bg-green-100 text-green-800' :
-                                order.status === 'in_transit' ? 'bg-bevvi-primary-100 text-bevvi-primary-800' :
-                                order.status === 'accepted' ? 'bg-yellow-100 text-yellow-800' :
-                                order.status === 'pending' ? 'bg-orange-100 text-orange-800' :
-                                order.status === 'canceled' ? 'bg-red-100 text-red-800' :
-                                order.status === 'rejected' ? 'bg-red-100 text-red-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {order.status.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase())}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Info Grid */}
-                          <div className="grid grid-cols-2 gap-3 mb-3">
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Order Date</p>
-                              <p className="text-sm font-medium text-gray-900">
-                                {order.orderDate ? getOrderYmdForDashboard(order) : 'N/A'}
-                              </p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Order Time</p>
-                              <p className="text-sm font-medium text-gray-900">{orderTimeDisplay}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Delivery Date</p>
-                              <p className={`text-sm font-medium ${deliveryValueClass}`}>{deliveryDateDisplay}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Delivery Time</p>
-                              <p className={`text-sm font-medium ${deliveryValueClass}`}>{deliveryTimeDisplay}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Service Fee</p>
-                              <p className="text-sm font-medium text-gray-900">{formatDollarAmount(parseFloat(order.serviceCharge) || 0)}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Retailer Fee</p>
-                              <p className="text-sm font-medium text-gray-900">{formatDollarAmount(orderRetailerFee(order))}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500 mb-0.5">Total</p>
-                              <p className="text-sm font-semibold text-gray-900">{formatDollarAmount(getOrderGrandTotal(order))}</p>
-                            </div>
-                          </div>
-
-                          {/* Badges Row */}
-                          <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              (parseFloat(order.shippingFee) || 0) > 0 ? 'bg-bevvi-primary-100 text-bevvi-primary-800' : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {(parseFloat(order.shippingFee) || 0) > 0 ? '🚢 Shipping' : '🚚 Delivery'}
-                            </span>
-                            {order.deliveryStatus && (
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                                order.deliveryStatus === 'Delayed' ? 'bg-red-100 text-red-800' :
-                                order.deliveryStatus === 'On Time' ? 'bg-green-100 text-green-800' :
-                                'bg-gray-100 text-gray-800'
-                              }`}>
-                                {order.deliveryStatus}
-                              </span>
-                            )}
-                          </div>
-
-                        </div>
-                      )
-                    })}
-                  </div>
+                  ) : null}
                 </>
               ) : (
                 <p className="text-gray-500 text-center py-8">

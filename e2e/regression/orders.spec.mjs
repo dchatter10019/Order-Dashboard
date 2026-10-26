@@ -22,13 +22,17 @@ test.describe('3. Orders dashboard', () => {
   test('O2 | Search no-match shows empty filtered state', async ({ page }) => {
     await page.locator('#dashboard-order-search').fill('zzzznomatch')
     await expect(page).toHaveURL(/[?&]q=zzzznomatch/)
-    await expect(page.getByText(/Showing 0 of \d+ orders/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/Found 0 matching/i)).toBeVisible({ timeout: 15_000 })
   })
 
   test('O3 | Status filter via URL (accepted only)', async ({ page }) => {
     await page.goto('/orders?status=accepted')
     await expect(page).toHaveURL(/status=accepted/)
-    await expect(page.getByText(/Showing \d+ of \d+ orders/i)).toBeVisible()
+    await expect(page.locator('#dashboard-order-search')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('heading', { name: 'Orders Dashboard' })).toBeVisible()
+    await expect(page.getByText(/\d+ in \d{4}-\d{2}-\d{2}[–-]\d{4}-\d{2}-\d{2}/)).toBeVisible({
+      timeout: 60_000
+    })
   })
 
   test('O4 | Fetch Orders requests API for date range', async ({ page }) => {

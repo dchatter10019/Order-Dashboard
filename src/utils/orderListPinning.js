@@ -25,10 +25,19 @@ function isPendingOrder(order) {
   return Boolean(status && (status === 'pending' || status.includes('pending')))
 }
 
-function isAcceptedNotDeliveredOrder(order) {
+export function isAcceptedNotDeliveredOrder(order) {
   if (isDeliveredOrder(order)) return false
   const status = normalizeOrderStatus(order)
   return Boolean(status && (status === 'accepted' || status.includes('accepted')))
+}
+
+/** Pending or accepted (not yet delivered) — shown outside in-range totals and main table. */
+export function isOpenAwaitingFulfillmentOrder(order) {
+  if (isDeliveredOrder(order)) return false
+  const status = normalizeOrderStatus(order)
+  if (!status) return false
+  if (status === 'pending' || status.includes('pending')) return true
+  return isAcceptedNotDeliveredOrder(order)
 }
 
 function isExcludedFromOutsideRangePin(order) {
